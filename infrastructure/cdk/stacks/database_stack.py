@@ -11,6 +11,7 @@ Creates DynamoDB tables for all application data:
 - Pillar scores
 - Gate results
 - IV history
+- OI history
 """
 
 from aws_cdk import (
@@ -225,7 +226,23 @@ class DatabaseStack(Stack):
             time_to_live_attribute="ttl",  # Enable TTL
         )
 
-        # 11. Earnings cache table (with TTL for automatic cleanup)
+        # 11. OI history table (with TTL for 90-day retention)
+        self.oi_history_table = dynamodb.Table(
+            self,
+            "OIHistoryTable",
+            table_name=f"{self.table_prefix}-oi-history",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+            time_to_live_attribute="ttl",  # Enable TTL
+        )
+
+        # 12. Earnings cache table (with TTL for automatic cleanup)
         self.earnings_cache_table = dynamodb.Table(
             self,
             "EarningsCacheTable",
@@ -250,6 +267,7 @@ class DatabaseStack(Stack):
             self.pillar_scores_table,
             self.gate_results_table,
             self.iv_history_table,
+            self.oi_history_table,
             self.earnings_cache_table,
         ]
 

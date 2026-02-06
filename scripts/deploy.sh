@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 # Configuration
 PROJECT_NAME="${PROJECT_NAME:-oss}"
 ENV_NAME="${ENV_NAME:-dev}"
-AWS_REGION="${AWS_REGION:-us-west-1}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  OSS Deployment Script (Lambda)${NC}"

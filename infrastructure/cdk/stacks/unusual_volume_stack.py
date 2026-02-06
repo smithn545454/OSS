@@ -243,7 +243,6 @@ class UnusualVolumeStack(Stack):
             lambda_runtime,
             timeout=Duration.seconds(90),
             memory_size=512,
-            reserved_concurrent_executions=500,  # Match ticker count
             environment={
                 **common_env,
                 "VOLUME_RATIO_THRESHOLD": "2.0",
@@ -261,6 +260,20 @@ class UnusualVolumeStack(Stack):
         self.volume_stats_table.grant_read_data(self.worker_lambda)
         self.candidates_table.grant_read_write_data(self.worker_lambda)
         polygon_secret.grant_read(self.worker_lambda)
+        # Grant access to OI history table (for _get_prior_oi lookups)
+        self.worker_lambda.role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "dynamodb:Query",
+                    "dynamodb:GetItem",
+                ],
+                resources=[
+                    f"arn:aws:dynamodb:{self.region}:{self.account}:table/{table_prefix}-oi-history",
+                    f"arn:aws:dynamodb:{self.region}:{self.account}:table/{table_prefix}-oi-history/index/*",
+                ],
+            )
+        )
 
         # Aggregator Lambda
         self.aggregator_lambda = self._create_lambda(
@@ -286,7 +299,6 @@ class UnusualVolumeStack(Stack):
             lambda_runtime,
             timeout=Duration.seconds(30),
             memory_size=256,
-            reserved_concurrent_executions=100,
             environment={
                 **common_env,
                 "MIN_UNDERLYING_PRICE": "5.0",
@@ -323,13 +335,14 @@ class UnusualVolumeStack(Stack):
         self.sp500_tickers_table.grant_read_data(self.nightly_stats_lambda)
         self.volume_stats_table.grant_read_write_data(self.nightly_stats_lambda)
         polygon_secret.grant_read(self.nightly_stats_lambda)
-        # Grant access to OI history table
+        # Grant access to OI history table (Scan used by _fetch_contract_histories)
         self.nightly_stats_lambda.role.add_to_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "dynamodb:Query",
                     "dynamodb:GetItem",
+                    "dynamodb:Scan",
                 ],
                 resources=[
                     f"arn:aws:dynamodb:{self.region}:{self.account}:table/{table_prefix}-oi-history",
