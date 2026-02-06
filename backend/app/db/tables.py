@@ -1,0 +1,1155 @@
+"""DynamoDB table definitions and operations."""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from app.core.schemas import (
+    Decision,
+    Evaluation,
+    FeatureValue,
+    GateResult,
+    IVHistory,
+    LLMUsage,
+    OIHistory,
+    Opportunity,
+    PaperPosition,
+    PillarScore,
+    PipelineRun,
+    Policy,
+    StageEvent,
+    TradeThesis,
+)
+from app.db.dynamodb import get_dynamodb
+
+logger = logging.getLogger(__name__)
+
+# Table suffixes
+POLICIES_TABLE = "policies"
+OPPORTUNITIES_TABLE = "opportunities"
+EVALUATIONS_TABLE = "evaluations"
+PIPELINE_RUNS_TABLE = "pipeline-runs"
+STAGE_EVENTS_TABLE = "stage-events"
+PAPER_POSITIONS_TABLE = "paper-positions"
+FEATURE_VALUES_TABLE = "feature-values"
+PILLAR_SCORES_TABLE = "pillar-scores"
+GATE_RESULTS_TABLE = "gate-results"
+IV_HISTORY_TABLE = "iv-history"
+OI_HISTORY_TABLE = "oi-history"
+TRADE_THESIS_TABLE = "trade-thesis"
+LLM_USAGE_TABLE = "llm-usage"
+
+
+class PolicyTable:
+    """Operations for the policies table."""
+
+    TABLE = POLICIES_TABLE
+
+    @staticmethod
+    async def put(policy: Policy) -> None:
+        """Store a policy version."""
+        db = get_dynamodb()
+        item = policy.to_dynamodb_item()
+        item["PK"] = "POLICY"
+        item["SK"] = policy.version
+        await db.put_item(PolicyTable.TABLE, item)
+
+    @staticmethod
+    async def get(version: str) -> Optional[Policy]:
+        """Get a policy by version."""
+        db = get_dynamodb()
+        item = await db.get_item(PolicyTable.TABLE, "POLICY", version)
+        if item:
+            # Remove DynamoDB keys before constructing model
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return Policy(**item)
+        return None
+
+    @staticmethod
+    async def get_active() -> Optional[Policy]:
+        """Get the currently active policy."""
+        db = get_dynamodb()
+        items = await db.query(PolicyTable.TABLE, "POLICY", limit=100, scan_forward=False)
+        for item in items:
+            if item.get("is_active"):
+                item.pop("PK", None)
+                item.pop("SK", None)
+                return Policy(**item)
+        return None
+
+    @staticmethod
+    async def list(limit: int = 20) -> list[Policy]:
+        """List policy versions (most recent first)."""
+        db = get_dynamodb()
+        items = await db.query(PolicyTable.TABLE, "POLICY", limit=limit, scan_forward=False)
+        policies = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            policies.append(Policy(**item))
+        return policies
+
+    @staticmethod
+    async def set_active(version: str) -> None:
+        """Set a policy as active (deactivate others)."""
+        db = get_dynamodb()
+
+        # Get all policies and deactivate them
+        items = await db.query(PolicyTable.TABLE, "POLICY", limit=100)
+        for item in items:
+            if item.get("is_active") and item.get("SK") != version:
+                await db.update_item(
+                    PolicyTable.TABLE,
+                    item["PK"],
+                    item["SK"],
+                    {"is_active": False},
+                )
+
+        # Activate the specified version
+        await db.update_item(
+            PolicyTable.TABLE,
+            "POLICY",
+            version,
+            {"is_active": True},
+        )
+
+
+class OpportunityTable:
+    """Operations for the opportunities table."""
+
+    TABLE = OPPORTUNITIES_TABLE
+
+    @staticmethod
+    async def put(opportunity: Opportunity) -> None:
+        """Store an opportunity."""
+        db = get_dynamodb()
+        item = opportunity.to_dynamodb_item()
+        item["PK"] = f"OPP#{opportunity.underlying_ticker}"
+        item["SK"] = f"{opportunity.timestamp_utc}#{opportunity.opportunity_id}"
+        # GSI for date-based queries
+        date_str = opportunity.timestamp_utc[:10]  # YYYY-MM-DD
+        item["GSI1PK"] = f"DATE#{date_str}"
+        item["GSI1SK"] = f"{opportunity.priority_score:03d}#{opportunity.underlying_ticker}"
+        await db.put_item(OpportunityTable.TABLE, item)
+
+    @staticmethod
+    async def get(ticker: str, timestamp: str, opportunity_id: str) -> Optional[Opportunity]:
+        """Get an opportunity by key."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            OpportunityTable.TABLE,
+            f"OPP#{ticker}",
+            f"{timestamp}#{opportunity_id}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            return Opportunity(**item)
+        return None
+
+    @staticmethod
+    async def list_by_ticker(ticker: str, limit: int = 50) -> list[Opportunity]:
+        """List opportunities for a ticker."""
+        db = get_dynamodb()
+        items = await db.query(
+            OpportunityTable.TABLE,
+            f"OPP#{ticker}",
+            limit=limit,
+            scan_forward=False,
+        )
+        opportunities = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            opportunities.append(Opportunity(**item))
+        return opportunities
+
+    @staticmethod
+    async def list_by_date(date: str, limit: int = 100) -> list[Opportunity]:
+        """List opportunities for a date."""
+        db = get_dynamodb()
+        items = await db.query(
+            OpportunityTable.TABLE,
+            f"DATE#{date}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        opportunities = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            opportunities.append(Opportunity(**item))
+        return opportunities
+
+
+class EvaluationTable:
+    """Operations for the evaluations table."""
+
+    TABLE = EVALUATIONS_TABLE
+
+    @staticmethod
+    async def put(evaluation: Evaluation, decision: Optional[Decision] = None) -> None:
+        """Store an evaluation with optional decision."""
+        db = get_dynamodb()
+        item = evaluation.to_dynamodb_item()
+        item["PK"] = f"EVAL#{evaluation.underlying_ticker}"
+        item["SK"] = f"{evaluation.evaluated_at}#{evaluation.evaluation_id}"
+
+        if decision:
+            item["decision"] = decision.to_dynamodb_item()
+            # GSI for verdict-based queries
+            item["GSI1PK"] = f"VERDICT#{decision.verdict}"
+            item["GSI1SK"] = evaluation.evaluated_at
+            # GSI for date-based queries
+            date_str = evaluation.evaluated_at[:10]
+            item["GSI2PK"] = f"DATE#{date_str}"
+            item["GSI2SK"] = f"{decision.final_score:06.2f}"
+
+        await db.put_item(EvaluationTable.TABLE, item)
+
+    @staticmethod
+    async def get(
+        ticker: str, timestamp: str, evaluation_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Get an evaluation with decision."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            EvaluationTable.TABLE,
+            f"EVAL#{ticker}",
+            f"{timestamp}#{evaluation_id}",
+        )
+        if item:
+            # Clean up DynamoDB keys
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+            return item
+        return None
+
+    @staticmethod
+    async def list_by_verdict(
+        verdict: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """List evaluations by verdict."""
+        db = get_dynamodb()
+        items = await db.query(
+            EvaluationTable.TABLE,
+            f"VERDICT#{verdict}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+        return items
+
+
+class PipelineRunTable:
+    """Operations for the pipeline-runs table."""
+
+    TABLE = PIPELINE_RUNS_TABLE
+
+    @staticmethod
+    async def put(run: PipelineRun) -> None:
+        """Store a pipeline run."""
+        db = get_dynamodb()
+        item = run.to_dynamodb_item()
+        item["PK"] = "RUN"
+        item["SK"] = f"{run.started_at}#{run.run_id}"
+        await db.put_item(PipelineRunTable.TABLE, item)
+
+    @staticmethod
+    async def get(run_id: str, started_at: str) -> Optional[PipelineRun]:
+        """Get a pipeline run."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            PipelineRunTable.TABLE,
+            "RUN",
+            f"{started_at}#{run_id}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return PipelineRun(**item)
+        return None
+
+    @staticmethod
+    async def list(limit: int = 20, status: Optional[str] = None) -> list[PipelineRun]:
+        """List pipeline runs (most recent first)."""
+        db = get_dynamodb()
+        items = await db.query(
+            PipelineRunTable.TABLE,
+            "RUN",
+            limit=limit,
+            scan_forward=False,
+        )
+        runs = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            run = PipelineRun(**item)
+            if status is None or run.status == status:
+                runs.append(run)
+        return runs
+
+    @staticmethod
+    async def update(run_id: str, started_at: str, updates: dict[str, Any]) -> Optional[PipelineRun]:
+        """Update a pipeline run."""
+        db = get_dynamodb()
+        item = await db.update_item(
+            PipelineRunTable.TABLE,
+            "RUN",
+            f"{started_at}#{run_id}",
+            updates,
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return PipelineRun(**item)
+        return None
+
+
+class StageEventTable:
+    """Operations for the stage-events table."""
+
+    TABLE = STAGE_EVENTS_TABLE
+
+    @staticmethod
+    async def put(event: StageEvent) -> None:
+        """Store a stage event."""
+        db = get_dynamodb()
+        item = event.to_dynamodb_item()
+        item["PK"] = f"RUN#{event.run_id}"
+        item["SK"] = f"{event.started_at}#{event.stage}"
+        await db.put_item(StageEventTable.TABLE, item)
+
+    @staticmethod
+    async def list_by_run(run_id: str) -> list[StageEvent]:
+        """List stage events for a pipeline run."""
+        db = get_dynamodb()
+        items = await db.query(
+            StageEventTable.TABLE,
+            f"RUN#{run_id}",
+            scan_forward=True,  # Chronological order
+        )
+        events = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            events.append(StageEvent(**item))
+        return events
+
+
+class PaperPositionTable:
+    """Operations for the paper-positions table."""
+
+    TABLE = PAPER_POSITIONS_TABLE
+
+    @staticmethod
+    async def put(position: PaperPosition) -> None:
+        """Store a paper position."""
+        db = get_dynamodb()
+        item = position.to_dynamodb_item()
+        item["PK"] = f"POS#{position.status}"
+        item["SK"] = f"{position.entry_date}#{position.position_id}"
+        # GSI for evaluation_id lookups (duplicate prevention)
+        item["GSI1PK"] = f"EVAL#{position.evaluation_id}"
+        item["GSI1SK"] = position.entry_date
+        await db.put_item(PaperPositionTable.TABLE, item)
+
+    @staticmethod
+    async def list_open(limit: int = 100) -> list[PaperPosition]:
+        """List open paper positions."""
+        db = get_dynamodb()
+        items = await db.query(
+            PaperPositionTable.TABLE,
+            "POS#OPEN",
+            limit=limit,
+            scan_forward=False,
+        )
+        positions = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            positions.append(PaperPosition(**item))
+        return positions
+
+    @staticmethod
+    async def list_closed(limit: int = 100) -> list[PaperPosition]:
+        """List closed paper positions."""
+        db = get_dynamodb()
+        items = await db.query(
+            PaperPositionTable.TABLE,
+            "POS#CLOSED",
+            limit=limit,
+            scan_forward=False,
+        )
+        positions = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            positions.append(PaperPosition(**item))
+        return positions
+
+    @staticmethod
+    async def get_by_evaluation_id(evaluation_id: str) -> Optional[PaperPosition]:
+        """Get a position by evaluation_id (checks for duplicates).
+        
+        Uses GSI1 to find positions by evaluation_id.
+        
+        Args:
+            evaluation_id: The evaluation ID to look up
+            
+        Returns:
+            PaperPosition if found, None otherwise
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            PaperPositionTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            limit=1,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        if items:
+            item = items[0]
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            return PaperPosition(**item)
+        return None
+
+    @staticmethod
+    async def update(
+        position: PaperPosition,
+        updates: dict[str, Any],
+    ) -> Optional[PaperPosition]:
+        """Update a paper position.
+        
+        Note: Cannot change status via this method - use close() instead.
+        
+        Args:
+            position: The position to update (needs entry_date, position_id, status)
+            updates: Dict of fields to update
+            
+        Returns:
+            Updated PaperPosition if successful, None otherwise
+        """
+        db = get_dynamodb()
+        
+        # Build PK/SK from position
+        pk = f"POS#{position.status}"
+        sk = f"{position.entry_date}#{position.position_id}"
+        
+        # Add last_updated timestamp
+        updates["last_updated"] = datetime.now(timezone.utc).isoformat()
+        
+        item = await db.update_item(
+            PaperPositionTable.TABLE,
+            pk,
+            sk,
+            updates,
+        )
+        
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            return PaperPosition(**item)
+        return None
+
+    @staticmethod
+    async def close(
+        position: PaperPosition,
+        exit_price: float,
+        exit_reason: str,
+    ) -> PaperPosition:
+        """Close a position (moves from OPEN to CLOSED partition).
+        
+        This operation deletes from POS#OPEN and creates in POS#CLOSED
+        because the status is part of the partition key.
+        
+        Args:
+            position: The open position to close
+            exit_price: The exit price
+            exit_reason: The reason for exit (PROFIT_TARGET, STOP_LOSS, etc.)
+            
+        Returns:
+            The closed PaperPosition
+        """
+        from app.core.schemas import ExitReason, PositionStatus
+        
+        db = get_dynamodb()
+        
+        # Delete from OPEN partition
+        old_pk = f"POS#{PositionStatus.OPEN.value}"
+        old_sk = f"{position.entry_date}#{position.position_id}"
+        await db.delete_item(PaperPositionTable.TABLE, old_pk, old_sk)
+        
+        # Calculate final P&L
+        final_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+        
+        # Create closed position
+        now = datetime.now(timezone.utc).isoformat()
+        closed_position = PaperPosition(
+            position_id=position.position_id,
+            evaluation_id=position.evaluation_id,
+            option_ticker=position.option_ticker,
+            entry_price=position.entry_price,
+            entry_date=position.entry_date,
+            quantity=position.quantity,
+            verdict_at_entry=position.verdict_at_entry,
+            quality_tier_at_entry=position.quality_tier_at_entry,
+            exit_price=exit_price,
+            exit_date=now[:10],  # YYYY-MM-DD
+            exit_reason=ExitReason(exit_reason),
+            current_price=exit_price,
+            current_pnl_pct=final_pnl_pct,
+            max_favorable_excursion=position.max_favorable_excursion,
+            max_adverse_excursion=position.max_adverse_excursion,
+            days_held=position.days_held,
+            status=PositionStatus.CLOSED,
+            last_updated=now,
+        )
+        
+        # Store in CLOSED partition
+        await PaperPositionTable.put(closed_position)
+        
+        return closed_position
+
+    @staticmethod
+    async def list_all(limit: int = 200) -> list[PaperPosition]:
+        """List all positions (open and closed).
+        
+        Args:
+            limit: Maximum positions to return per status
+            
+        Returns:
+            Combined list of open and closed positions
+        """
+        open_positions = await PaperPositionTable.list_open(limit=limit)
+        closed_positions = await PaperPositionTable.list_closed(limit=limit)
+        
+        # Combine and sort by entry_date descending
+        all_positions = open_positions + closed_positions
+        all_positions.sort(key=lambda p: p.entry_date, reverse=True)
+        
+        return all_positions
+
+
+class FeatureValueTable:
+    """Operations for the feature-values table.
+    
+    Per Section 18.1 of requirements: 90-day retention.
+    """
+
+    TABLE = FEATURE_VALUES_TABLE
+
+    @staticmethod
+    async def put(feature: FeatureValue) -> None:
+        """Store a feature value."""
+        db = get_dynamodb()
+        item = feature.to_dynamodb_item()
+        item["PK"] = f"EVAL#{feature.evaluation_id}"
+        item["SK"] = f"FEATURE#{feature.feature_name}"
+        await db.put_item(FeatureValueTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(features: list[FeatureValue]) -> None:
+        """Store multiple feature values for an evaluation."""
+        db = get_dynamodb()
+        for feature in features:
+            await FeatureValueTable.put(feature)
+
+    @staticmethod
+    async def list_by_evaluation(evaluation_id: str) -> list[FeatureValue]:
+        """List all feature values for an evaluation."""
+        db = get_dynamodb()
+        items = await db.query(
+            FeatureValueTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            scan_forward=True,
+        )
+        features = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            features.append(FeatureValue(**item))
+        return features
+
+
+class PillarScoreTable:
+    """Operations for the pillar-scores table.
+    
+    Per Section 18.1 of requirements: Permanent retention.
+    """
+
+    TABLE = PILLAR_SCORES_TABLE
+
+    @staticmethod
+    async def put(score: PillarScore) -> None:
+        """Store a pillar score."""
+        db = get_dynamodb()
+        item = score.to_dynamodb_item()
+        item["PK"] = f"EVAL#{score.evaluation_id}"
+        item["SK"] = f"PILLAR#{score.pillar_id}"
+        await db.put_item(PillarScoreTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(scores: list[PillarScore]) -> None:
+        """Store all three pillar scores for an evaluation."""
+        for score in scores:
+            await PillarScoreTable.put(score)
+
+    @staticmethod
+    async def get(evaluation_id: str, pillar_id: str) -> Optional[PillarScore]:
+        """Get a specific pillar score."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            PillarScoreTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            f"PILLAR#{pillar_id}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return PillarScore(**item)
+        return None
+
+    @staticmethod
+    async def list_by_evaluation(evaluation_id: str) -> list[PillarScore]:
+        """List all pillar scores for an evaluation."""
+        db = get_dynamodb()
+        items = await db.query(
+            PillarScoreTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            scan_forward=True,
+        )
+        scores = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            scores.append(PillarScore(**item))
+        return scores
+
+
+class GateResultTable:
+    """Operations for the gate-results table.
+    
+    Per Section 18.1 of requirements: Permanent retention.
+    """
+
+    TABLE = GATE_RESULTS_TABLE
+
+    @staticmethod
+    async def put(result: GateResult) -> None:
+        """Store a gate result."""
+        db = get_dynamodb()
+        item = result.to_dynamodb_item()
+        item["PK"] = f"EVAL#{result.evaluation_id}"
+        item["SK"] = f"GATE#{result.gate_id}"
+        await db.put_item(GateResultTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(results: list[GateResult]) -> None:
+        """Store all gate results for an evaluation."""
+        for result in results:
+            await GateResultTable.put(result)
+
+    @staticmethod
+    async def get(evaluation_id: str, gate_id: str) -> Optional[GateResult]:
+        """Get a specific gate result."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            GateResultTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            f"GATE#{gate_id}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return GateResult(**item)
+        return None
+
+    @staticmethod
+    async def list_by_evaluation(evaluation_id: str) -> list[GateResult]:
+        """List all gate results for an evaluation."""
+        db = get_dynamodb()
+        items = await db.query(
+            GateResultTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            scan_forward=True,
+        )
+        results = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            results.append(GateResult(**item))
+        return results
+
+    @staticmethod
+    async def list_failed_by_evaluation(evaluation_id: str) -> list[GateResult]:
+        """List only failed gate results for an evaluation."""
+        all_results = await GateResultTable.list_by_evaluation(evaluation_id)
+        return [r for r in all_results if not r.passed]
+
+    @staticmethod
+    async def list_by_run(run_id: str, limit: int = 10000) -> list[GateResult]:
+        """List all gate results for a pipeline run.
+        
+        This requires scanning through evaluations from the run and collecting
+        their gate results. Used by the Pipeline Monitor for aggregate views.
+        
+        Args:
+            run_id: The pipeline run ID
+            limit: Maximum results to return
+            
+        Returns:
+            List of GateResult objects from evaluations in this run
+        """
+        # Note: This is a simplified implementation. In production, you'd
+        # want a GSI on run_id or store run_id in gate results.
+        # For now, return empty list if called (gate results are per-evaluation)
+        logger.warning(f"list_by_run called for run {run_id} - not fully implemented")
+        return []
+
+
+class IVHistoryTable:
+    """Operations for the iv-history table.
+
+    Used to store daily IV data for IV percentile calculation.
+    Per plan: TTL set to 252 trading days (~365 calendar days) for cost control.
+    """
+
+    TABLE = IV_HISTORY_TABLE
+
+    @staticmethod
+    async def put(iv_history: IVHistory) -> None:
+        """Store an IV history record."""
+        db = get_dynamodb()
+        item = iv_history.to_dynamodb_item()
+        item["PK"] = f"TICKER#{iv_history.ticker}"
+        item["SK"] = f"DATE#{iv_history.date}"
+        await db.put_item(IVHistoryTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(records: list[IVHistory]) -> None:
+        """Store multiple IV history records."""
+        db = get_dynamodb()
+        items = []
+        for record in records:
+            item = record.to_dynamodb_item()
+            item["PK"] = f"TICKER#{record.ticker}"
+            item["SK"] = f"DATE#{record.date}"
+            items.append(item)
+
+        # DynamoDB BatchWriteItem limit is 25
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(IVHistoryTable.TABLE, batch)
+
+    @staticmethod
+    async def get(ticker: str, date: str) -> Optional[IVHistory]:
+        """Get IV history for a specific ticker and date."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            IVHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            f"DATE#{date}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return IVHistory(**item)
+        return None
+
+    @staticmethod
+    async def list_by_ticker(
+        ticker: str,
+        limit: int = 252,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> list[IVHistory]:
+        """List IV history for a ticker.
+
+        Args:
+            ticker: The ticker symbol
+            limit: Maximum records to return (default 252 for percentile calc)
+            start_date: Optional start date filter (YYYY-MM-DD)
+            end_date: Optional end date filter (YYYY-MM-DD)
+
+        Returns:
+            List of IVHistory records, most recent first
+        """
+        db = get_dynamodb()
+
+        # Build sort key condition if date filters provided
+        sk_condition = None
+        if start_date and end_date:
+            sk_condition = {"between": [f"DATE#{start_date}", f"DATE#{end_date}"]}
+        elif start_date:
+            sk_condition = {"gte": f"DATE#{start_date}"}
+        elif end_date:
+            sk_condition = {"lte": f"DATE#{end_date}"}
+
+        items = await db.query(
+            IVHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=limit,
+            scan_forward=False,  # Most recent first
+            sk_condition=sk_condition,
+        )
+
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(IVHistory(**item))
+        return records
+
+    @staticmethod
+    async def calculate_percentile(ticker: str, current_iv: float) -> Optional[float]:
+        """Calculate IV percentile for a ticker.
+
+        Args:
+            ticker: The ticker symbol
+            current_iv: Current IV value to rank
+
+        Returns:
+            Percentile (0-100) or None if insufficient data
+        """
+        records = await IVHistoryTable.list_by_ticker(ticker, limit=252)
+
+        if len(records) < 20:  # Need at least 20 days for meaningful percentile
+            logger.warning(
+                f"Insufficient IV history for {ticker}: {len(records)} days"
+            )
+            return None
+
+        # Count how many historical values are below current IV
+        iv_values = [r.atm_iv for r in records]
+        below_count = sum(1 for iv in iv_values if iv < current_iv)
+
+        percentile = (below_count / len(iv_values)) * 100
+        return round(percentile, 2)
+
+    @staticmethod
+    async def get_latest(ticker: str) -> Optional[IVHistory]:
+        """Get the most recent IV history record for a ticker."""
+        records = await IVHistoryTable.list_by_ticker(ticker, limit=1)
+        return records[0] if records else None
+
+
+class OIHistoryTable:
+    """Operations for the oi-history table.
+
+    Used to store daily Open Interest data per option contract
+    for calculating oi_5d_change_pct feature.
+    """
+
+    TABLE = OI_HISTORY_TABLE
+
+    @staticmethod
+    async def put(oi_history: OIHistory) -> None:
+        """Store an OI history record."""
+        db = get_dynamodb()
+        item = oi_history.to_dynamodb_item()
+        item["PK"] = f"CONTRACT#{oi_history.option_ticker}"
+        item["SK"] = f"DATE#{oi_history.date}"
+        await db.put_item(OIHistoryTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(records: list[OIHistory]) -> None:
+        """Store multiple OI history records."""
+        db = get_dynamodb()
+        items = []
+        for record in records:
+            item = record.to_dynamodb_item()
+            item["PK"] = f"CONTRACT#{record.option_ticker}"
+            item["SK"] = f"DATE#{record.date}"
+            items.append(item)
+
+        # DynamoDB BatchWriteItem limit is 25
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(OIHistoryTable.TABLE, batch)
+
+    @staticmethod
+    async def get(option_ticker: str, date: str) -> Optional[OIHistory]:
+        """Get OI history for a specific contract and date."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            OIHistoryTable.TABLE,
+            f"CONTRACT#{option_ticker}",
+            f"DATE#{date}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return OIHistory(**item)
+        return None
+
+    @staticmethod
+    async def list_by_contract(
+        option_ticker: str,
+        limit: int = 10,
+    ) -> list[OIHistory]:
+        """List OI history for a contract (most recent first).
+
+        Args:
+            option_ticker: The option contract ticker
+            limit: Maximum records to return (default 10)
+
+        Returns:
+            List of OIHistory records, most recent first
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            OIHistoryTable.TABLE,
+            f"CONTRACT#{option_ticker}",
+            limit=limit,
+            scan_forward=False,  # Most recent first
+        )
+
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(OIHistory(**item))
+        return records
+
+    @staticmethod
+    async def calculate_5d_change(option_ticker: str, current_oi: int) -> Optional[float]:
+        """Calculate 5-day OI change percentage.
+
+        Args:
+            option_ticker: The option contract ticker
+            current_oi: Current open interest value
+
+        Returns:
+            Percentage change from 5 days ago, or None if insufficient data
+        """
+        records = await OIHistoryTable.list_by_contract(option_ticker, limit=6)
+
+        if len(records) < 5:
+            return None
+
+        # Get OI from approximately 5 days ago
+        oi_5d_ago = records[4].open_interest if len(records) > 4 else records[-1].open_interest
+
+        if oi_5d_ago == 0:
+            return None
+
+        change_pct = ((current_oi - oi_5d_ago) / oi_5d_ago) * 100
+        return round(change_pct, 2)
+
+
+class TradeThesisTable:
+    """Operations for the trade-thesis table.
+
+    Stores LLM-generated trade theses for APPROVE evaluations.
+    Per Section 21 of OSS_Complete_Requirements.md.
+    """
+
+    TABLE = TRADE_THESIS_TABLE
+
+    @staticmethod
+    async def put(thesis: TradeThesis) -> None:
+        """Store a trade thesis."""
+        db = get_dynamodb()
+        item = thesis.to_dynamodb_item()
+        item["PK"] = f"EVAL#{thesis.evaluation_id}"
+        item["SK"] = f"THESIS#{thesis.thesis_id}"
+        # GSI for date-based queries
+        date_str = thesis.generated_at[:10]  # YYYY-MM-DD
+        item["GSI1PK"] = f"DATE#{date_str}"
+        item["GSI1SK"] = f"{thesis.status}#{thesis.thesis_id}"
+        await db.put_item(TradeThesisTable.TABLE, item)
+
+    @staticmethod
+    async def get(evaluation_id: str, thesis_id: str) -> Optional[TradeThesis]:
+        """Get a trade thesis by evaluation_id and thesis_id."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            TradeThesisTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            f"THESIS#{thesis_id}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            return TradeThesis(**item)
+        return None
+
+    @staticmethod
+    async def get_by_evaluation_id(evaluation_id: str) -> Optional[TradeThesis]:
+        """Get the thesis for an evaluation.
+
+        Args:
+            evaluation_id: The evaluation ID to look up
+
+        Returns:
+            TradeThesis if found, None otherwise
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            TradeThesisTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            limit=1,
+            scan_forward=False,  # Get most recent
+        )
+        if items:
+            item = items[0]
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            return TradeThesis(**item)
+        return None
+
+    @staticmethod
+    async def list_by_date(date: str, limit: int = 50) -> list[TradeThesis]:
+        """List trade theses generated on a specific date.
+
+        Args:
+            date: Date string in YYYY-MM-DD format
+            limit: Maximum records to return
+
+        Returns:
+            List of TradeThesis records
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            TradeThesisTable.TABLE,
+            f"DATE#{date}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        theses = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            theses.append(TradeThesis(**item))
+        return theses
+
+
+class LLMUsageTable:
+    """Operations for the llm-usage table.
+
+    Tracks daily LLM API call counts for rate limiting.
+    Per Section 21.4: Max 50 LLM calls per day.
+    """
+
+    TABLE = LLM_USAGE_TABLE
+
+    @staticmethod
+    async def put(usage: LLMUsage) -> None:
+        """Store LLM usage record."""
+        db = get_dynamodb()
+        item = usage.to_dynamodb_item()
+        item["PK"] = "USAGE"
+        item["SK"] = f"DATE#{usage.date}"
+        await db.put_item(LLMUsageTable.TABLE, item)
+
+    @staticmethod
+    async def get(date: str) -> Optional[LLMUsage]:
+        """Get LLM usage for a specific date.
+
+        Args:
+            date: Date string in YYYY-MM-DD format
+
+        Returns:
+            LLMUsage if found, None otherwise
+        """
+        db = get_dynamodb()
+        item = await db.get_item(
+            LLMUsageTable.TABLE,
+            "USAGE",
+            f"DATE#{date}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return LLMUsage(**item)
+        return None
+
+    @staticmethod
+    async def increment(date: str, tokens: int = 0) -> LLMUsage:
+        """Increment usage count for a date.
+
+        Creates new record if doesn't exist.
+
+        Args:
+            date: Date string in YYYY-MM-DD format
+            tokens: Number of tokens used in this call
+
+        Returns:
+            Updated LLMUsage record
+        """
+        db = get_dynamodb()
+
+        # Get existing usage
+        existing = await LLMUsageTable.get(date)
+
+        if existing:
+            # Update existing record
+            new_calls = existing.calls_made + 1
+            new_tokens = existing.tokens_used + tokens
+        else:
+            new_calls = 1
+            new_tokens = tokens
+
+        # Create new usage record (LLMUsage is frozen)
+        usage = LLMUsage(
+            date=date,
+            calls_made=new_calls,
+            tokens_used=new_tokens,
+        )
+
+        await LLMUsageTable.put(usage)
+        return usage
+
+    @staticmethod
+    async def list_recent(days: int = 7) -> list[LLMUsage]:
+        """List recent LLM usage records.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            List of LLMUsage records, most recent first
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            LLMUsageTable.TABLE,
+            "USAGE",
+            limit=days,
+            scan_forward=False,  # Most recent first
+        )
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(LLMUsage(**item))
+        return records

@@ -1,0 +1,320 @@
+import { 
+  Sparkles, 
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  TrendingUp,
+  Shield,
+  Target,
+  AlertCircle,
+  Zap
+} from 'lucide-react'
+import type { TradeThesis, ThesisStatus } from '@/lib/types'
+import clsx from 'clsx'
+
+// ============================================================================
+// Status Badge Component
+// ============================================================================
+
+interface StatusBadgeProps {
+  status: ThesisStatus
+}
+
+function StatusBadge({ status }: StatusBadgeProps) {
+  const config = {
+    COMPLETED: { 
+      icon: CheckCircle, 
+      color: 'bg-oss-approve/10 text-oss-approve border-oss-approve/30',
+      label: 'Generated'
+    },
+    FAILED: { 
+      icon: XCircle, 
+      color: 'bg-oss-reject/10 text-oss-reject border-oss-reject/30',
+      label: 'Failed'
+    },
+    RATE_LIMITED: { 
+      icon: Clock, 
+      color: 'bg-oss-watch/10 text-oss-watch border-oss-watch/30',
+      label: 'Rate Limited'
+    },
+    PENDING: { 
+      icon: Clock, 
+      color: 'bg-oss-muted/10 text-oss-muted border-oss-muted/30',
+      label: 'Pending'
+    },
+  }[status] || { icon: AlertCircle, color: 'bg-oss-muted/10 text-oss-muted border-oss-muted/30', label: status }
+
+  const Icon = config.icon
+
+  return (
+    <span className={clsx(
+      'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium',
+      config.color
+    )}>
+      <Icon className="h-3 w-3" />
+      {config.label}
+    </span>
+  )
+}
+
+// ============================================================================
+// Section Components
+// ============================================================================
+
+interface SectionProps {
+  title: string
+  icon: React.ElementType
+  iconColor?: string
+  children: React.ReactNode
+}
+
+function Section({ title, icon: Icon, iconColor = 'text-oss-accent', children }: SectionProps) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Icon className={clsx('h-4 w-4', iconColor)} />
+        <h4 className="text-sm font-medium text-oss-text">{title}</h4>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ============================================================================
+// Evidence List Component
+// ============================================================================
+
+interface EvidenceListProps {
+  items: string[]
+  variant?: 'default' | 'success' | 'warning' | 'danger'
+}
+
+function EvidenceList({ items, variant = 'default' }: EvidenceListProps) {
+  const colors = {
+    default: 'border-oss-border bg-oss-bg',
+    success: 'border-oss-approve/30 bg-oss-approve/5',
+    warning: 'border-oss-watch/30 bg-oss-watch/5',
+    danger: 'border-oss-reject/30 bg-oss-reject/5',
+  }
+
+  const bulletColors = {
+    default: 'bg-oss-accent',
+    success: 'bg-oss-approve',
+    warning: 'bg-oss-watch',
+    danger: 'bg-oss-reject',
+  }
+
+  return (
+    <ul className="space-y-2">
+      {items.map((item, idx) => (
+        <li 
+          key={idx}
+          className={clsx(
+            'flex items-start gap-3 rounded-lg border p-3 text-sm text-oss-text',
+            colors[variant]
+          )}
+        >
+          <span className={clsx('mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full', bulletColors[variant])} />
+          {item}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// ============================================================================
+// Exit Plan Card Component
+// ============================================================================
+
+interface ExitPlanCardProps {
+  exitPlan: TradeThesis['exit_plan']
+}
+
+function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="rounded-lg border border-oss-approve/30 bg-oss-approve/5 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <TrendingUp className="h-4 w-4 text-oss-approve" />
+          <span className="text-xs font-medium text-oss-approve">Profit Target</span>
+        </div>
+        <p className="text-sm text-oss-text">{exitPlan.profit_target}</p>
+      </div>
+      
+      <div className="rounded-lg border border-oss-reject/30 bg-oss-reject/5 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="h-4 w-4 text-oss-reject" />
+          <span className="text-xs font-medium text-oss-reject">Stop Loss</span>
+        </div>
+        <p className="text-sm text-oss-text">{exitPlan.stop_loss}</p>
+      </div>
+      
+      <div className="rounded-lg border border-oss-watch/30 bg-oss-watch/5 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Clock className="h-4 w-4 text-oss-watch" />
+          <span className="text-xs font-medium text-oss-watch">Time Exit</span>
+        </div>
+        <p className="text-sm text-oss-text">{exitPlan.time_exit}</p>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Error State Component
+// ============================================================================
+
+interface ThesisErrorProps {
+  status: ThesisStatus
+  errorMessage: string | null
+}
+
+function ThesisError({ status, errorMessage }: ThesisErrorProps) {
+  const isRateLimited = status === 'RATE_LIMITED'
+  
+  return (
+    <div className={clsx(
+      'rounded-xl border p-6',
+      isRateLimited 
+        ? 'border-oss-watch/30 bg-oss-watch/5' 
+        : 'border-oss-reject/30 bg-oss-reject/5'
+    )}>
+      <div className="flex items-center gap-3 mb-4">
+        <Sparkles className={clsx('h-5 w-5', isRateLimited ? 'text-oss-watch' : 'text-oss-reject')} />
+        <h3 className="text-lg font-medium text-oss-text">AI Trade Thesis</h3>
+        <StatusBadge status={status} />
+      </div>
+      
+      <div className="flex items-start gap-3">
+        <AlertTriangle className={clsx('h-5 w-5 flex-shrink-0', isRateLimited ? 'text-oss-watch' : 'text-oss-reject')} />
+        <div>
+          <p className="text-sm text-oss-text font-medium">
+            {isRateLimited 
+              ? 'Daily LLM limit reached' 
+              : 'Thesis generation failed'
+            }
+          </p>
+          {errorMessage && (
+            <p className="text-xs text-oss-muted mt-1">{errorMessage}</p>
+          )}
+          {isRateLimited && (
+            <p className="text-xs text-oss-muted mt-1">
+              The thesis will be available when the daily limit resets.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Placeholder Component (no thesis yet)
+// ============================================================================
+
+function ThesisPlaceholder() {
+  return (
+    <div className="rounded-xl border border-oss-border border-dashed bg-oss-surface/50 p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <Sparkles className="h-5 w-5 text-oss-muted" />
+        <h3 className="text-lg font-medium text-oss-muted">AI Trade Thesis</h3>
+      </div>
+      <p className="text-sm text-oss-muted text-center py-4">
+        No thesis generated yet. Theses are created automatically for APPROVE verdicts during pipeline runs.
+      </p>
+    </div>
+  )
+}
+
+// ============================================================================
+// Main AITradeThesis Component
+// ============================================================================
+
+interface AITradeThesisProps {
+  thesis: TradeThesis | null
+}
+
+export default function AITradeThesis({ thesis }: AITradeThesisProps) {
+  // No thesis available
+  if (!thesis) {
+    return <ThesisPlaceholder />
+  }
+
+  // Thesis failed or rate limited
+  if (thesis.status !== 'COMPLETED') {
+    return <ThesisError status={thesis.status} errorMessage={thesis.error_message} />
+  }
+
+  // Successful thesis
+  return (
+    <div className="rounded-xl border border-oss-accent/30 bg-gradient-to-br from-oss-surface to-oss-accent/5 p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-oss-accent/10 p-2">
+            <Sparkles className="h-5 w-5 text-oss-accent" />
+          </div>
+          <div>
+            <h3 className="text-lg font-medium text-oss-text">AI Trade Thesis</h3>
+            <p className="text-xs text-oss-muted">
+              Generated by {thesis.llm_provider} · {thesis.model_used} · {thesis.tokens_used} tokens
+            </p>
+          </div>
+        </div>
+        <StatusBadge status={thesis.status} />
+      </div>
+
+      {/* Setup Summary */}
+      <div className="mb-6 rounded-lg bg-oss-bg border border-oss-border p-4">
+        <p className="text-sm text-oss-text leading-relaxed font-medium">
+          {thesis.setup_summary}
+        </p>
+      </div>
+
+      {/* Main Thesis */}
+      <Section title="Trade Thesis" icon={Zap} iconColor="text-oss-accent">
+        <div className="rounded-lg bg-oss-bg border border-oss-border p-4">
+          <p className="text-sm text-oss-text leading-relaxed whitespace-pre-wrap">
+            {thesis.thesis}
+          </p>
+        </div>
+      </Section>
+
+      <div className="my-6 border-t border-oss-border" />
+
+      {/* Supporting Evidence */}
+      <Section title="Supporting Evidence" icon={CheckCircle} iconColor="text-oss-approve">
+        <EvidenceList items={thesis.supporting_evidence} variant="success" />
+      </Section>
+
+      <div className="my-6 border-t border-oss-border" />
+
+      {/* Risks */}
+      <Section title="Key Risks" icon={AlertTriangle} iconColor="text-oss-watch">
+        <EvidenceList items={thesis.risks} variant="warning" />
+      </Section>
+
+      <div className="my-6 border-t border-oss-border" />
+
+      {/* Invalidation Conditions */}
+      <Section title="Invalidation Conditions" icon={XCircle} iconColor="text-oss-reject">
+        <EvidenceList items={thesis.invalidation_conditions} variant="danger" />
+      </Section>
+
+      <div className="my-6 border-t border-oss-border" />
+
+      {/* Exit Plan */}
+      <Section title="Exit Strategy" icon={Target} iconColor="text-sky-400">
+        <ExitPlanCard exitPlan={thesis.exit_plan} />
+      </Section>
+
+      {/* Footer */}
+      <div className="mt-6 pt-4 border-t border-oss-border">
+        <p className="text-xs text-oss-muted text-center">
+          Generated at {new Date(thesis.generated_at).toLocaleString()}
+        </p>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,30 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - echo Installing dependencies...
+      - pip install -r requirements.txt -t package/ --quiet --upgrade
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Packaging Lambda function...
+      - cp -r app package/
+      - cd package && zip -r ../lambda.zip . -q
+      - cd ..
+      - echo Package size: $(ls -lh lambda.zip | awk '{print $5}')
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Updating Lambda function...
+      - aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://lambda.zip --region $AWS_DEFAULT_REGION
+      - echo Lambda function updated successfully
+
+artifacts:
+  files:
+    - lambda.zip
+  discard-paths: yes

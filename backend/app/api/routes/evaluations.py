@@ -1,0 +1,792 @@
+"""Evaluation endpoints."""
+
+from __future__ import annotations
+
+import logging
+import math
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException
+
+from app.config import get_settings
+from app.db.tables import (
+    EvaluationTable,
+    FeatureValueTable,
+    GateResultTable,
+    OpportunityTable,
+    PaperPositionTable,
+    PillarScoreTable,
+    TradeThesisTable,
+)
+from app.services.catalyst import CatalystDataService
+from app.services.finnhub import FinnhubClient
+from app.services.earnings_cache import EarningsCacheService
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _create_catalyst_service() -> CatalystDataService:
+    """Create a CatalystDataService with Finnhub support if configured.
+    
+    Returns:
+        CatalystDataService with earnings cache if Finnhub API key is available,
+        otherwise a basic service without earnings lookup.
+    """
+    settings = get_settings()
+    
+    if settings.finnhub_api_key:
+        finnhub_client = FinnhubClient(settings.finnhub_api_key)
+        earnings_cache = EarningsCacheService(finnhub_client=finnhub_client)
+        return CatalystDataService(earnings_cache=earnings_cache)
+    else:
+        logger.warning("No Finnhub API key configured, earnings data will be unavailable")
+        return CatalystDataService()
+
+
+# Urgency classification based on scanner type (Section 4.2.5)
+URGENCY_BY_SCANNER = {
+    "BREAKOUT": "act_now",
+    "BREAKDOWN": "act_now",
+    "UNUSUAL_VOLUME": "hours",
+    "COMPRESSION_EXPANSION": "patient",
+    "CHEAP_OPTIONS": "patient",
+}
+
+
+def calculate_theta_adjusted_ev(
+    delta: float,
+    theta: float,
+    mid: float,
+    iv: float,
+    underlying_price: float,
+    dte: int,
+    expected_hold_days: int = 5,
+) -> float:
+    """Calculate theta-adjusted expected value.
+    
+    Per Section 4.2.1:
+    θ-Adjusted EV = (P_profit × E_gain) - (P_loss × E_loss) - (θ × T_hold)
+    
+    Simplified calculation for display purposes.
+    """
+    if mid <= 0 or dte <= 0:
+        return 0.0
+    
+    # Daily expected move
+    daily_expected_move = underlying_price * (iv / math.sqrt(252))
+    
+    # Expected gain from delta exposure over holding period
+    expected_price_move = daily_expected_move * math.sqrt(expected_hold_days)
+    expected_gain = abs(delta) * expected_price_move * 100  # Per contract
+    
+    # Theta cost over holding period
+    theta_cost = abs(theta) * expected_hold_days * 100  # Per contract
+    
+    # Simplified EV (assumes 50/50 probability for directional move)
+    ev = (0.6 * expected_gain) - (0.4 * mid * 0.5 * 100) - theta_cost
+    
+    return round(ev, 2)
+
+
+def calculate_gate_margin(gate_results: list[dict[str, Any]]) -> float:
+    """Calculate average gate margin for conviction scoring.
+    
+    Per Section 4.2.3:
+    Per-gate margin = (Actual - Threshold) / Threshold × 100
+    Gate Margin Score = average(all gate margins), clamped 0-100
+    """
+    if not gate_results:
+        return 50.0  # Neutral score if no gates
+    
+    margins = []
+    for gate in gate_results:
+        if not gate.get("enabled", True) or not gate.get("passed", False):
+            continue
+        
+        measured = gate.get("measured_value", 0)
+        threshold = gate.get("threshold_value", 1)
+        operator = gate.get("operator", "gte")
+        
+        if threshold == 0:
+            continue
+        
+        # Calculate margin based on operator
+        if operator in ("gte", ">="):
+            margin = (measured - threshold) / abs(threshold) * 100
+        elif operator in ("lte", "<="):
+            margin = (threshold - measured) / abs(threshold) * 100
+        else:
+            margin = 50  # Default for between/equals
+        
+        margins.append(max(0, min(100, margin)))
+    
+    if not margins:
+        return 50.0
+    
+    return round(sum(margins) / len(margins), 1)
+
+
+def determine_urgency(scanner_types: list[str]) -> str:
+    """Determine urgency level from scanner types.
+    
+    Per Section 4.2.5:
+    - 🔴 Act Now: Breakout/Breakdown
+    - 🟡 Hours: Unusual Volume
+    - 🟢 Patient: Compression, Cheap Options
+    """
+    urgency_priority = {"act_now": 3, "hours": 2, "patient": 1}
+    
+    max_urgency = "patient"
+    max_priority = 0
+    
+    for scanner in scanner_types:
+        scanner_upper = scanner.upper()
+        urgency = URGENCY_BY_SCANNER.get(scanner_upper, "patient")
+        priority = urgency_priority.get(urgency, 1)
+        
+        if priority > max_priority:
+            max_priority = priority
+            max_urgency = urgency
+    
+    return max_urgency
+
+
+@router.get("")
+async def list_evaluations(
+    verdict: Optional[str] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List evaluations, optionally filtered by verdict."""
+    if verdict:
+        items = await EvaluationTable.list_by_verdict(verdict.upper(), limit=limit)
+    else:
+        # For now, return empty - would need to implement a scan or date-based query
+        items = []
+
+    return {
+        "evaluations": items,
+        "count": len(items),
+        "filter": {"verdict": verdict} if verdict else None,
+    }
+
+
+@router.get("/{ticker}/{timestamp}/{evaluation_id}")
+async def get_evaluation(
+    ticker: str,
+    timestamp: str,
+    evaluation_id: str,
+) -> dict[str, Any]:
+    """Get a specific evaluation by key."""
+    item = await EvaluationTable.get(ticker, timestamp, evaluation_id)
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Evaluation not found: {ticker}/{timestamp}/{evaluation_id}",
+        )
+    return item
+
+
+@router.get("/{ticker}/{timestamp}/{evaluation_id}/detail")
+async def get_evaluation_detail(
+    ticker: str,
+    timestamp: str,
+    evaluation_id: str,
+) -> dict[str, Any]:
+    """Get complete evaluation details including pillar scores, gates, and position.
+    
+    Per Section 19.1 of OSS_Complete_Requirements.md - Evaluation Detail Page.
+    
+    Returns:
+        Evaluation + Decision + PillarScores (3) + GateResults (all) + 
+        PaperPosition (if exists) + Opportunity scanner triggers + Features
+    """
+    # 1. Get base evaluation with decision
+    evaluation = await EvaluationTable.get(ticker, timestamp, evaluation_id)
+    if not evaluation:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Evaluation not found: {ticker}/{timestamp}/{evaluation_id}",
+        )
+    
+    # 2. Fetch pillar scores (3 pillars: DIRECTIONAL, VOLATILITY, STRUCTURE)
+    pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+    pillar_scores_dict = [
+        {
+            "pillar_id": str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id),
+            "score": ps.score,
+            "contributors": [
+                {
+                    "feature_name": c.feature_name,
+                    "subscore": c.subscore,
+                    "weight": c.weight,
+                    "weighted_contribution": c.weighted_contribution,
+                    "raw_value": c.raw_value,
+                    "distance_from_neutral": c.distance_from_neutral,
+                }
+                for c in ps.contributors
+            ],
+            "tags": ps.tags,
+        }
+        for ps in pillar_scores
+    ]
+    
+    # 3. Fetch gate results (all 9 gates)
+    gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+    gate_results_dict = [
+        {
+            "gate_id": gr.gate_id,
+            "enabled": gr.enabled,
+            "passed": gr.passed,
+            "measured_value": gr.measured_value,
+            "threshold_value": gr.threshold_value,
+            "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+            "units": gr.units,
+            "reason_code": gr.reason_code,
+            "notes": gr.notes,
+        }
+        for gr in gate_results
+    ]
+    
+    # 4. Fetch paper position if exists
+    position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    position_dict = None
+    if position:
+        position_dict = {
+            "position_id": position.position_id,
+            "option_ticker": position.option_ticker,
+            "entry_price": position.entry_price,
+            "entry_date": position.entry_date,
+            "quantity": position.quantity,
+            "verdict_at_entry": str(position.verdict_at_entry.value) if hasattr(position.verdict_at_entry, 'value') else str(position.verdict_at_entry),
+            "quality_tier_at_entry": str(position.quality_tier_at_entry.value) if position.quality_tier_at_entry and hasattr(position.quality_tier_at_entry, 'value') else str(position.quality_tier_at_entry) if position.quality_tier_at_entry else None,
+            "exit_price": position.exit_price,
+            "exit_date": position.exit_date,
+            "exit_reason": str(position.exit_reason.value) if position.exit_reason and hasattr(position.exit_reason, 'value') else str(position.exit_reason) if position.exit_reason else None,
+            "current_price": position.current_price,
+            "current_pnl_pct": round(position.current_pnl_pct, 2),
+            "max_favorable_excursion": round(position.max_favorable_excursion, 2),
+            "max_adverse_excursion": round(position.max_adverse_excursion, 2),
+            "days_held": position.days_held,
+            "status": str(position.status.value) if hasattr(position.status, 'value') else str(position.status),
+            "last_updated": position.last_updated,
+        }
+    
+    # 5. Fetch opportunity to get scanner triggers
+    opportunity_id = evaluation.get("opportunity_id")
+    scanner_triggers = []
+    if opportunity_id:
+        # Find opportunity - need timestamp from evaluation
+        eval_timestamp = evaluation.get("evaluated_at", "")
+        date_str = eval_timestamp[:10] if eval_timestamp else ""
+        opportunities = await OpportunityTable.list_by_ticker(ticker, limit=20)
+        for opp in opportunities:
+            if opp.opportunity_id == opportunity_id:
+                scanner_triggers = [
+                    {
+                        "scanner_type": str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') else str(st.scanner_type),
+                        "reason_codes": st.reason_codes,
+                        "metrics": st.metrics,
+                        "triggered_at": st.triggered_at,
+                    }
+                    for st in opp.scanner_triggers
+                ]
+                break
+    
+    # 6. Fetch feature values
+    features = await FeatureValueTable.list_by_evaluation(evaluation_id)
+    features_dict = {
+        f.feature_name: {
+            "value": f.value,
+            "units": f.units,
+            "computed_at": f.computed_at,
+        }
+        for f in features
+    }
+    
+    # 7. Fetch trade thesis if exists (Phase 10 - LLM Integration)
+    thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    thesis_dict = None
+    if thesis:
+        thesis_dict = {
+            "thesis_id": thesis.thesis_id,
+            "status": str(thesis.status.value) if hasattr(thesis.status, 'value') else str(thesis.status),
+            "setup_summary": thesis.setup_summary,
+            "thesis": thesis.thesis,
+            "supporting_evidence": thesis.supporting_evidence,
+            "risks": thesis.risks,
+            "invalidation_conditions": thesis.invalidation_conditions,
+            "exit_plan": {
+                "profit_target": thesis.exit_plan.profit_target,
+                "stop_loss": thesis.exit_plan.stop_loss,
+                "time_exit": thesis.exit_plan.time_exit,
+            },
+            "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, 'value') else str(thesis.llm_provider),
+            "model_used": thesis.model_used,
+            "tokens_used": thesis.tokens_used,
+            "generated_at": thesis.generated_at,
+            "error_message": thesis.error_message,
+        }
+    
+    # 8. Compute summary stats
+    all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
+    failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
+    
+    return {
+        "evaluation": evaluation,
+        "pillar_scores": pillar_scores_dict,
+        "gate_results": gate_results_dict,
+        "position": position_dict,
+        "scanner_triggers": scanner_triggers,
+        "features": features_dict,
+        "thesis": thesis_dict,
+        "summary": {
+            "all_gates_passed": all_gates_passed,
+            "failed_gates": failed_gates,
+            "pillar_count": len(pillar_scores_dict),
+            "gate_count": len(gate_results_dict),
+            "has_position": position_dict is not None,
+            "feature_count": len(features_dict),
+            "has_thesis": thesis_dict is not None,
+        },
+    }
+
+
+@router.get("/by-verdict/{verdict}")
+async def list_by_verdict(
+    verdict: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List evaluations by verdict (APPROVE, WATCH, REJECT)."""
+    valid_verdicts = ["APPROVE", "WATCH", "REJECT"]
+    verdict_upper = verdict.upper()
+
+    if verdict_upper not in valid_verdicts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid verdict. Must be one of: {valid_verdicts}",
+        )
+
+    items = await EvaluationTable.list_by_verdict(verdict_upper, limit=limit)
+
+    return {
+        "verdict": verdict_upper,
+        "evaluations": items,
+        "count": len(items),
+    }
+
+
+@router.get("/filtered")
+async def list_evaluations_filtered(
+    verdict: Optional[str] = None,
+    dte_bucket: Optional[str] = None,
+    option_type: Optional[str] = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """List evaluations with filters for Pipeline Monitor breakdown.
+    
+    Per Section 19.2 - Pipeline Monitor breakdown controls.
+    
+    Args:
+        verdict: Filter by verdict (APPROVE, WATCH, REJECT)
+        dte_bucket: Filter by DTE bucket (A, B, C, D)
+        option_type: Filter by option type (CALL, PUT)
+        limit: Maximum evaluations to return
+        
+    Returns:
+        Filtered list of evaluations with summary statistics
+    """
+    # Start with verdict-based query if provided, else get all verdicts
+    if verdict:
+        items = await EvaluationTable.list_by_verdict(verdict.upper(), limit=500)
+    else:
+        # Get all verdicts
+        approve_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
+        watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=200)
+        reject_items = await EvaluationTable.list_by_verdict("REJECT", limit=200)
+        items = approve_items + watch_items + reject_items
+    
+    # Apply in-memory filters
+    filtered = items
+    
+    if dte_bucket:
+        filtered = [e for e in filtered if e.get("dte_bucket") == dte_bucket.upper()]
+    
+    if option_type:
+        filtered = [e for e in filtered if e.get("option_type") == option_type.upper()]
+    
+    # Sort by evaluated_at descending and limit
+    filtered.sort(key=lambda x: x.get("evaluated_at", ""), reverse=True)
+    filtered = filtered[:limit]
+    
+    # Compute summary statistics
+    stats = {
+        "total": len(filtered),
+        "by_verdict": {},
+        "by_dte_bucket": {},
+        "by_option_type": {},
+    }
+    
+    for item in filtered:
+        # By verdict
+        v = item.get("decision", {}).get("verdict") if isinstance(item.get("decision"), dict) else None
+        if v:
+            stats["by_verdict"][v] = stats["by_verdict"].get(v, 0) + 1
+        
+        # By DTE bucket
+        bucket = item.get("dte_bucket")
+        if bucket:
+            stats["by_dte_bucket"][bucket] = stats["by_dte_bucket"].get(bucket, 0) + 1
+        
+        # By option type
+        ot = item.get("option_type")
+        if ot:
+            stats["by_option_type"][ot] = stats["by_option_type"].get(ot, 0) + 1
+    
+    return {
+        "evaluations": filtered,
+        "count": len(filtered),
+        "filters": {
+            "verdict": verdict,
+            "dte_bucket": dte_bucket,
+            "option_type": option_type,
+        },
+        "statistics": stats,
+    }
+
+
+@router.get("/approve")
+async def list_approve_evaluations(
+    exclude_earnings: bool = True,
+    earnings_days: int = 7,
+    scanner: Optional[str] = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Get APPROVE evaluations with enhanced data for Opportunities page.
+    
+    Per Section 19.1 of OSS_Opportunities_Page_Specification:
+    - Fetch APPROVE evaluations from latest pipeline run
+    - Include scanner convergence data
+    - Include gate margin calculations
+    - Include theta-adjusted EV
+    - Optionally exclude contracts with earnings within N days
+    
+    Args:
+        exclude_earnings: Whether to exclude contracts near earnings
+        earnings_days: Days window for earnings exclusion
+        scanner: Filter by scanner type
+        limit: Maximum evaluations to return
+        
+    Returns:
+        Enhanced evaluation list with conviction scoring inputs
+    """
+    # Fetch APPROVE evaluations
+    items = await EvaluationTable.list_by_verdict("APPROVE", limit=500)
+    
+    # Filter by scanner if specified
+    if scanner:
+        scanner_upper = scanner.upper()
+        filtered_items = []
+        for item in items:
+            opportunity_id = item.get("opportunity_id")
+            if opportunity_id:
+                # Get scanner triggers from opportunity
+                ticker = item.get("underlying_ticker", "")
+                opportunities = await OpportunityTable.list_by_ticker(ticker, limit=10)
+                for opp in opportunities:
+                    if opp.opportunity_id == opportunity_id:
+                        scanner_types = [
+                            str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') 
+                            else str(st.scanner_type)
+                            for st in opp.scanner_triggers
+                        ]
+                        if scanner_upper in [s.upper() for s in scanner_types]:
+                            filtered_items.append(item)
+                        break
+        items = filtered_items
+    
+    # Track tickers to check for scanner convergence
+    ticker_to_evals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    excluded_for_earnings: list[dict[str, Any]] = []
+    
+    # Enhance each evaluation
+    enhanced_items = []
+    catalyst_service = _create_catalyst_service()
+    
+    for item in items:
+        ticker = item.get("underlying_ticker", "")
+        evaluation_id = item.get("evaluation_id", "")
+        
+        # Get pillar scores for composite calculation
+        pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+        pillar_dict = {
+            str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id): ps.score
+            for ps in pillar_scores
+        }
+        
+        # Get gate results for margin calculation
+        gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+        gate_list = [
+            {
+                "gate_id": gr.gate_id,
+                "enabled": gr.enabled,
+                "passed": gr.passed,
+                "measured_value": gr.measured_value,
+                "threshold_value": gr.threshold_value,
+                "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+            }
+            for gr in gate_results
+        ]
+        
+        # Get scanner triggers
+        opportunity_id = item.get("opportunity_id")
+        scanner_types: list[str] = []
+        if opportunity_id:
+            opportunities = await OpportunityTable.list_by_ticker(ticker, limit=10)
+            for opp in opportunities:
+                if opp.opportunity_id == opportunity_id:
+                    scanner_types = [
+                        str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') 
+                        else str(st.scanner_type)
+                        for st in opp.scanner_triggers
+                    ]
+                    break
+        
+        # Check earnings exclusion
+        if exclude_earnings:
+            try:
+                days_to_earnings = await catalyst_service.get_days_to_earnings(ticker)
+                if days_to_earnings is not None and days_to_earnings <= earnings_days:
+                    excluded_for_earnings.append({
+                        "ticker": ticker,
+                        "earningsDate": (datetime.now(timezone.utc) + timedelta(days=days_to_earnings)).strftime("%Y-%m-%d"),
+                        "contractCount": 1,
+                    })
+                    continue
+            except Exception:
+                pass  # If we can't fetch earnings, include the contract
+        
+        # Calculate theta-adjusted EV
+        theta_adj_ev = calculate_theta_adjusted_ev(
+            delta=item.get("delta", 0),
+            theta=item.get("theta", 0),
+            mid=item.get("mid", 0),
+            iv=item.get("iv", 0),
+            underlying_price=item.get("underlying_price", 0),
+            dte=item.get("dte", 30),
+        )
+        
+        # Calculate gate margin
+        gate_margin = calculate_gate_margin(gate_list)
+        
+        # Determine urgency
+        urgency = determine_urgency(scanner_types)
+        
+        # Get thesis headline if exists
+        thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+        headline = None
+        if thesis and thesis.setup_summary:
+            headline = thesis.setup_summary[:120]  # Truncate to 120 chars
+        
+        # Build enhanced evaluation
+        enhanced = {
+            **item,
+            "pillarScores": pillar_dict,
+            "gateResults": gate_list,
+            "gateMargin": gate_margin,
+            "scannerSource": scanner_types,
+            "thetaAdjustedEV": theta_adj_ev,
+            "urgency": urgency,
+            "headline": headline,
+        }
+        
+        enhanced_items.append(enhanced)
+        ticker_to_evals[ticker].append(enhanced)
+    
+    # Mark scanner convergence (multiple scanners on same underlying)
+    for ticker, evals in ticker_to_evals.items():
+        if len(evals) > 1:
+            # Get unique scanner types across all evals for this ticker
+            all_scanners = set()
+            for e in evals:
+                all_scanners.update(e.get("scannerSource", []))
+            
+            convergence_count = len(all_scanners)
+            for e in evals:
+                e["scannerConvergence"] = convergence_count
+        else:
+            for e in evals:
+                e["scannerConvergence"] = len(e.get("scannerSource", []))
+    
+    # Sort by decision score descending, limit
+    enhanced_items.sort(
+        key=lambda x: x.get("decision", {}).get("final_score", 0) if isinstance(x.get("decision"), dict) else 0,
+        reverse=True,
+    )
+    enhanced_items = enhanced_items[:limit]
+    
+    # Consolidate earnings exclusions by ticker
+    earnings_by_ticker: dict[str, dict[str, Any]] = {}
+    for exc in excluded_for_earnings:
+        ticker = exc["ticker"]
+        if ticker in earnings_by_ticker:
+            earnings_by_ticker[ticker]["contractCount"] += 1
+        else:
+            earnings_by_ticker[ticker] = exc
+    
+    return {
+        "evaluations": enhanced_items,
+        "excludedForEarnings": list(earnings_by_ticker.values()),
+        "meta": {
+            "total": len(enhanced_items),
+            "excludedCount": len(excluded_for_earnings),
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
+@router.get("/watch/insights")
+async def get_watch_insights(
+    since_days: int = 7,
+) -> dict[str, Any]:
+    """Get WATCH intelligence insights for pattern detection.
+    
+    Per Section 11 of OSS_Opportunities_Page_Specification:
+    - Gate Pressure: identify gates causing most WATCH failures
+    - Recurring Near-Miss: contracts evaluated multiple times
+    - WATCH to APPROVE Conversion tracking
+    
+    Args:
+        since_days: Number of days to analyze
+        
+    Returns:
+        List of WatchInsight objects
+    """
+    # Fetch WATCH evaluations
+    watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=500)
+    approve_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
+    
+    insights: list[dict[str, Any]] = []
+    
+    # 1. Gate Pressure Analysis
+    gate_failure_counts: dict[str, int] = defaultdict(int)
+    total_watch = len(watch_items)
+    
+    for item in watch_items:
+        evaluation_id = item.get("evaluation_id", "")
+        gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+        
+        for gr in gate_results:
+            if gr.enabled and not gr.passed:
+                gate_failure_counts[gr.gate_id] += 1
+    
+    # Find top failing gates
+    if gate_failure_counts and total_watch > 0:
+        sorted_gates = sorted(gate_failure_counts.items(), key=lambda x: x[1], reverse=True)
+        top_gate, top_count = sorted_gates[0]
+        percentage = round((top_count / total_watch) * 100, 1)
+        
+        if percentage >= 10:  # Only report if significant
+            insights.append({
+                "type": "gate_pressure",
+                "headline": f"{top_count} contracts failed the {top_gate.replace('_', ' ')} gate today ({percentage}% of all WATCH)",
+                "gateName": top_gate,
+                "failCount": top_count,
+                "percentage": percentage,
+                "highPotentialCount": min(top_count, 5),
+                "actionLink": {
+                    "label": "Review threshold in Policy",
+                    "url": "/config",
+                },
+            })
+    
+    # 2. Recurring Near-Miss Detection
+    # Group by contract identifier (ticker + strike + expiration)
+    contract_occurrences: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    
+    for item in watch_items:
+        ticker = item.get("underlying_ticker", "")
+        strike = item.get("strike", 0)
+        expiration = item.get("expiration_date", "")
+        contract_key = f"{ticker}_{strike}_{expiration}"
+        contract_occurrences[contract_key].append(item)
+    
+    # Find contracts evaluated multiple times
+    for contract_key, occurrences in contract_occurrences.items():
+        if len(occurrences) >= 2:
+            parts = contract_key.split("_")
+            ticker = parts[0] if parts else ""
+            
+            # Get the most recent evaluation's failing gate
+            latest = max(occurrences, key=lambda x: x.get("evaluated_at", ""))
+            evaluation_id = latest.get("evaluation_id", "")
+            gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+            
+            failing_gate = None
+            for gr in gate_results:
+                if gr.enabled and not gr.passed:
+                    failing_gate = gr.gate_id
+                    break
+            
+            insights.append({
+                "type": "recurring_near_miss",
+                "headline": f"{ticker} {latest.get('strike', '')} {latest.get('option_type', '')} {latest.get('expiration_date', '')} has been evaluated {len(occurrences)} times this week",
+                "subInsight": f"Currently failing: {failing_gate.replace('_', ' ') if failing_gate else 'Unknown'}",
+                "contractId": contract_key,
+                "ticker": ticker,
+                "strike": latest.get("strike", 0),
+                "expiration": latest.get("expiration_date", ""),
+                "occurrences": len(occurrences),
+                "failingGate": failing_gate,
+            })
+    
+    # 3. WATCH to APPROVE Conversion Tracking
+    # Find contracts that were WATCH and later became APPROVE
+    watch_contracts = set()
+    for item in watch_items:
+        ticker = item.get("underlying_ticker", "")
+        strike = item.get("strike", 0)
+        expiration = item.get("expiration_date", "")
+        watch_contracts.add(f"{ticker}_{strike}_{expiration}")
+    
+    conversions: list[dict[str, Any]] = []
+    for item in approve_items:
+        ticker = item.get("underlying_ticker", "")
+        strike = item.get("strike", 0)
+        expiration = item.get("expiration_date", "")
+        contract_key = f"{ticker}_{strike}_{expiration}"
+        
+        if contract_key in watch_contracts:
+            evaluation_id = item.get("evaluation_id", "")
+            gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+            
+            # Find which gate now passed
+            gate_passed = None
+            for gr in gate_results:
+                if gr.enabled and gr.passed:
+                    gate_passed = gr.gate_id
+                    break
+            
+            conversions.append({
+                "contractId": contract_key,
+                "ticker": ticker,
+                "strike": strike,
+                "expiration": expiration,
+                "gatePassed": gate_passed,
+            })
+    
+    if conversions:
+        insights.append({
+            "type": "watch_to_approve",
+            "headline": f"{len(conversions)} contracts converted from WATCH to APPROVE",
+            "contracts": [f"{c['ticker']} {c['strike']} {c['expiration']}" for c in conversions[:5]],
+            "conversions": conversions[:10],
+        })
+    
+    return {
+        "insights": insights,
+        "watchCount": total_watch,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }

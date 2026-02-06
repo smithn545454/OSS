@@ -1,0 +1,1009 @@
+"""Unit tests for Stage 7: Decision Logic.
+
+Tests verdict determination, quality tier assignment, concentration warnings,
+and reason code generation.
+"""
+
+import pytest
+from datetime import datetime, timezone
+
+from app.core.schemas import (
+    Decision,
+    DecisionConfig,
+    Evaluation,
+    GateResult,
+    Opportunity,
+    PillarWeights,
+    QualityTier,
+    ScannerTrigger,
+    Verdict,
+)
+from app.decision.calculator import (
+    DecisionCalculator,
+    DecisionContext,
+    assign_quality_tier,
+    compute_decision,
+    determine_verdict,
+)
+from app.decision.concentration import (
+    analyze_concentration,
+    check_concentration_warnings,
+    check_directional_concentration,
+    check_ticker_concentration,
+    update_decisions_with_warnings,
+)
+from app.gates.models import GateEvaluation
+from app.pillars.models import PillarResult, Subscore
+
+
+# =============================================================================
+# Test Fixtures
+# =============================================================================
+
+
+def make_evaluation(
+    evaluation_id: str = "eval-001",
+    ticker: str = "AAPL",
+    option_type: str = "CALL",
+    spread_pct: float = 3.0,
+    policy_version: str = "v2.0.0",
+    **kwargs,
+) -> Evaluation:
+    """Create a test Evaluation."""
+    defaults = {
+        "opportunity_id": "opp-001",
+        "underlying_ticker": ticker,
+        "option_ticker": f"O:{ticker}240119C00190000",
+        "option_type": option_type,
+        "expiration_date": "2024-01-19",
+        "dte": 30,
+        "strike": 190.0,
+        "underlying_price": 185.0,
+        "moneyness_pct": 2.7,
+        "bid": 4.20,
+        "ask": 4.40,
+        "mid": 4.30,
+        "spread_abs": 0.20,
+        "spread_pct": spread_pct,
+        "iv": 0.32,
+        "delta": 0.45,
+        "gamma": 0.03,
+        "theta": -0.08,
+        "vega": 0.25,
+        "open_interest": 1500,
+        "volume": 250,
+        "breakeven_price": 194.30,
+        "required_move_pct": 5.03,
+        "expected_move_pct": 8.16,
+        "feasibility_ratio": 0.62,
+        "time_adjusted_feasibility": 0.56,
+        "dte_bucket": "B",
+        "rank_score": 85.0,
+        "policy_version": policy_version,
+        "policy_hash": "abc123",
+    }
+    defaults.update(kwargs)
+    defaults["evaluation_id"] = evaluation_id
+    return Evaluation(**defaults)
+
+
+def make_pillar_results(
+    evaluation_id: str,
+    directional: float = 75.0,
+    volatility: float = 80.0,
+    structure: float = 70.0,
+) -> list[PillarResult]:
+    """Create test PillarResult list."""
+    return [
+        PillarResult(
+            pillar_id="DIRECTIONAL",
+            evaluation_id=evaluation_id,
+            score=directional,
+            subscores=[
+                Subscore(name="trend_alignment", raw_value=1, score=90.0, weight=0.30),
+                Subscore(name="momentum", raw_value=5.2, score=70.0, weight=0.25),
+            ],
+            tags=["BULLISH_TREND"] if directional >= 70 else [],
+        ),
+        PillarResult(
+            pillar_id="VOLATILITY",
+            evaluation_id=evaluation_id,
+            score=volatility,
+            subscores=[
+                Subscore(name="iv_vs_rv", raw_value=0.95, score=85.0, weight=0.35),
+                Subscore(name="iv_percentile", raw_value=35.0, score=75.0, weight=0.25),
+            ],
+            tags=["IV_LOW"] if volatility >= 70 else [],
+        ),
+        PillarResult(
+            pillar_id="STRUCTURE",
+            evaluation_id=evaluation_id,
+            score=structure,
+            subscores=[
+                Subscore(name="spread", raw_value=3.0, score=80.0, weight=0.30),
+                Subscore(name="open_interest", raw_value=1500, score=75.0, weight=0.25),
+            ],
+            tags=["TIGHT_SPREAD"] if structure >= 70 else [],
+        ),
+    ]
+
+
+def make_gate_evaluation(
+    evaluation_id: str,
+    all_passed: bool = True,
+    failed_gates: list[str] = None,
+) -> GateEvaluation:
+    """Create a test GateEvaluation."""
+    gate_results = []
+    
+    if all_passed:
+        # All gates passed
+        gate_results = [
+            GateResult(
+                evaluation_id=evaluation_id,
+                gate_id="GATE_MIN_OPEN_INTEREST",
+                enabled=True,
+                passed=True,
+                measured_value=1500,
+                threshold_value=300,
+                operator="gte",
+                units="contracts",
+                reason_code="GATE_PASS_MIN_OI",
+            ),
+            GateResult(
+                evaluation_id=evaluation_id,
+                gate_id="GATE_MAX_SPREAD_PCT",
+                enabled=True,
+                passed=True,
+                measured_value=3.0,
+                threshold_value=8.0,
+                operator="lte",
+                units="percent",
+                reason_code="GATE_PASS_SPREAD",
+            ),
+        ]
+    else:
+        # Some gates failed
+        failed_list = failed_gates or ["GATE_MIN_OPEN_INTEREST"]
+        gate_results = [
+            GateResult(
+                evaluation_id=evaluation_id,
+                gate_id="GATE_MIN_OPEN_INTEREST",
+                enabled=True,
+                passed="GATE_MIN_OPEN_INTEREST" not in failed_list,
+                measured_value=150 if "GATE_MIN_OPEN_INTEREST" in failed_list else 1500,
+                threshold_value=300,
+                operator="gte",
+                units="contracts",
+                reason_code="GATE_FAIL_MIN_OI" if "GATE_MIN_OPEN_INTEREST" in failed_list else "GATE_PASS_MIN_OI",
+            ),
+            GateResult(
+                evaluation_id=evaluation_id,
+                gate_id="GATE_MAX_SPREAD_PCT",
+                enabled=True,
+                passed="GATE_MAX_SPREAD_PCT" not in failed_list,
+                measured_value=12.0 if "GATE_MAX_SPREAD_PCT" in failed_list else 3.0,
+                threshold_value=8.0,
+                operator="lte",
+                units="percent",
+                reason_code="GATE_FAIL_SPREAD" if "GATE_MAX_SPREAD_PCT" in failed_list else "GATE_PASS_SPREAD",
+            ),
+        ]
+    
+    return GateEvaluation(
+        evaluation_id=evaluation_id,
+        gate_results=gate_results,
+    )
+
+
+# =============================================================================
+# Test DecisionCalculator - Final Score Calculation
+# =============================================================================
+
+
+class TestFinalScoreCalculation:
+    """Test final score calculation from pillar scores."""
+    
+    def test_default_weights(self):
+        """Test final score with default weights (0.35, 0.35, 0.30)."""
+        calculator = DecisionCalculator()
+        
+        # 0.35 * 80 + 0.35 * 70 + 0.30 * 90 = 28 + 24.5 + 27 = 79.5
+        final = calculator.compute_final_score(80.0, 70.0, 90.0)
+        
+        assert final == pytest.approx(79.5, rel=0.01)
+    
+    def test_custom_weights(self):
+        """Test final score with custom weights."""
+        weights = PillarWeights(directional=0.40, volatility=0.40, structure=0.20)
+        calculator = DecisionCalculator(pillar_weights=weights)
+        
+        # 0.40 * 80 + 0.40 * 70 + 0.20 * 90 = 32 + 28 + 18 = 78
+        final = calculator.compute_final_score(80.0, 70.0, 90.0)
+        
+        assert final == pytest.approx(78.0, rel=0.01)
+    
+    def test_score_clamping(self):
+        """Test that final score is clamped to 0-100."""
+        calculator = DecisionCalculator()
+        
+        # Even with impossible inputs, should clamp
+        final = calculator.compute_final_score(150.0, 150.0, 150.0)
+        assert final == 100.0
+        
+        final = calculator.compute_final_score(-50.0, -50.0, -50.0)
+        assert final == 0.0
+
+
+# =============================================================================
+# Test DecisionCalculator - Verdict Determination
+# =============================================================================
+
+
+class TestVerdictDetermination:
+    """Test verdict determination from score and gate results."""
+    
+    def test_gate_failure_always_rejects(self):
+        """Test that any gate failure results in REJECT."""
+        calculator = DecisionCalculator()
+        
+        # High score but gates failed
+        verdict, reason = calculator.determine_verdict(95.0, all_gates_passed=False)
+        
+        assert verdict == Verdict.REJECT
+        assert reason == "REJECTED_BY_GATES"
+    
+    def test_approve_threshold_default(self):
+        """Test APPROVE with default threshold (75)."""
+        calculator = DecisionCalculator()
+        
+        # Exactly at threshold
+        verdict, reason = calculator.determine_verdict(75.0, all_gates_passed=True)
+        assert verdict == Verdict.APPROVE
+        assert reason == "APPROVED_BY_SCORE"
+        
+        # Above threshold
+        verdict, reason = calculator.determine_verdict(85.0, all_gates_passed=True)
+        assert verdict == Verdict.APPROVE
+    
+    def test_watch_threshold_default(self):
+        """Test WATCH with default thresholds (65-75)."""
+        calculator = DecisionCalculator()
+        
+        # At watch threshold
+        verdict, reason = calculator.determine_verdict(65.0, all_gates_passed=True)
+        assert verdict == Verdict.WATCH
+        assert reason == "WATCH_BY_SCORE"
+        
+        # Between thresholds
+        verdict, reason = calculator.determine_verdict(70.0, all_gates_passed=True)
+        assert verdict == Verdict.WATCH
+        
+        # Just below approve
+        verdict, reason = calculator.determine_verdict(74.99, all_gates_passed=True)
+        assert verdict == Verdict.WATCH
+    
+    def test_reject_by_score(self):
+        """Test REJECT when score below watch threshold."""
+        calculator = DecisionCalculator()
+        
+        # Below watch threshold
+        verdict, reason = calculator.determine_verdict(64.99, all_gates_passed=True)
+        assert verdict == Verdict.REJECT
+        assert reason == "REJECTED_BY_SCORE"
+        
+        # Much lower
+        verdict, reason = calculator.determine_verdict(40.0, all_gates_passed=True)
+        assert verdict == Verdict.REJECT
+    
+    def test_custom_thresholds(self):
+        """Test with custom approve/watch thresholds."""
+        config = DecisionConfig(approve_threshold=80, watch_threshold=60)
+        calculator = DecisionCalculator(decision_config=config)
+        
+        # Between new thresholds
+        verdict, reason = calculator.determine_verdict(75.0, all_gates_passed=True)
+        assert verdict == Verdict.WATCH  # Would be APPROVE with defaults
+
+
+# =============================================================================
+# Test DecisionCalculator - Quality Tier Assignment
+# =============================================================================
+
+
+class TestQualityTierAssignment:
+    """Test quality tier assignment for APPROVE verdicts."""
+    
+    def test_tier_1_requirements(self):
+        """Test TIER_1: score >= 85, all pillars >= 70, spread <= 5%."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=87.0,
+            directional=75.0,
+            volatility=80.0,
+            structure=72.0,
+            spread_pct=4.0,
+        )
+        
+        assert tier == QualityTier.TIER_1
+    
+    def test_tier_1_fails_on_low_score(self):
+        """Test TIER_1 fails if score < 85."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=82.0,  # Below 85
+            directional=75.0,
+            volatility=80.0,
+            structure=72.0,
+            spread_pct=4.0,
+        )
+        
+        assert tier == QualityTier.TIER_2  # Falls to TIER_2
+    
+    def test_tier_1_fails_on_low_pillar(self):
+        """Test TIER_1 fails if any pillar < 70."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=87.0,
+            directional=75.0,
+            volatility=80.0,
+            structure=65.0,  # Below 70
+            spread_pct=4.0,
+        )
+        
+        assert tier == QualityTier.TIER_2
+    
+    def test_tier_1_fails_on_wide_spread(self):
+        """Test TIER_1 fails if spread > 5%."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=87.0,
+            directional=75.0,
+            volatility=80.0,
+            structure=72.0,
+            spread_pct=6.0,  # Above 5%
+        )
+        
+        assert tier == QualityTier.TIER_2
+    
+    def test_tier_2_requirements(self):
+        """Test TIER_2: score >= 75, all pillars >= 55."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=78.0,
+            directional=60.0,
+            volatility=65.0,
+            structure=58.0,
+            spread_pct=7.0,
+        )
+        
+        assert tier == QualityTier.TIER_2
+    
+    def test_tier_3_weak_pillar(self):
+        """Test TIER_3: APPROVE but one pillar < 55."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=76.0,
+            directional=50.0,  # Below 55
+            volatility=85.0,
+            structure=80.0,
+            spread_pct=3.0,
+        )
+        
+        assert tier == QualityTier.TIER_3
+    
+    def test_no_tier_below_approve(self):
+        """Test no tier assigned if below approve threshold."""
+        calculator = DecisionCalculator()
+        
+        tier = calculator.assign_quality_tier(
+            final_score=70.0,  # Below 75
+            directional=80.0,
+            volatility=80.0,
+            structure=80.0,
+            spread_pct=3.0,
+        )
+        
+        assert tier is None
+
+
+# =============================================================================
+# Test DecisionCalculator - Full Decision Computation
+# =============================================================================
+
+
+class TestFullDecisionComputation:
+    """Test complete decision computation flow."""
+    
+    def test_approve_with_tier_1(self):
+        """Test approved decision with TIER_1 quality."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=85.0,
+            volatility=88.0,
+            structure=82.0,
+        )
+        gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
+        
+        decision = compute_decision(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        assert decision.verdict == Verdict.APPROVE
+        assert decision.quality_tier == QualityTier.TIER_1
+        assert decision.primary_reason_code == "APPROVED_BY_SCORE"
+        assert decision.failed_gates == []
+        # Final score: 0.35*85 + 0.35*88 + 0.30*82 = 29.75 + 30.8 + 24.6 = 85.15
+        assert decision.final_score >= 85.0
+    
+    def test_approve_with_tier_3(self):
+        """Test approved decision with TIER_3 (weak pillar)."""
+        evaluation = make_evaluation()
+        # Final score: 0.35*52 + 0.35*95 + 0.30*90 = 18.2 + 33.25 + 27 = 78.45 (APPROVE)
+        # But directional < 55 means TIER_3
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=52.0,  # Weak (below 55)
+            volatility=95.0,
+            structure=90.0,
+        )
+        gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
+        
+        decision = compute_decision(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        assert decision.verdict == Verdict.APPROVE
+        assert decision.quality_tier == QualityTier.TIER_3
+        assert "WEAK_DIRECTIONAL" in decision.supporting_reason_codes
+    
+    def test_watch_verdict(self):
+        """Test WATCH verdict."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=70.0,
+            volatility=68.0,
+            structure=65.0,
+        )
+        gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
+        
+        decision = compute_decision(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        # Final: 0.35*70 + 0.35*68 + 0.30*65 = 24.5 + 23.8 + 19.5 = 67.8
+        assert decision.verdict == Verdict.WATCH
+        assert decision.quality_tier is None
+        assert decision.primary_reason_code == "WATCH_BY_SCORE"
+    
+    def test_reject_by_gates(self):
+        """Test REJECT due to gate failure."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=90.0,
+            volatility=90.0,
+            structure=90.0,
+        )
+        gate_eval = make_gate_evaluation(
+            evaluation.evaluation_id,
+            all_passed=False,
+            failed_gates=["GATE_MIN_OPEN_INTEREST"],
+        )
+        
+        decision = compute_decision(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        assert decision.verdict == Verdict.REJECT
+        assert decision.quality_tier is None
+        assert decision.primary_reason_code == "REJECTED_BY_GATES"
+        assert "GATE_MIN_OPEN_INTEREST" in decision.failed_gates
+    
+    def test_reject_by_score(self):
+        """Test REJECT due to low score."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=50.0,
+            volatility=55.0,
+            structure=45.0,
+        )
+        gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
+        
+        decision = compute_decision(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        # Final: 0.35*50 + 0.35*55 + 0.30*45 = 17.5 + 19.25 + 13.5 = 50.25
+        assert decision.verdict == Verdict.REJECT
+        assert decision.primary_reason_code == "REJECTED_BY_SCORE"
+
+
+# =============================================================================
+# Test Concentration Warnings
+# =============================================================================
+
+
+class TestTickerConcentration:
+    """Test ticker concentration warning detection."""
+    
+    def test_no_warning_under_threshold(self):
+        """Test no warning when contracts per ticker <= 3."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL"),
+            make_evaluation("eval-2", ticker="AAPL"),
+            make_evaluation("eval-3", ticker="AAPL"),  # 3 is OK
+            make_evaluation("eval-4", ticker="MSFT"),
+        ]
+        decisions = {
+            "eval-1": Decision(
+                evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-2": Decision(
+                evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-3": Decision(
+                evaluation_id="eval-3", verdict=Verdict.WATCH, quality_tier=None,
+                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-4": Decision(
+                evaluation_id="eval-4", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+        }
+        
+        warnings = check_ticker_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 0
+    
+    def test_warning_over_threshold(self):
+        """Test warning when contracts per ticker > 3."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL"),
+            make_evaluation("eval-2", ticker="AAPL"),
+            make_evaluation("eval-3", ticker="AAPL"),
+            make_evaluation("eval-4", ticker="AAPL"),  # 4th = warning
+        ]
+        decisions = {
+            f"eval-{i}": Decision(
+                evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            )
+            for i in range(1, 5)
+        }
+        
+        warnings = check_ticker_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 4  # All 4 AAPL contracts get warning
+        for eval_id in warnings:
+            assert any("SAME_TICKER" in w for w in warnings[eval_id])
+    
+    def test_rejects_not_counted(self):
+        """Test that REJECT verdicts don't count toward ticker concentration."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL"),
+            make_evaluation("eval-2", ticker="AAPL"),
+            make_evaluation("eval-3", ticker="AAPL"),
+            make_evaluation("eval-4", ticker="AAPL"),  # Rejected
+        ]
+        decisions = {
+            "eval-1": Decision(
+                evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-2": Decision(
+                evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-3": Decision(
+                evaluation_id="eval-3", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-4": Decision(
+                evaluation_id="eval-4", verdict=Verdict.REJECT, quality_tier=None,
+                final_score=50.0, directional_score=45.0, volatility_score=50.0, structure_score=55.0,
+                primary_reason_code="REJECTED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+        }
+        
+        warnings = check_ticker_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 0  # Only 3 non-rejected AAPL = OK
+
+
+class TestDirectionalConcentration:
+    """Test directional concentration warning detection."""
+    
+    def test_no_warning_balanced(self):
+        """Test no warning when direction is balanced."""
+        evaluations = [
+            make_evaluation("eval-1", option_type="CALL"),
+            make_evaluation("eval-2", option_type="CALL"),
+            make_evaluation("eval-3", option_type="PUT"),
+            make_evaluation("eval-4", option_type="PUT"),
+        ]
+        decisions = {
+            f"eval-{i}": Decision(
+                evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            )
+            for i in range(1, 5)
+        }
+        
+        warnings = check_directional_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 0  # 50% each = OK
+    
+    def test_warning_call_heavy(self):
+        """Test warning when >70% CALLs."""
+        evaluations = [
+            make_evaluation("eval-1", option_type="CALL"),
+            make_evaluation("eval-2", option_type="CALL"),
+            make_evaluation("eval-3", option_type="CALL"),
+            make_evaluation("eval-4", option_type="CALL"),  # 4 CALLs
+            make_evaluation("eval-5", option_type="PUT"),   # 1 PUT = 80% CALLs
+        ]
+        decisions = {
+            f"eval-{i}": Decision(
+                evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            )
+            for i in range(1, 6)
+        }
+        
+        warnings = check_directional_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 5  # All approves get warning
+        for eval_id in warnings:
+            assert any("DIRECTIONAL:CALL" in w for w in warnings[eval_id])
+    
+    def test_warning_put_heavy(self):
+        """Test warning when >70% PUTs."""
+        evaluations = [
+            make_evaluation("eval-1", option_type="PUT"),
+            make_evaluation("eval-2", option_type="PUT"),
+            make_evaluation("eval-3", option_type="PUT"),
+            make_evaluation("eval-4", option_type="PUT"),  # 4 PUTs
+            make_evaluation("eval-5", option_type="CALL"),  # 1 CALL = 80% PUTs
+        ]
+        decisions = {
+            f"eval-{i}": Decision(
+                evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            )
+            for i in range(1, 6)
+        }
+        
+        warnings = check_directional_concentration(evaluations, decisions)
+        
+        assert len(warnings) == 5
+        for eval_id in warnings:
+            assert any("DIRECTIONAL:PUT" in w for w in warnings[eval_id])
+    
+    def test_watch_not_counted(self):
+        """Test that WATCH verdicts don't count toward directional concentration."""
+        evaluations = [
+            make_evaluation("eval-1", option_type="CALL"),
+            make_evaluation("eval-2", option_type="CALL"),
+            make_evaluation("eval-3", option_type="CALL"),  # All 3 approves are CALL
+            make_evaluation("eval-4", option_type="PUT"),   # WATCH - not counted
+        ]
+        decisions = {
+            "eval-1": Decision(
+                evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-2": Decision(
+                evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-3": Decision(
+                evaluation_id="eval-3", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-4": Decision(
+                evaluation_id="eval-4", verdict=Verdict.WATCH, quality_tier=None,
+                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+        }
+        
+        warnings = check_directional_concentration(evaluations, decisions)
+        
+        # 100% CALL among approves = warning
+        assert len(warnings) == 3  # Only the 3 approves
+
+
+class TestCombinedConcentration:
+    """Test combined concentration warning checks."""
+    
+    def test_combined_warnings(self):
+        """Test both ticker and directional warnings together."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL", option_type="CALL"),
+            make_evaluation("eval-2", ticker="AAPL", option_type="CALL"),
+            make_evaluation("eval-3", ticker="AAPL", option_type="CALL"),
+            make_evaluation("eval-4", ticker="AAPL", option_type="CALL"),  # 4 AAPL + all CALL
+        ]
+        decisions = {
+            f"eval-{i}": Decision(
+                evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            )
+            for i in range(1, 5)
+        }
+        
+        warnings = check_concentration_warnings(evaluations, decisions)
+        
+        # All 4 should have both warnings
+        assert len(warnings) == 4
+        for eval_id in warnings:
+            assert any("SAME_TICKER" in w for w in warnings[eval_id])
+            assert any("DIRECTIONAL:CALL" in w for w in warnings[eval_id])
+
+
+class TestUpdateDecisionsWithWarnings:
+    """Test updating decisions with concentration warnings."""
+    
+    def test_updates_preserve_other_fields(self):
+        """Test that update preserves all original decision fields."""
+        original = Decision(
+            evaluation_id="eval-1",
+            verdict=Verdict.APPROVE,
+            quality_tier=QualityTier.TIER_1,
+            final_score=87.5,
+            directional_score=85.0,
+            volatility_score=88.0,
+            structure_score=90.0,
+            primary_reason_code="APPROVED_BY_SCORE",
+            supporting_reason_codes=["STRONG_DIRECTIONAL", "STRONG_VOLATILITY"],
+            failed_gates=[],
+            concentration_warnings=[],
+            policy_version="v2.0.0",
+        )
+        
+        warnings = {"eval-1": ["WARN_CONCENTRATION_SAME_TICKER:AAPL:4"]}
+        
+        updated = update_decisions_with_warnings({"eval-1": original}, warnings)
+        
+        new_decision = updated["eval-1"]
+        assert new_decision.verdict == original.verdict
+        assert new_decision.quality_tier == original.quality_tier
+        assert new_decision.final_score == original.final_score
+        assert new_decision.directional_score == original.directional_score
+        assert new_decision.primary_reason_code == original.primary_reason_code
+        assert "WARN_CONCENTRATION_SAME_TICKER:AAPL:4" in new_decision.concentration_warnings
+
+
+# =============================================================================
+# Test DecisionContext
+# =============================================================================
+
+
+class TestDecisionContext:
+    """Test DecisionContext construction."""
+    
+    def test_from_evaluation_and_results(self):
+        """Test building context from evaluation and results."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(
+            evaluation.evaluation_id,
+            directional=78.0,
+            volatility=82.0,
+            structure=75.0,
+        )
+        gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
+        
+        ctx = DecisionContext.from_evaluation_and_results(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        assert ctx.evaluation_id == evaluation.evaluation_id
+        assert ctx.underlying_ticker == "AAPL"
+        assert ctx.option_type == "CALL"
+        assert ctx.spread_pct == 3.0
+        assert ctx.directional_score == 78.0
+        assert ctx.volatility_score == 82.0
+        assert ctx.structure_score == 75.0
+        assert ctx.all_gates_passed is True
+        assert ctx.failed_gates == []
+    
+    def test_context_with_failed_gates(self):
+        """Test context captures failed gates correctly."""
+        evaluation = make_evaluation()
+        pillar_results = make_pillar_results(evaluation.evaluation_id)
+        gate_eval = make_gate_evaluation(
+            evaluation.evaluation_id,
+            all_passed=False,
+            failed_gates=["GATE_MIN_OPEN_INTEREST", "GATE_MAX_SPREAD_PCT"],
+        )
+        
+        ctx = DecisionContext.from_evaluation_and_results(
+            evaluation=evaluation,
+            pillar_results=pillar_results,
+            gate_evaluation=gate_eval,
+        )
+        
+        assert ctx.all_gates_passed is False
+        assert "GATE_MIN_OPEN_INTEREST" in ctx.failed_gates
+        assert "GATE_MAX_SPREAD_PCT" in ctx.failed_gates
+
+
+# =============================================================================
+# Test Batch Processing
+# =============================================================================
+
+
+class TestBatchProcessing:
+    """Test batch decision processing."""
+    
+    def test_batch_processing(self):
+        """Test processing multiple evaluations in batch."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL"),
+            make_evaluation("eval-2", ticker="MSFT"),
+            make_evaluation("eval-3", ticker="GOOGL"),
+        ]
+        
+        pillar_results = {
+            "eval-1": make_pillar_results("eval-1", 85.0, 88.0, 82.0),  # APPROVE
+            "eval-2": make_pillar_results("eval-2", 70.0, 68.0, 65.0),  # WATCH
+            "eval-3": make_pillar_results("eval-3", 45.0, 50.0, 48.0),  # REJECT
+        }
+        
+        gate_evaluations = {
+            "eval-1": make_gate_evaluation("eval-1", all_passed=True),
+            "eval-2": make_gate_evaluation("eval-2", all_passed=True),
+            "eval-3": make_gate_evaluation("eval-3", all_passed=True),
+        }
+        
+        calculator = DecisionCalculator()
+        decisions = calculator.compute_decisions_batch(
+            evaluations=evaluations,
+            pillar_results=pillar_results,
+            gate_evaluations=gate_evaluations,
+        )
+        
+        assert len(decisions) == 3
+        assert decisions["eval-1"].verdict == Verdict.APPROVE
+        assert decisions["eval-2"].verdict == Verdict.WATCH
+        assert decisions["eval-3"].verdict == Verdict.REJECT
+
+
+# =============================================================================
+# Test Convenience Functions
+# =============================================================================
+
+
+class TestConvenienceFunctions:
+    """Test convenience functions."""
+    
+    def test_determine_verdict_function(self):
+        """Test standalone determine_verdict function."""
+        verdict, reason = determine_verdict(80.0, all_gates_passed=True)
+        assert verdict == Verdict.APPROVE
+        
+        verdict, reason = determine_verdict(80.0, all_gates_passed=False)
+        assert verdict == Verdict.REJECT
+        assert reason == "REJECTED_BY_GATES"
+    
+    def test_assign_quality_tier_function(self):
+        """Test standalone assign_quality_tier function."""
+        tier = assign_quality_tier(
+            final_score=87.0,
+            directional=75.0,
+            volatility=80.0,
+            structure=72.0,
+            spread_pct=4.0,
+        )
+        assert tier == QualityTier.TIER_1
+
+
+# =============================================================================
+# Test Concentration Analysis
+# =============================================================================
+
+
+class TestConcentrationAnalysis:
+    """Test concentration analysis."""
+    
+    def test_analyze_concentration(self):
+        """Test comprehensive concentration analysis."""
+        evaluations = [
+            make_evaluation("eval-1", ticker="AAPL", option_type="CALL"),
+            make_evaluation("eval-2", ticker="AAPL", option_type="CALL"),
+            make_evaluation("eval-3", ticker="MSFT", option_type="CALL"),
+            make_evaluation("eval-4", ticker="GOOGL", option_type="PUT"),
+        ]
+        decisions = {
+            "eval-1": Decision(
+                evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-2": Decision(
+                evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-3": Decision(
+                evaluation_id="eval-3", verdict=Verdict.WATCH, quality_tier=None,
+                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+            "eval-4": Decision(
+                evaluation_id="eval-4", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
+                final_score=78.0, directional_score=72.0, volatility_score=78.0, structure_score=82.0,
+                primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
+                failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
+            ),
+        }
+        
+        analysis = analyze_concentration(evaluations, decisions)
+        
+        assert analysis.total_approves == 3
+        assert analysis.total_watches == 1
+        assert analysis.ticker_counts["AAPL"] == 2  # APPROVE + APPROVE
+        assert analysis.ticker_counts["MSFT"] == 1  # WATCH
+        assert analysis.ticker_counts["GOOGL"] == 1  # APPROVE
+        assert analysis.call_count == 2  # 2 CALL approves
+        assert analysis.put_count == 1  # 1 PUT approve
+        assert analysis.call_pct == pytest.approx(2/3, rel=0.01)

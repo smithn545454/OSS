@@ -1,0 +1,851 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   OSS Design System
+   Per oss-pipeline-monitor-requirements.md Section 3
+   ============================================================================ */
+
+:root {
+  /* ---- Background colors ---- */
+  --bg-primary: #0a0f14;           /* Page background */
+  --bg-secondary: #0d1318;         /* Card backgrounds */
+  --bg-tertiary: rgba(15, 23, 42, 0.6);   /* Input backgrounds */
+  --bg-elevated: rgba(15, 23, 42, 0.4);   /* Panel backgrounds */
+  --bg-hover: rgba(30, 41, 59, 0.5);      /* Hover states */
+  --bg-active: rgba(6, 182, 212, 0.1);    /* Active/selected states */
+  
+  /* ---- Border colors ---- */
+  --border-subtle: rgba(51, 65, 85, 0.3);
+  --border-default: rgba(51, 65, 85, 0.5);
+  --border-active: rgba(6, 182, 212, 0.4);
+  --border-anomaly: rgba(239, 68, 68, 0.4);
+  
+  /* ---- Text colors ---- */
+  --text-primary: #f1f5f9;         /* Headings, important values */
+  --text-secondary: #e2e8f0;       /* Body text */
+  --text-tertiary: #cbd5e1;        /* Secondary information */
+  --text-muted: #94a3b8;           /* Labels, hints */
+  --text-disabled: #64748b;        /* Disabled states, timestamps */
+  
+  /* ---- Accent colors ---- */
+  --accent-primary: #22d3ee;       /* Primary cyan */
+  --accent-primary-muted: rgba(6, 182, 212, 0.4);
+  --accent-secondary: #06b6d4;     /* Secondary cyan */
+  
+  /* ---- Semantic colors ---- */
+  --color-success: #10b981;        /* Passed, healthy */
+  --color-success-text: #34d399;   /* Success text */
+  --color-success-bg: rgba(16, 185, 129, 0.15);
+  
+  --color-warning: #f59e0b;        /* Watch state */
+  --color-warning-text: #fbbf24;
+  --color-warning-bg: rgba(245, 158, 11, 0.15);
+  
+  --color-error: #ef4444;          /* Failed, anomaly */
+  --color-error-text: #f87171;
+  --color-error-bg: rgba(239, 68, 68, 0.15);
+  
+  --color-info: #6366f1;           /* Informational (overlap data) */
+  --color-info-text: #a5b4fc;
+  --color-info-bg: rgba(99, 102, 241, 0.1);
+
+  /* ---- Legacy variables for backward compatibility ---- */
+  --oss-bg: var(--bg-primary);
+  --oss-surface: var(--bg-secondary);
+  --oss-border: var(--border-default);
+  --oss-muted: var(--text-muted);
+  --oss-text: var(--text-secondary);
+  --oss-accent: var(--accent-primary);
+  --oss-approve: var(--color-success);
+  --oss-watch: var(--color-warning);
+  --oss-reject: var(--color-error);
+  
+  /* ---- Typography (Section 3.2) ---- */
+  --font-primary: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  
+  /* Font sizes */
+  --text-xs: 10px;      /* Micro labels */
+  --text-sm: 11px;      /* Small labels, metadata */
+  --text-base: 12px;    /* Body text, table data */
+  --text-md: 13px;      /* Emphasized body */
+  --text-lg: 14px;      /* Section headers */
+  --text-xl: 24px;      /* Large values */
+  --text-2xl: 28px;     /* Page title */
+  
+  /* Font weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  
+  /* Letter spacing */
+  --tracking-tight: -0.02em;  /* Headings */
+  --tracking-normal: 0;
+  --tracking-wide: 0.05em;    /* Uppercase labels */
+  
+  /* ---- Spacing system (8px base) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ============================================================================
+     Opportunities Page Design Tokens (OSS_Opportunities_Page_Specification)
+     ============================================================================ */
+
+  /* ---- Rank Colors (Section 2.1.2) ---- */
+  --color-rank-1: #fbbf24;            /* Gold */
+  --color-rank-2: #94a3b8;            /* Silver */
+  --color-rank-3: #cd7f32;            /* Bronze */
+  --color-rank-default: #475569;      /* 4th and beyond */
+
+  /* ---- Conviction Score Colors (Section 2.1.3) ---- */
+  --color-conviction-high: #22d3ee;   /* Score >= 85 */
+  --color-conviction-medium: #10b981; /* Score >= 75 */
+  --color-conviction-low: #f59e0b;    /* Score < 75 */
+
+  /* ---- Urgency Colors (Section 2.1.4) ---- */
+  /* Act Now (Red) */
+  --urgency-act-now-bg: rgba(239, 68, 68, 0.15);
+  --urgency-act-now-border: #dc2626;
+  --urgency-act-now-text: #fca5a5;
+  
+  /* Hours (Yellow) */
+  --urgency-hours-bg: rgba(245, 158, 11, 0.15);
+  --urgency-hours-border: #d97706;
+  --urgency-hours-text: #fcd34d;
+  
+  /* Patient (Green) */
+  --urgency-patient-bg: rgba(16, 185, 129, 0.15);
+  --urgency-patient-border: #059669;
+  --urgency-patient-text: #6ee7b7;
+
+  /* ---- Additional Opportunities colors ---- */
+  --color-purple: #8b5cf6;            /* Recurring/pattern */
+  --color-purple-muted: rgba(139, 92, 246, 0.15);
+  --color-purple-text: #c4b5fd;
+
+  /* ---- Shadows (Section 2.5) ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+  --shadow-glow-cyan: 0 0 20px rgba(34, 211, 238, 0.1);
+  --shadow-glow-cyan-strong: 0 0 30px rgba(34, 211, 238, 0.15);
+
+  /* ---- Transitions (Section 2.6) ---- */
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* ---- Border Radius (Section 2.4) ---- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-full: 9999px;  /* Pills/badges */
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: var(--font-primary);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================================
+   Custom Scrollbar
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ============================================================================
+   Grid Background Pattern (Section 3.3)
+   ============================================================================ */
+
+.pipeline-monitor {
+  position: relative;
+}
+
+.pipeline-monitor::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.pipeline-monitor > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================================
+   Animations
+   ============================================================================ */
+
+@keyframes score-fill {
+  from {
+    width: 0%;
+  }
+}
+
+.animate-score-fill {
+  animation: score-fill 0.8s ease-out forwards;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px currentColor;
+  }
+  50% {
+    box-shadow: 0 0 16px currentColor;
+  }
+}
+
+.animate-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ============================================================================
+   Verdict Badge Glow Effects
+   ============================================================================ */
+
+.verdict-approve {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+.verdict-watch {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+}
+
+.verdict-reject {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+/* ============================================================================
+   Pipeline Monitor Specific Styles
+   ============================================================================ */
+
+/* Stage flow bar */
+.stage-flow-bar {
+  height: 32px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+}
+
+.stage-flow-bar-fill {
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.4), rgba(6, 182, 212, 0.2));
+  border-right: 2px solid rgba(6, 182, 212, 0.6);
+  transition: width 0.3s ease;
+  min-width: 0.5%;
+}
+
+.stage-flow-bar-fill.anomaly {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.3), rgba(239, 68, 68, 0.1));
+  border-right-color: rgba(239, 68, 68, 0.6);
+}
+
+/* Stage connector line */
+.stage-connector {
+  width: 2px;
+  height: 16px;
+  background: linear-gradient(180deg, rgba(6, 182, 212, 0.4), rgba(6, 182, 212, 0.1));
+  margin-left: 13px;
+  margin-top: 8px;
+}
+
+/* Gate header */
+.gate-header {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(30, 41, 59, 0.3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.gate-header:hover {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.gate-header.expanded {
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 6px 6px 0 0;
+}
+
+/* Gate detail panel */
+.gate-detail {
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+
+/* Rule row */
+.rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.rule-row.critical {
+  background: var(--color-error-bg);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Multi-failure overlap panel */
+.overlap-panel {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 4px;
+}
+
+/* Status indicator dot */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.status-dot.healthy {
+  background-color: var(--color-success);
+  box-shadow: 0 0 8px var(--color-success);
+}
+
+.status-dot.anomaly {
+  background-color: var(--color-error);
+  box-shadow: 0 0 8px var(--color-error);
+}
+
+/* Filter button styles */
+.filter-btn {
+  padding: 6px 12px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-btn:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.filter-btn.selected {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: var(--border-active);
+  color: var(--accent-primary);
+}
+
+/* Run card styles */
+.run-card {
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.run-card:hover {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: var(--border-default);
+}
+
+.run-card.selected {
+  background: var(--bg-active);
+  border-color: var(--border-active);
+}
+
+/* ============================================================================
+   Opportunities Page Styles (OSS_Opportunities_Page_Specification)
+   ============================================================================ */
+
+/* Context Bar */
+.context-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Market Status Badge */
+.market-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--color-success-text);
+}
+
+.market-status-badge--closed {
+  background: rgba(100, 116, 139, 0.15);
+  border-color: #64748b;
+  color: #94a3b8;
+}
+
+.market-status-dot {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  border-radius: 50%;
+}
+
+/* Opportunity Card */
+.opportunity-card {
+  display: grid;
+  grid-template-columns: 140px 1fr 180px;
+  gap: 20px;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.opportunity-card:hover {
+  border-color: var(--accent-primary);
+}
+
+.opportunity-card:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Rank #1 Card Enhancement */
+.opportunity-card--top {
+  padding: 20px 24px;
+  border-left: 3px solid var(--accent-primary);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.opportunity-card--top:hover {
+  box-shadow: var(--shadow-glow-cyan-strong);
+}
+
+/* Rank Indicator */
+.rank-indicator {
+  font-size: 28px;
+  font-weight: 800;
+  font-family: var(--font-primary);
+  line-height: 1;
+}
+
+.rank-indicator--1 { color: var(--color-rank-1); }
+.rank-indicator--2 { color: var(--color-rank-2); }
+.rank-indicator--3 { color: var(--color-rank-3); }
+.rank-indicator--default { color: var(--color-rank-default); }
+
+/* Urgency Badge */
+.urgency-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid;
+}
+
+.urgency-badge--small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.urgency-badge--act-now {
+  background: var(--urgency-act-now-bg);
+  border-color: var(--urgency-act-now-border);
+  color: var(--urgency-act-now-text);
+}
+
+.urgency-badge--hours {
+  background: var(--urgency-hours-bg);
+  border-color: var(--urgency-hours-border);
+  color: var(--urgency-hours-text);
+}
+
+.urgency-badge--patient {
+  background: var(--urgency-patient-bg);
+  border-color: var(--urgency-patient-border);
+  color: var(--urgency-patient-text);
+}
+
+/* Scanner Badge */
+.scanner-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: rgba(100, 116, 139, 0.2);
+  border: 1px solid #475569;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.scanner-badge--convergence {
+  background: rgba(14, 165, 233, 0.2);
+  border-color: #0ea5e9;
+  color: #7dd3fc;
+}
+
+/* Convergence Badge */
+.convergence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: rgba(14, 165, 233, 0.25);
+  border: 1px solid #0ea5e9;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+
+/* Conviction Gauge */
+.conviction-gauge {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+
+.conviction-gauge svg {
+  transform: rotate(-90deg);
+}
+
+.conviction-gauge-track {
+  fill: none;
+  stroke: var(--border-subtle);
+  stroke-width: 4;
+}
+
+.conviction-gauge-fill {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--transition-base);
+}
+
+.conviction-gauge-fill--high {
+  stroke: var(--color-conviction-high);
+}
+
+.conviction-gauge-fill--medium {
+  stroke: var(--color-conviction-medium);
+}
+
+.conviction-gauge-fill--low {
+  stroke: var(--color-conviction-low);
+}
+
+.conviction-gauge-value {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* Mini Gauge (32px) for tables */
+.conviction-gauge--mini {
+  width: 32px;
+  height: 32px;
+}
+
+.conviction-gauge--mini .conviction-gauge-track,
+.conviction-gauge--mini .conviction-gauge-fill {
+  stroke-width: 3;
+}
+
+.conviction-gauge--mini .conviction-gauge-value {
+  font-size: 11px;
+}
+
+/* WATCH Intelligence Panel */
+.watch-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.watch-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.watch-panel-header:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.watch-panel--expanded .watch-panel-header {
+  border-bottom: 1px solid var(--border-default);
+}
+
+.watch-panel-chevron {
+  color: var(--text-muted);
+  font-size: 18px;
+  transition: transform var(--transition-base);
+}
+
+.watch-panel--expanded .watch-panel-chevron {
+  transform: rotate(180deg);
+}
+
+/* Insight Cards */
+.watch-insight-card {
+  padding: 14px 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+}
+
+.watch-insight-card--gate-pressure {
+  border-left-color: var(--color-warning);
+}
+
+.watch-insight-card--recurring {
+  border-left-color: var(--color-purple);
+}
+
+.watch-insight-card--conversion {
+  border-left-color: var(--color-success);
+}
+
+/* Earnings Notice */
+.earnings-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-md);
+}
+
+.earnings-notice-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.earnings-notice-text {
+  font-size: 13px;
+  color: var(--color-warning-text);
+  flex: 1;
+}
+
+/* Refresh notification */
+.refresh-notification {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Contract Detail Hero */
+.detail-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  padding: 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+}
+
+.detail-ticker {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+/* Gate Journey Timeline */
+.gate-journey {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+}
+
+.gate-journey::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  background: var(--border-default);
+  transform: translateY(-50%);
+  z-index: 0;
+}
+
+.gate-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.gate-node-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gate-node-circle--pass {
+  background: var(--color-success);
+  color: white;
+}
+
+.gate-node-circle--pass-narrow {
+  background: var(--color-warning);
+  color: white;
+}
+
+.gate-node-circle--fail {
+  background: var(--color-error);
+  color: white;
+}
+
+.gate-node-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 60px;
+}
+
+/* Score breakdown cards */
+.score-pillar-card {
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+
+.score-bar {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.score-bar-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 4px;
+  transition: width var(--transition-base);
+}
+
+/* Thesis Section */
+.thesis-section {
+  margin-bottom: 16px;
+}
+
+.thesis-section:last-child {
+  margin-bottom: 0;
+}
+
+.thesis-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.thesis-catalyst-pill {
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.thesis-invalidation {
+  padding: 12px 16px;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--color-error-text);
+}
