@@ -166,6 +166,20 @@ class ScannerOrchestrator:
         if not tickers:
             raise ValueError("No tickers to scan")
 
+        # Validate Polygon API key is available before starting
+        from app.config import get_settings
+        settings = get_settings()
+        if not settings.polygon_api_key:
+            logger.critical(
+                "POLYGON API KEY NOT CONFIGURED. "
+                "All scanners require market data from Polygon.io. "
+                "Set the key via: AWS_REGION=us-west-1 POLYGON_API_KEY=<key> ./scripts/deploy.sh secret"
+            )
+            raise ValueError(
+                "Polygon API key not configured. Cannot fetch market data. "
+                "Set the secret in AWS Secrets Manager."
+            )
+
         logger.info(f"Starting scan of {len(tickers)} tickers with {len(self._scanners)} scanners")
 
         # Start or get pipeline run
@@ -180,6 +194,9 @@ class ScannerOrchestrator:
         scanner_stats: dict[str, dict[str, int]] = {}
         filter_stats: Optional[dict[str, Any]] = None
         selection_stats: Optional[dict[str, Any]] = None
+        approve_count: int = 0
+        watch_count: int = 0
+        reject_count: int = 0
 
         # Create scan context with increased concurrency for performance
         # Using 20 concurrent requests as Polygon allows higher limits
@@ -310,7 +327,21 @@ class ScannerOrchestrator:
                         run_id, PipelineStage.UNDERLYING_FILTERS
                     )
 
-                    underlying_filter = UnderlyingFilter(policy_config.underlying_filter)
+                    # Initialize earnings cache for earnings window filter
+                    earnings_cache = None
+                    if policy_config.underlying_filter.exclude_earnings_within_days > 0:
+                        try:
+                            from app.services.finnhub import FinnhubClient
+                            from app.services.earnings_cache import EarningsCacheService
+                            finnhub = FinnhubClient()
+                            earnings_cache = EarningsCacheService(finnhub_client=finnhub)
+                        except Exception as e:
+                            logger.warning(f"Could not initialize earnings cache: {e}")
+
+                    underlying_filter = UnderlyingFilter(
+                        policy_config.underlying_filter,
+                        earnings_cache=earnings_cache,
+                    )
                     underlying_filter.set_polygon_client(polygon)
 
                     filtered_opportunities, filter_result = await underlying_filter.filter_opportunities(
@@ -356,7 +387,9 @@ class ScannerOrchestrator:
 
                         # Build evaluations from selected candidates
                         policy_hash = Policy.compute_hash(policy_config)
-                        evaluation_builder = EvaluationBuilder(policy_version, policy_hash)
+                        evaluation_builder = EvaluationBuilder(
+                            policy_version, policy_hash, policy_snapshot_id=policy_version
+                        )
                         evaluations = evaluation_builder.build_evaluations(
                             selection_result.selected_candidates,
                             filtered_opportunities,
@@ -455,6 +488,10 @@ class ScannerOrchestrator:
                 # STAGE 6: Hard Gates
                 # ================================================================
                 gate_evaluations: dict[str, GateEvaluation] = {}
+                logger.info(
+                    f"Stage 6 guard: evaluations={len(evaluations) if evaluations else 0}, "
+                    f"feature_sets={len(feature_sets) if feature_sets else 0}"
+                )
                 if evaluations and feature_sets:
                     try:
                         gate_evaluations = await run_hard_gates(
@@ -465,6 +502,7 @@ class ScannerOrchestrator:
                             orchestrator=self._pipeline,
                             config=policy_config.gates,
                             persist_results=True,
+                            pillar_results=pillar_results if pillar_results else None,
                         )
 
                         passed_count = sum(
@@ -572,10 +610,10 @@ class ScannerOrchestrator:
             stats.get("triggered", 0) for stats in scanner_stats.values()
         )
 
-        # Get verdict counts (may not be set if stages failed)
-        final_approve_count = approve_count if 'approve_count' in dir() else 0
-        final_watch_count = watch_count if 'watch_count' in dir() else 0
-        final_reject_count = reject_count if 'reject_count' in dir() else 0
+        # Get verdict counts (initialized before try blocks so they're always defined)
+        final_approve_count = approve_count
+        final_watch_count = watch_count
+        final_reject_count = reject_count
 
         result = ScanRunResult(
             run_id=run_id,
@@ -628,13 +666,22 @@ class ScannerOrchestrator:
         Args:
             opportunities: List of opportunities to persist
         """
+        success_count = 0
         for opp in opportunities:
             try:
                 await OpportunityTable.put(opp)
+                success_count += 1
             except Exception as e:
                 logger.error(f"Failed to persist opportunity {opp.opportunity_id}: {e}")
 
-        logger.info(f"Persisted {len(opportunities)} opportunities to DynamoDB")
+        fail_count = len(opportunities) - success_count
+        if fail_count > 0:
+            logger.warning(
+                f"Persisted {success_count}/{len(opportunities)} opportunities "
+                f"({fail_count} failures)"
+            )
+        else:
+            logger.info(f"Persisted {success_count} opportunities to DynamoDB")
 
     async def _persist_evaluations(
         self,
@@ -645,13 +692,22 @@ class ScannerOrchestrator:
         Args:
             evaluations: List of evaluations to persist
         """
+        success_count = 0
         for evaluation in evaluations:
             try:
                 await EvaluationTable.put(evaluation)
+                success_count += 1
             except Exception as e:
                 logger.error(f"Failed to persist evaluation {evaluation.evaluation_id}: {e}")
 
-        logger.info(f"Persisted {len(evaluations)} evaluations to DynamoDB")
+        fail_count = len(evaluations) - success_count
+        if fail_count > 0:
+            logger.warning(
+                f"Persisted {success_count}/{len(evaluations)} evaluations "
+                f"({fail_count} failures)"
+            )
+        else:
+            logger.info(f"Persisted {success_count} evaluations to DynamoDB")
 
     async def _record_discovery_stage_event(
         self,
@@ -1036,10 +1092,11 @@ class ScannerOrchestrator:
                 total_put_oi += oi
         
         # Calculate call/put volume ratio (call volume / put volume)
+        # Cap at 999.0 to avoid float("inf") which breaks JSON/DynamoDB serialization
         if total_put_volume > 0:
-            call_put_ratio = total_call_volume / total_put_volume
+            call_put_ratio = min(total_call_volume / total_put_volume, 999.0)
         else:
-            call_put_ratio = float("inf") if total_call_volume > 0 else 0.0
+            call_put_ratio = 999.0 if total_call_volume > 0 else 0.0
         
         return AggregatedOptionsVolume(
             ticker=ticker,

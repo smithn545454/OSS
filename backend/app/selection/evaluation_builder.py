@@ -26,15 +26,17 @@ logger = logging.getLogger(__name__)
 class EvaluationBuilder:
     """Builds Evaluation records from selected contract candidates."""
 
-    def __init__(self, policy_version: str, policy_hash: str) -> None:
+    def __init__(self, policy_version: str, policy_hash: str, policy_snapshot_id: Optional[str] = None) -> None:
         """Initialize the evaluation builder.
-        
+
         Args:
             policy_version: Current policy version for tagging evaluations
             policy_hash: SHA-256 hash of policy config per Section 7.3
+            policy_snapshot_id: Foreign key to archived policy snapshot per Section 7.3
         """
         self._policy_version = policy_version
         self._policy_hash = policy_hash
+        self._policy_snapshot_id = policy_snapshot_id
 
     def build_evaluation(
         self,
@@ -60,10 +62,13 @@ class EvaluationBuilder:
 
         # Calculate required move percentage
         # required_move_pct = |breakeven - underlying| / underlying * 100
-        required_move_pct = (
-            abs(breakeven_price - candidate.underlying_price) 
-            / candidate.underlying_price * 100
-        )
+        if candidate.underlying_price > 0:
+            required_move_pct = (
+                abs(breakeven_price - candidate.underlying_price) 
+                / candidate.underlying_price * 100
+            )
+        else:
+            required_move_pct = 999.0  # Unfeasible — no valid underlying price
 
         # Calculate expected move percentage
         # expected_move_pct = iv * sqrt(DTE/365) * 100
@@ -128,6 +133,7 @@ class EvaluationBuilder:
             rank_score=rank_score,
             policy_version=self._policy_version,
             policy_hash=self._policy_hash,
+            policy_snapshot_id=self._policy_snapshot_id,
         )
 
         return evaluation

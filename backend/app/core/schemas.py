@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ============================================================================
@@ -321,6 +321,7 @@ class GateResult(OSSBaseModel):
     units: str
     reason_code: str
     notes: Optional[str] = None
+    run_id: Optional[str] = None  # Pipeline run ID for GSI-based retrieval
 
 
 # ============================================================================
@@ -419,6 +420,7 @@ class PipelineRun(OSSBaseModel):
     total_approves: int = 0
     total_watches: int = 0
     total_rejects: int = 0
+    scanner_type: Optional[str] = None
     error_message: Optional[str] = None
 
 
@@ -526,6 +528,7 @@ class ContractSelectionConfig(OSSBaseModel):
 class GateConfig(OSSBaseModel):
     """Hard gate configuration."""
 
+    # Existing thresholds
     min_open_interest: int = 300
     min_volume: int = 75
     max_spread_pct: float = 8.0
@@ -536,13 +539,41 @@ class GateConfig(OSSBaseModel):
     breakout_volume_min: float = 1.5
     theta_burden_max: float = 4.0
 
+    # Directional confidence thresholds
+    trend_alignment_min: float = 0.6
+
+    # Volatility / structure thresholds
+    iv_rv_ratio_max: float = 1.5
+    feasibility_ratio_max: float = 1.5
+
+    # Risk parameter thresholds
+    delta_min: float = 0.20
+    delta_max: float = 0.70
+    max_premium: float = 20.0
+
+    # Composite threshold gate thresholds
+    combined_score_min: float = 75.0
+    pillar_minimum: float = 60.0
+    pillar_spread_max: float = 30.0
+
 
 class PillarWeights(OSSBaseModel):
-    """Pillar weight configuration."""
+    """Pillar weight configuration. Weights must sum to 1.0."""
 
     directional: float = 0.35
     volatility: float = 0.35
     structure: float = 0.30
+
+    @model_validator(mode="after")
+    def _weights_must_sum_to_one(self) -> "PillarWeights":
+        total = self.directional + self.volatility + self.structure
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"Pillar weights must sum to 1.0, got {total:.6f} "
+                f"(directional={self.directional}, volatility={self.volatility}, "
+                f"structure={self.structure})"
+            )
+        return self
 
 
 class DirectionalPillarConfig(OSSBaseModel):
@@ -564,6 +595,19 @@ class DirectionalPillarConfig(OSSBaseModel):
     momentum_blend_bucket_c: float = 0.30  # 46-75 DTE: 30% 5d, 70% 20d
     momentum_blend_bucket_d: float = 0.20  # 76-120 DTE: 20% 5d, 80% 20d
 
+    @model_validator(mode="after")
+    def _subscore_weights_must_sum_to_one(self) -> "DirectionalPillarConfig":
+        total = (
+            self.trend_alignment_weight + self.momentum_weight
+            + self.signal_confirmation_weight + self.relative_strength_weight
+            + self.catalyst_weight
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"Directional subscore weights must sum to 1.0, got {total:.6f}"
+            )
+        return self
+
 
 class VolatilityPillarConfig(OSSBaseModel):
     """Volatility pillar subscore weights (Section 14.3).
@@ -576,6 +620,18 @@ class VolatilityPillarConfig(OSSBaseModel):
     iv_percentile_weight: float = 0.25
     iv_regime_weight: float = 0.20
     theta_adjusted_edge_weight: float = 0.20
+
+    @model_validator(mode="after")
+    def _subscore_weights_must_sum_to_one(self) -> "VolatilityPillarConfig":
+        total = (
+            self.iv_vs_rv_weight + self.iv_percentile_weight
+            + self.iv_regime_weight + self.theta_adjusted_edge_weight
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"Volatility subscore weights must sum to 1.0, got {total:.6f}"
+            )
+        return self
 
 
 class StructurePillarConfig(OSSBaseModel):
@@ -590,6 +646,19 @@ class StructurePillarConfig(OSSBaseModel):
     volume_weight: float = 0.20
     theta_burden_weight: float = 0.15
     liquidity_trend_weight: float = 0.10
+
+    @model_validator(mode="after")
+    def _subscore_weights_must_sum_to_one(self) -> "StructurePillarConfig":
+        total = (
+            self.spread_weight + self.open_interest_weight
+            + self.volume_weight + self.theta_burden_weight
+            + self.liquidity_trend_weight
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"Structure subscore weights must sum to 1.0, got {total:.6f}"
+            )
+        return self
 
 
 class PillarConfig(OSSBaseModel):
