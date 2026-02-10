@@ -30,6 +30,14 @@ npm run lint         # ESLint
 npm run build        # Production build (tsc + vite)
 ```
 
+### Git / GitHub
+```bash
+git add -A && git commit -m "message"  # Stage and commit all changes
+git push                                # Push to GitHub
+gh repo view --web                      # Open repo in browser
+gh pr create --title "title" --body ""  # Create a pull request
+```
+
 ### Infrastructure (from `infrastructure/cdk/`)
 ```bash
 source .venv/bin/activate
