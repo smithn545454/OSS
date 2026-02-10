@@ -6,6 +6,7 @@ import PolicyConfig from './pages/PolicyConfig'
 import PipelineMonitor from './pages/PipelineMonitor'
 import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
+import PaperTrading from './pages/PaperTrading'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <Route path="opportunities" element={<Opportunities />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
+        <Route path="paper-trading" element={<PaperTrading />} />
         <Route path="config" element={<PolicyConfig />} />
         <Route path="evaluation/:ticker/:evaluationId" element={<EvaluationDetail />} />
       </Route>
