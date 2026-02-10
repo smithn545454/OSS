@@ -24,7 +24,7 @@ from app.core.schemas import (
     TrackingConfig,
     Verdict,
 )
-from app.db.tables import PaperPositionTable
+from app.db.tables import PaperPositionTable, PaperSnapshotTable
 from app.paper_trading.exit_checker import (
     calculate_dte_from_expiration,
     check_exit_conditions,
@@ -266,7 +266,7 @@ async def update_open_positions(
     results: list[UpdateResult] = []
     
     # Get all open positions
-    open_positions = await PaperPositionTable.list_open(limit=500)
+    open_positions = await PaperPositionTable.list_open()
     if not open_positions:
         logger.info("No open positions to update")
         return results
@@ -289,9 +289,10 @@ async def update_open_positions(
             chain = await polygon_client.get_options_chain(underlying)
             
             # Build lookup by option ticker
+            # Polygon returns ticker at top level, not nested in details
             contract_data: dict[str, dict] = {}
             for contract in chain:
-                ticker = contract.get("details", {}).get("ticker")
+                ticker = contract.get("ticker") or contract.get("details", {}).get("ticker")
                 if ticker:
                     contract_data[ticker] = contract
             
@@ -396,8 +397,9 @@ async def _update_position_from_chain(
     day = contract.get("day", {})
     underlying = contract.get("underlying_asset", {})
     
-    bid = day.get("close") or contract.get("last_quote", {}).get("bid", 0) or 0
-    ask = day.get("close") or contract.get("last_quote", {}).get("ask", 0) or 0
+    last_quote = contract.get("last_quote", {})
+    bid = last_quote.get("bid", 0) or 0
+    ask = last_quote.get("ask", 0) or 0
     
     # Use mid price if both bid/ask available, otherwise use close or last_quote
     if bid > 0 and ask > 0:
@@ -411,7 +413,29 @@ async def _update_position_from_chain(
     # Extract expiration date
     details = contract.get("details", {})
     expiration_date = details.get("expiration_date", "2099-12-31")
-    
+
+    # Write daily snapshot for historical tracking
+    try:
+        greeks = contract.get("greeks", {})
+        underlying_asset = contract.get("underlying_asset", {})
+        snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        await PaperSnapshotTable.put_snapshot(
+            position.position_id,
+            snapshot_date,
+            {
+                "price": current_price,
+                "delta": greeks.get("delta"),
+                "gamma": greeks.get("gamma"),
+                "theta": greeks.get("theta"),
+                "vega": greeks.get("vega"),
+                "iv": contract.get("implied_volatility"),
+                "underlying_price": underlying_asset.get("price"),
+                "volume": day.get("volume"),
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Failed to write snapshot for {position.position_id}: {e}")
+
     return await update_position(position, current_price, expiration_date, config)
 
 
@@ -503,7 +527,7 @@ async def close_position_manually(
         The closed position or None if not found
     """
     # Find the position in open positions
-    open_positions = await PaperPositionTable.list_open(limit=500)
+    open_positions = await PaperPositionTable.list_open()
     position = None
     for p in open_positions:
         if p.position_id == position_id:

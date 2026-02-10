@@ -290,6 +290,24 @@ async def _run_scheduled_scan() -> dict[str, Any]:
         return await _run_worker_scan()
 
 
+async def _run_paper_update() -> dict[str, Any]:
+    """Run daily paper trading position update."""
+    from app.paper_trading.position_manager import update_open_positions
+    from app.services.polygon import PolygonClient
+
+    async with PolygonClient() as polygon:
+        results = await update_open_positions(polygon)
+
+    exits = sum(1 for r in results if r.exit_triggered)
+    errors = sum(1 for r in results if r.error)
+    return {
+        "status": "success",
+        "positions_updated": len(results),
+        "exits_triggered": exits,
+        "errors": errors,
+    }
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
     
@@ -320,7 +338,12 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             chunk_idx = event.get("chunk_index", 0)
             logger.info(f"Received worker_scan event for chunk {chunk_idx} ({len(tickers) if tickers else 0} tickers)")
             return asyncio.run(_run_worker_scan(tickers))
-        
+
+        elif action == "paper_update":
+            # Paper trading daily update: fetch prices, update positions
+            logger.info("Received paper_update event from EventBridge")
+            return asyncio.run(_run_paper_update())
+
         else:
             logger.warning(f"Unknown scheduler action: {action}")
             return {"status": "error", "error": f"Unknown action: {action}"}

@@ -51,7 +51,7 @@ class UpdateResponse(BaseModel):
 @router.get("/positions")
 async def list_positions(
     status: Optional[str] = None,
-    limit: int = 100,
+    limit: Optional[int] = None,
 ) -> dict[str, Any]:
     """List paper trading positions.
     
@@ -112,7 +112,7 @@ async def get_position(position_id: str) -> dict[str, Any]:
         Position details
     """
     # Search in both open and closed
-    all_positions = await PaperPositionTable.list_all(limit=500)
+    all_positions = await PaperPositionTable.list_all()
     
     for pos in all_positions:
         if pos.position_id == position_id:
@@ -211,7 +211,7 @@ async def get_tier_comparison() -> dict[str, Any]:
     Returns:
         Performance breakdown by TIER_1, TIER_2, TIER_3
     """
-    positions = await PaperPositionTable.list_all(limit=1000)
+    positions = await PaperPositionTable.list_all()
     comparison = compare_tiers(positions)
     
     return {
@@ -227,7 +227,7 @@ async def get_exit_analysis() -> dict[str, Any]:
     Returns:
         Analysis by exit type (profit target, stop loss, etc.)
     """
-    positions = await PaperPositionTable.list_all(limit=1000)
+    positions = await PaperPositionTable.list_all()
     analysis = analyze_exit_effectiveness(positions)
     
     return {
@@ -325,6 +325,139 @@ async def trigger_update() -> dict[str, Any]:
 
 
 # ============================================================================
+# Snapshots & Analysis Endpoints
+# ============================================================================
+
+
+@router.get("/positions/{position_id}/snapshots")
+async def get_position_snapshots(position_id: str) -> dict[str, Any]:
+    """Get daily snapshots for a position."""
+    from app.db.tables import PaperSnapshotTable
+
+    snapshots = await PaperSnapshotTable.list_by_position(position_id)
+    return {
+        "position_id": position_id,
+        "snapshots": snapshots,
+        "count": len(snapshots),
+    }
+
+
+@router.post("/positions/{position_id}/analyze")
+async def analyze_position(position_id: str) -> dict[str, Any]:
+    """Generate AI analysis for a position."""
+    from datetime import datetime, timezone, timedelta
+
+    from app.db.tables import EvaluationTable
+    from app.llm.provider import get_provider
+    from app.paper_trading.position_manager import extract_underlying_from_option_ticker
+
+    # Find the position
+    all_positions = await PaperPositionTable.list_all()
+    position = None
+    for p in all_positions:
+        if p.position_id == position_id:
+            position = p
+            break
+
+    if not position:
+        raise HTTPException(status_code=404, detail=f"Position not found: {position_id}")
+
+    # Check cache (4h TTL)
+    if position.ai_analysis and position.ai_analysis_at:
+        try:
+            cached_at = datetime.fromisoformat(position.ai_analysis_at)
+            if datetime.now(timezone.utc) - cached_at < timedelta(hours=4):
+                return {"analysis": position.ai_analysis, "cached": True}
+        except (ValueError, TypeError):
+            pass
+
+    # Fetch evaluation for context
+    underlying = extract_underlying_from_option_ticker(position.option_ticker)
+    eval_data = await EvaluationTable.get_by_id(underlying, position.evaluation_id)
+
+    # Build prompt
+    score_info = ""
+    if eval_data and isinstance(eval_data, dict):
+        decision = eval_data.get("decision", {})
+        score_info = (
+            f" Score: {decision.get('final_score', 'N/A')}."
+            f" Directional: {decision.get('directional_score', 'N/A')},"
+            f" Volatility: {decision.get('volatility_score', 'N/A')},"
+            f" Structure: {decision.get('structure_score', 'N/A')}."
+        )
+
+    prompt = (
+        f"Analyze this options position in 2-3 sentences: "
+        f"{position.option_ticker}, entry ${position.entry_price:.2f}, "
+        f"current P&L {position.current_pnl_pct:.1f}%, "
+        f"{position.days_held} days held, status {position.status}."
+        f"{score_info}"
+    )
+
+    provider = get_provider()
+    analysis = await provider.generate(prompt)
+
+    # Cache the result
+    now = datetime.now(timezone.utc).isoformat()
+    await PaperPositionTable.update(
+        position, {"ai_analysis": analysis, "ai_analysis_at": now}
+    )
+
+    return {"analysis": analysis, "cached": False}
+
+
+@router.get("/equity-curve")
+async def get_equity_curve(period: str = "30d") -> dict[str, Any]:
+    """Get equity curve data for paper trading positions."""
+    from datetime import datetime, timezone, timedelta
+
+    from app.db.tables import PaperSnapshotTable
+
+    # Parse period
+    period_days = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+    days = period_days.get(period, 30)
+
+    positions = await PaperPositionTable.list_all()
+    if not positions:
+        return {"curve": [], "period": period}
+
+    # Calculate date range
+    now = datetime.now(timezone.utc)
+    if period == "all":
+        start_date = min(p.entry_date for p in positions)
+    else:
+        start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    end_date = now.strftime("%Y-%m-%d")
+
+    # Collect snapshots per position and build daily curve
+    daily_pnl: dict[str, float] = {}
+    for pos in positions:
+        snapshots = await PaperSnapshotTable.list_by_position_range(
+            pos.position_id, start_date, end_date
+        )
+        prev_price = pos.entry_price
+        for snap in snapshots:
+            date = snap["snapshot_date"]
+            price = snap.get("price", prev_price)
+            change = (price - prev_price) * 100  # 1 contract = 100 shares
+            daily_pnl[date] = daily_pnl.get(date, 0) + change
+            prev_price = price
+
+    # Build equity curve
+    curve = []
+    equity = 10000.0
+    for date in sorted(daily_pnl.keys()):
+        equity += daily_pnl[date]
+        curve.append({
+            "date": date,
+            "daily_pnl": daily_pnl[date],
+            "equity": equity,
+        })
+
+    return {"curve": curve, "period": period}
+
+
+# ============================================================================
 # Summary Endpoint
 # ============================================================================
 
@@ -357,8 +490,8 @@ async def get_summary() -> dict[str, Any]:
     Returns:
         Summary with position counts, key metrics, and recent activity
     """
-    open_positions = await PaperPositionTable.list_open(limit=100)
-    closed_positions = await PaperPositionTable.list_closed(limit=100)
+    open_positions = await PaperPositionTable.list_open()
+    closed_positions = await PaperPositionTable.list_closed()
     
     metrics = await calculate_performance_metrics()
     

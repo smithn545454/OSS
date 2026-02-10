@@ -40,6 +40,7 @@ IV_HISTORY_TABLE = "iv-history"
 OI_HISTORY_TABLE = "oi-history"
 TRADE_THESIS_TABLE = "trade-thesis"
 LLM_USAGE_TABLE = "llm-usage"
+PAPER_SNAPSHOTS_TABLE = "paper-snapshots"
 
 
 class PolicyTable:
@@ -253,6 +254,30 @@ class EvaluationTable:
                 item.pop(key, None)
         return items
 
+    @staticmethod
+    async def get_by_id(
+        ticker: str, evaluation_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Get an evaluation by ticker and evaluation_id.
+
+        Queries by PK and scans SK suffix for evaluation_id,
+        avoiding URL-encoding issues with ISO timestamps.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            EvaluationTable.TABLE,
+            f"EVAL#{ticker}",
+            limit=50,
+            scan_forward=False,
+        )
+        for item in items:
+            sk = item.get("SK", "")
+            if sk.endswith(evaluation_id):
+                for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                    item.pop(key, None)
+                return item
+        return None
+
 
 class PipelineRunTable:
     """Operations for the pipeline-runs table."""
@@ -368,7 +393,7 @@ class PaperPositionTable:
         await db.put_item(PaperPositionTable.TABLE, item)
 
     @staticmethod
-    async def list_open(limit: int = 100) -> list[PaperPosition]:
+    async def list_open(limit: Optional[int] = None) -> list[PaperPosition]:
         """List open paper positions."""
         db = get_dynamodb()
         items = await db.query(
@@ -387,7 +412,7 @@ class PaperPositionTable:
         return positions
 
     @staticmethod
-    async def list_closed(limit: int = 100) -> list[PaperPosition]:
+    async def list_closed(limit: Optional[int] = None) -> list[PaperPosition]:
         """List closed paper positions."""
         db = get_dynamodb()
         items = await db.query(
@@ -534,7 +559,7 @@ class PaperPositionTable:
         return closed_position
 
     @staticmethod
-    async def list_all(limit: int = 200) -> list[PaperPosition]:
+    async def list_all(limit: Optional[int] = None) -> list[PaperPosition]:
         """List all positions (open and closed).
         
         Args:
@@ -1153,3 +1178,68 @@ class LLMUsageTable:
             item.pop("SK", None)
             records.append(LLMUsage(**item))
         return records
+
+
+class PaperSnapshotTable:
+    """Operations for the paper-snapshots table.
+
+    Stores daily snapshots of paper trading positions for historical tracking.
+    Schema: PK=POS#{position_id}, SK=SNAP#{YYYY-MM-DD}
+    """
+
+    TABLE = PAPER_SNAPSHOTS_TABLE
+
+    @staticmethod
+    async def put_snapshot(
+        position_id: str,
+        snapshot_date: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Write one daily snapshot for a position."""
+        db = get_dynamodb()
+        item = {
+            "PK": f"POS#{position_id}",
+            "SK": f"SNAP#{snapshot_date}",
+            "position_id": position_id,
+            "snapshot_date": snapshot_date,
+            **data,
+        }
+        await db.put_item(PaperSnapshotTable.TABLE, item)
+
+    @staticmethod
+    async def list_by_position(
+        position_id: str,
+        limit: int = 365,
+    ) -> list[dict[str, Any]]:
+        """Query all snapshots for a position, most recent first."""
+        db = get_dynamodb()
+        items = await db.query(
+            PaperSnapshotTable.TABLE,
+            f"POS#{position_id}",
+            sk_prefix="SNAP#",
+            limit=limit,
+            scan_forward=False,
+        )
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
+
+    @staticmethod
+    async def list_by_position_range(
+        position_id: str,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict[str, Any]]:
+        """Query snapshots for a position within a date range (inclusive)."""
+        db = get_dynamodb()
+        items = await db.query(
+            PaperSnapshotTable.TABLE,
+            f"POS#{position_id}",
+            sk_condition={"between": [f"SNAP#{start_date}", f"SNAP#{end_date}"]},
+            scan_forward=True,
+        )
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items

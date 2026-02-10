@@ -395,6 +395,7 @@ def moto_dynamodb():
             "llm-usage",
             "calibration-reports",
             "scan-status",
+            "paper-snapshots",
         ]
         for name in simple_tables:
             db.create_table(TableName=f"{table_prefix}-{name}", **pk_sk_schema)

@@ -379,6 +379,8 @@ class PaperPosition(OSSBaseModel):
     last_updated: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    ai_analysis: Optional[str] = None
+    ai_analysis_at: Optional[str] = None
 
 
 # ============================================================================

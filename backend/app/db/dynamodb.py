@@ -119,7 +119,7 @@ class DynamoDBClient:
         pk: str,
         sk_prefix: Optional[str] = None,
         sk_condition: Optional[dict[str, Any]] = None,
-        limit: int = 100,
+        limit: Optional[int] = 100,
         scan_forward: bool = False,
         index_name: Optional[str] = None,
     ) -> list[dict[str, Any]]:
@@ -133,7 +133,7 @@ class DynamoDBClient:
                 - {"gte": value} for SK >= value
                 - {"lte": value} for SK <= value
                 - {"between": [start, end]} for SK BETWEEN start AND end
-            limit: Maximum items to return
+            limit: Maximum items to return (None for all items)
             scan_forward: If True, sort ascending; if False, sort descending
             index_name: Optional GSI name
 
@@ -164,9 +164,11 @@ class DynamoDBClient:
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": key_condition,
             "ExpressionAttributeValues": expression_values,
-            "Limit": limit,
             "ScanIndexForward": scan_forward,
         }
+
+        if limit is not None:
+            query_kwargs["Limit"] = limit
 
         if index_name:
             query_kwargs["IndexName"] = index_name
@@ -179,6 +181,18 @@ class DynamoDBClient:
                 query_kwargs["KeyConditionExpression"] = query_kwargs[
                     "KeyConditionExpression"
                 ].replace("PK", "GSI2PK").replace("SK", "GSI2SK")
+
+        # If no limit, paginate through all results
+        if limit is None:
+            all_items: list[dict[str, Any]] = []
+            while True:
+                response = table.query(**query_kwargs)
+                items = response.get("Items", [])
+                all_items.extend(items)
+                if "LastEvaluatedKey" not in response:
+                    break
+                query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            return [self.convert_from_dynamodb(item) for item in all_items]
 
         response = table.query(**query_kwargs)
         items = response.get("Items", [])
