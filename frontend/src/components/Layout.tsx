@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Settings, BarChart3, Scan, Target, Crosshair, LineChart } from 'lucide-react'
+import { Activity, Settings, BarChart3, Scan, Target, Crosshair } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
@@ -7,7 +7,6 @@ const navItems = [
   { path: '/opportunities', label: 'Opportunities', icon: Crosshair },
   { path: '/pipeline', label: 'Pipeline', icon: Activity },
   { path: '/calibration', label: 'Calibration', icon: Target },
-  { path: '/paper-trading', label: 'Paper Trading', icon: LineChart },
   { path: '/config', label: 'Policy', icon: Settings },
 ]
 
