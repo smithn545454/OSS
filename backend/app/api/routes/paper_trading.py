@@ -329,6 +329,27 @@ async def trigger_update() -> dict[str, Any]:
 # ============================================================================
 
 
+@router.get("/ai-insights")
+async def get_ai_insights() -> dict[str, Any]:
+    """Generate AI-powered insights for system optimization.
+
+    Analyzes paper trading performance data and generates
+    actionable recommendations using an LLM.
+
+    Returns:
+        AI-generated insights with data summary
+    """
+    from app.paper_trading.insights import generate_ai_insights
+
+    try:
+        return await generate_ai_insights()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Insights generation failed: {e}",
+        )
+
+
 @router.get("/summary")
 async def get_summary() -> dict[str, Any]:
     """Get a summary of paper trading status.

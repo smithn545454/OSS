@@ -11,7 +11,6 @@ import type {
   PipelineMonitorScannerType,
   ApproveEvaluation,
 } from '@/lib/types'
-import { enhanceWithConvictionScores, sortByConviction, type ConvictionScoreWeights, DEFAULT_WEIGHTS, DEFAULT_EV_BENCHMARK } from '@/lib/convictionScore'
 
 // Query Keys
 export const queryKeys = {
@@ -24,8 +23,8 @@ export const queryKeys = {
   pipelineRun: (runId: string) => ['pipeline', 'runs', runId] as const,
   runStages: (runId: string) => ['pipeline', 'runs', runId, 'stages'] as const,
   pipelineStats: (days: number) => ['pipeline', 'stats', days] as const,
-  evaluationDetail: (ticker: string, timestamp: string, id: string) => 
-    ['evaluations', ticker, timestamp, id, 'detail'] as const,
+  evaluationDetail: (ticker: string, id: string) =>
+    ['evaluations', ticker, id, 'detail'] as const,
   evaluations: (filters: EvaluationFilters) => ['evaluations', 'list', filters] as const,
   evaluationsByVerdict: (verdict: string, limit: number) => 
     ['evaluations', 'verdict', verdict, limit] as const,
@@ -48,6 +47,7 @@ export const queryKeys = {
   approveEvaluations: (options: {
     excludeEarnings?: boolean
     scanner?: string
+    verdict?: string
     limit?: number
   }) => ['evaluations', 'approve', options] as const,
   watchInsights: (sinceDays: number) => ['evaluations', 'watch', 'insights', sinceDays] as const,
@@ -175,11 +175,11 @@ export function useCompletePipelineRun() {
 }
 
 // Evaluations
-export function useEvaluationDetail(ticker: string, timestamp: string, evaluationId: string) {
+export function useEvaluationDetail(ticker: string, evaluationId: string) {
   return useQuery({
-    queryKey: queryKeys.evaluationDetail(ticker, timestamp, evaluationId),
-    queryFn: () => api.getEvaluationDetail(ticker, timestamp, evaluationId),
-    enabled: !!ticker && !!timestamp && !!evaluationId,
+    queryKey: queryKeys.evaluationDetail(ticker, evaluationId),
+    queryFn: () => api.getEvaluationDetail(ticker, evaluationId),
+    enabled: !!ticker && !!evaluationId,
   })
 }
 
@@ -365,18 +365,15 @@ export function useApproveEvaluations(
     excludeEarnings?: boolean
     earningsDays?: number
     scanner?: string
+    verdict?: string
     limit?: number
-    weights?: ConvictionScoreWeights
-    evBenchmark?: number
   } = {}
 ) {
-  const weights = options.weights ?? DEFAULT_WEIGHTS
-  const evBenchmark = options.evBenchmark ?? DEFAULT_EV_BENCHMARK
-
   return useQuery({
     queryKey: queryKeys.approveEvaluations({
       excludeEarnings: options.excludeEarnings,
       scanner: options.scanner,
+      verdict: options.verdict,
       limit: options.limit,
     }),
     queryFn: async () => {
@@ -384,17 +381,15 @@ export function useApproveEvaluations(
         excludeEarnings: options.excludeEarnings,
         earningsDays: options.earningsDays,
         scanner: options.scanner,
+        verdict: options.verdict,
         limit: options.limit,
       })
-      
-      // Enhance with conviction scores and sort
-      const enhanced = enhanceWithConvictionScores(
-        response.evaluations as ApproveEvaluation[],
-        weights,
-        evBenchmark
+
+      // Sort by backend final_score descending
+      const sorted = [...(response.evaluations as ApproveEvaluation[])].sort(
+        (a, b) => (b.decision?.final_score ?? 0) - (a.decision?.final_score ?? 0)
       )
-      const sorted = sortByConviction(enhanced)
-      
+
       return {
         ...response,
         evaluations: sorted,
@@ -429,6 +424,21 @@ export function useContractQuotes(contractIds: string[], enabled: boolean = true
 }
 
 /**
+ * Trigger an on-demand UV scan.
+ * Invokes the Publisher and Aggregator Lambdas outside of the normal schedule.
+ */
+export function useTriggerUVScan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: api.triggerUVScan,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pipeline', 'monitor'] })
+    },
+  })
+}
+
+/**
  * Generate thesis for an evaluation.
  */
 export function useGenerateThesis() {
@@ -439,6 +449,86 @@ export function useGenerateThesis() {
     onSuccess: () => {
       // Invalidate evaluations to refresh thesis data
       queryClient.invalidateQueries({ queryKey: ['evaluations'] })
+    },
+  })
+}
+
+// ============================================================================
+// Paper Trading Workstation Hooks
+// ============================================================================
+
+export function usePaperTradingSummary() {
+  return useQuery({
+    queryKey: ['paper-trading', 'summary'] as const,
+    queryFn: api.getPaperTradingSummary,
+    refetchInterval: 30000,
+  })
+}
+
+export function usePaperTradingPositions(status?: string) {
+  return useQuery({
+    queryKey: ['paper-trading', 'positions', status] as const,
+    queryFn: () => api.getPaperTradingPositions(status),
+    refetchInterval: status === 'open' ? 30000 : undefined,
+  })
+}
+
+export function usePaperTradingMetrics() {
+  return useQuery({
+    queryKey: ['paper-trading', 'metrics'] as const,
+    queryFn: api.getPaperTradingMetrics,
+    staleTime: 60000,
+  })
+}
+
+export function usePaperTradingTiers() {
+  return useQuery({
+    queryKey: ['paper-trading', 'tiers'] as const,
+    queryFn: api.getPaperTradingTiers,
+    staleTime: 60000,
+  })
+}
+
+export function usePaperTradingExits() {
+  return useQuery({
+    queryKey: ['paper-trading', 'exits'] as const,
+    queryFn: api.getPaperTradingExits,
+    staleTime: 60000,
+  })
+}
+
+export function useAIInsights() {
+  return useQuery({
+    queryKey: ['paper-trading', 'ai-insights'] as const,
+    queryFn: api.getAIInsights,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+export function useUpdatePositions() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: api.updatePaperTradingPositions,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading'] })
+    },
+  })
+}
+
+export function useClosePosition() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      positionId,
+      exitPrice,
+    }: {
+      positionId: string
+      exitPrice?: number
+    }) => api.closePaperTradingPosition(positionId, exitPrice),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading'] })
     },
   })
 }
