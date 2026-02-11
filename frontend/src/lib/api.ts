@@ -35,6 +35,9 @@ import type {
   WatchInsightsResponse,
   ContractQuotesResponse,
   // Paper Trading Workstation types
+  EquityCurveResponse,
+  PositionSnapshotsResponse,
+  PositionAnalysisResponse,
   PaperTradingSummary,
   PaperTradingPositionsResponse,
   PaperTradingMetricsResponse,
@@ -458,6 +461,29 @@ export async function closePaperTradingPosition(
     method: 'POST',
     body: JSON.stringify({ exit_price: exitPrice ?? null }),
   })
+}
+
+export async function getEquityCurve(period: string = '30d'): Promise<EquityCurveResponse> {
+  return fetchApi<EquityCurveResponse>(
+    `/api/paper-trading/equity-curve?period=${encodeURIComponent(period)}`
+  )
+}
+
+export async function getPositionSnapshots(
+  positionId: string
+): Promise<PositionSnapshotsResponse> {
+  return fetchApi<PositionSnapshotsResponse>(
+    `/api/paper-trading/positions/${encodeURIComponent(positionId)}/snapshots`
+  )
+}
+
+export async function analyzePosition(
+  positionId: string
+): Promise<PositionAnalysisResponse> {
+  return fetchApi<PositionAnalysisResponse>(
+    `/api/paper-trading/positions/${encodeURIComponent(positionId)}/analyze`,
+    { method: 'POST' }
+  )
 }
 
 // Export the ApiError for error handling

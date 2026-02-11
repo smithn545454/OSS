@@ -532,3 +532,31 @@ export function useClosePosition() {
     },
   })
 }
+
+export function useEquityCurve(period: string = '30d') {
+  return useQuery({
+    queryKey: ['paper-trading', 'equity-curve', period] as const,
+    queryFn: () => api.getEquityCurve(period),
+    staleTime: 60000,
+  })
+}
+
+export function usePositionSnapshots(positionId: string) {
+  return useQuery({
+    queryKey: ['paper-trading', 'snapshots', positionId] as const,
+    queryFn: () => api.getPositionSnapshots(positionId),
+    enabled: !!positionId,
+    staleTime: 30000,
+  })
+}
+
+export function useAnalyzePosition() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (positionId: string) => api.analyzePosition(positionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading'] })
+    },
+  })
+}

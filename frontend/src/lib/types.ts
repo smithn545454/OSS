@@ -176,6 +176,50 @@ export interface PaperPosition {
   last_updated: string
 }
 
+// Enriched position (paper trading + evaluation join)
+export interface EnrichedPosition extends PaperPosition {
+  conviction_score: number | null
+  pillar_directional: number | null
+  pillar_volatility: number | null
+  pillar_structure: number | null
+  scanner_source: ScannerType | null
+  convergence_count: number
+  underlying_ticker: string
+  strike: number | null
+  option_type_parsed: 'CALL' | 'PUT' | null
+  expiration_date: string | null
+  entry_delta: number | null
+  entry_iv: number | null
+  entry_theta: number | null
+  dte_at_entry: number | null
+  dte_bucket: string | null
+  gate_margin: number | null
+  theta_adj_ev: number | null
+}
+
+// Equity curve / snapshots / analysis response types
+export interface EquityCurveResponse {
+  curve: Array<{ date: string; daily_pnl: number; equity: number }>
+  period: string
+}
+
+export interface PositionSnapshotsResponse {
+  position_id: string
+  snapshots: Array<{
+    snapshot_date: string
+    delta?: number
+    theta?: number
+    iv?: number
+    price?: number
+  }>
+  count: number
+}
+
+export interface PositionAnalysisResponse {
+  analysis: string
+  cached: boolean
+}
+
 // Pipeline Run & Stage Events
 export interface StageEvent {
   run_id: string
