@@ -827,15 +827,13 @@ function HeroSection({ evaluation, decision }: HeroSectionProps) {
 // ============================================================================
 
 export default function EvaluationDetail() {
-  const { ticker, timestamp, evaluationId } = useParams<{
+  const { ticker, evaluationId } = useParams<{
     ticker: string
-    timestamp: string
     evaluationId: string
   }>()
 
   const { data, isLoading, error } = useEvaluationDetail(
     ticker || '',
-    timestamp || '',
     evaluationId || ''
   )
 

@@ -71,9 +71,8 @@ describe('api.ts URL construction', () => {
 
   it('getEvaluationDetail encodes all path params', async () => {
     const { getEvaluationDetail } = await import('../lib/api')
-    await getEvaluationDetail('AAPL', '2026-01-17T16:00:00Z', 'eval-001')
-    expect(lastFetchUrl).toContain('/api/evaluations/AAPL/')
-    expect(lastFetchUrl).toContain('/eval-001/detail')
+    await getEvaluationDetail('AAPL', 'eval-001')
+    expect(lastFetchUrl).toContain('/api/evaluations/detail/AAPL/eval-001')
   })
 
   it('listEvaluations builds filter params correctly', async () => {
@@ -268,8 +267,8 @@ describe('queryKeys', () => {
 
   it('evaluationDetail key includes all parts', async () => {
     const { queryKeys } = await import('../hooks/useApi')
-    expect(queryKeys.evaluationDetail('AAPL', '2026-01-17', 'eval-001')).toEqual([
-      'evaluations', 'AAPL', '2026-01-17', 'eval-001', 'detail'
+    expect(queryKeys.evaluationDetail('AAPL', 'eval-001')).toEqual([
+      'evaluations', 'AAPL', 'eval-001', 'detail'
     ])
   })
 

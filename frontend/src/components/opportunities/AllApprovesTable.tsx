@@ -201,7 +201,7 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
   const paginatedData = filteredAndSorted.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
   
   const handleRowClick = (evaluation: ApproveEvaluation) => {
-    navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluated_at}/${evaluation.evaluation_id}`)
+    navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluation_id}`)
   }
   
   return (

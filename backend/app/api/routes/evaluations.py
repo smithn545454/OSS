@@ -173,6 +173,160 @@ async def list_evaluations(
     }
 
 
+@router.get("/detail/{ticker}/{evaluation_id}")
+async def get_evaluation_detail_by_id(
+    ticker: str,
+    evaluation_id: str,
+) -> dict[str, Any]:
+    """Get complete evaluation details by ticker and evaluation_id (no timestamp needed).
+
+    Uses EvaluationTable.get_by_id() which queries by PK and scans SK suffix,
+    avoiding URL-encoding issues with ISO timestamps containing +00:00.
+
+    MUST be defined BEFORE the catch-all /{ticker}/{timestamp}/{evaluation_id}
+    route to avoid FastAPI route collision (both are 3-segment paths).
+    """
+    evaluation = await EvaluationTable.get_by_id(ticker, evaluation_id)
+    if not evaluation:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Evaluation not found: {ticker}/{evaluation_id}",
+        )
+
+    # Fetch all related data (same as get_evaluation_detail below)
+    pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+    pillar_scores_dict = [
+        {
+            "pillar_id": str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id),
+            "score": ps.score,
+            "contributors": [
+                {
+                    "feature_name": c.feature_name,
+                    "subscore": c.subscore,
+                    "weight": c.weight,
+                    "weighted_contribution": c.weighted_contribution,
+                    "raw_value": c.raw_value,
+                    "distance_from_neutral": c.distance_from_neutral,
+                }
+                for c in ps.contributors
+            ],
+            "tags": ps.tags,
+        }
+        for ps in pillar_scores
+    ]
+
+    gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+    gate_results_dict = [
+        {
+            "gate_id": gr.gate_id,
+            "enabled": gr.enabled,
+            "passed": gr.passed,
+            "measured_value": gr.measured_value,
+            "threshold_value": gr.threshold_value,
+            "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+            "units": gr.units,
+            "reason_code": gr.reason_code,
+            "notes": gr.notes,
+        }
+        for gr in gate_results
+    ]
+
+    position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    position_dict = None
+    if position:
+        position_dict = {
+            "position_id": position.position_id,
+            "option_ticker": position.option_ticker,
+            "entry_price": position.entry_price,
+            "entry_date": position.entry_date,
+            "quantity": position.quantity,
+            "verdict_at_entry": str(position.verdict_at_entry.value) if hasattr(position.verdict_at_entry, 'value') else str(position.verdict_at_entry),
+            "quality_tier_at_entry": str(position.quality_tier_at_entry.value) if position.quality_tier_at_entry and hasattr(position.quality_tier_at_entry, 'value') else str(position.quality_tier_at_entry) if position.quality_tier_at_entry else None,
+            "exit_price": position.exit_price,
+            "exit_date": position.exit_date,
+            "exit_reason": str(position.exit_reason.value) if position.exit_reason and hasattr(position.exit_reason, 'value') else str(position.exit_reason) if position.exit_reason else None,
+            "current_price": position.current_price,
+            "current_pnl_pct": round(position.current_pnl_pct, 2),
+            "max_favorable_excursion": round(position.max_favorable_excursion, 2),
+            "max_adverse_excursion": round(position.max_adverse_excursion, 2),
+            "days_held": position.days_held,
+            "status": str(position.status.value) if hasattr(position.status, 'value') else str(position.status),
+            "last_updated": position.last_updated,
+        }
+
+    opportunity_id = evaluation.get("opportunity_id")
+    scanner_triggers = []
+    if opportunity_id:
+        opportunities = await OpportunityTable.list_by_ticker(ticker, limit=20)
+        for opp in opportunities:
+            if opp.opportunity_id == opportunity_id:
+                scanner_triggers = [
+                    {
+                        "scanner_type": str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') else str(st.scanner_type),
+                        "reason_codes": st.reason_codes,
+                        "metrics": st.metrics,
+                        "triggered_at": st.triggered_at,
+                    }
+                    for st in opp.scanner_triggers
+                ]
+                break
+
+    features = await FeatureValueTable.list_by_evaluation(evaluation_id)
+    features_dict = {
+        f.feature_name: {
+            "value": f.value,
+            "units": f.units,
+            "computed_at": f.computed_at,
+        }
+        for f in features
+    }
+
+    thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    thesis_dict = None
+    if thesis:
+        thesis_dict = {
+            "thesis_id": thesis.thesis_id,
+            "status": str(thesis.status.value) if hasattr(thesis.status, 'value') else str(thesis.status),
+            "setup_summary": thesis.setup_summary,
+            "thesis": thesis.thesis,
+            "supporting_evidence": thesis.supporting_evidence,
+            "risks": thesis.risks,
+            "invalidation_conditions": thesis.invalidation_conditions,
+            "exit_plan": {
+                "profit_target": thesis.exit_plan.profit_target,
+                "stop_loss": thesis.exit_plan.stop_loss,
+                "time_exit": thesis.exit_plan.time_exit,
+            },
+            "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, 'value') else str(thesis.llm_provider),
+            "model_used": thesis.model_used,
+            "tokens_used": thesis.tokens_used,
+            "generated_at": thesis.generated_at,
+            "error_message": thesis.error_message,
+        }
+
+    all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
+    failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
+
+    return {
+        "evaluation": evaluation,
+        "pillar_scores": pillar_scores_dict,
+        "gate_results": gate_results_dict,
+        "position": position_dict,
+        "scanner_triggers": scanner_triggers,
+        "features": features_dict,
+        "thesis": thesis_dict,
+        "summary": {
+            "all_gates_passed": all_gates_passed,
+            "failed_gates": failed_gates,
+            "pillar_count": len(pillar_scores_dict),
+            "gate_count": len(gate_results_dict),
+            "has_position": position_dict is not None,
+            "feature_count": len(features_dict),
+            "has_thesis": thesis_dict is not None,
+        },
+    }
+
+
 @router.get("/{ticker}/{timestamp}/{evaluation_id}")
 async def get_evaluation(
     ticker: str,

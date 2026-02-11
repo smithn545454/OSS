@@ -144,7 +144,7 @@ export function OpportunityCard({ evaluation, rank, className = '' }: Opportunit
   const isTopRank = rank === 1
   
   const handleClick = () => {
-    navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluated_at}/${evaluation.evaluation_id}`)
+    navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluation_id}`)
   }
   
   const handleKeyDown = (e: React.KeyboardEvent) => {
