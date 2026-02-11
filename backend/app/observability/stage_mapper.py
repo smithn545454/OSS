@@ -1,14 +1,16 @@
 """Stage mapper service for Pipeline Monitor.
 
-Maps the internal 8-stage pipeline to the 5-stage display model
-per oss-pipeline-monitor-requirements.md.
+Maps the internal 8-stage pipeline to the 8-stage display model (1:1).
 
 Stage Mapping:
-- Stage 1 (Discovery): OPPORTUNITY_DISCOVERY
-- Stage 2 (Quality Filters): UNDERLYING_FILTERS  
-- Stage 3 (Selection): CONTRACT_SELECTION
-- Stage 4 (Evaluation): FEATURE_COMPUTATION + PILLAR_SCORING + HARD_GATES
-- Stage 5 (Output): DECISION_LOGIC
+- Stage 1 (Opportunity Discovery): OPPORTUNITY_DISCOVERY
+- Stage 2 (Underlying Filters): UNDERLYING_FILTERS
+- Stage 3 (Contract Selection): CONTRACT_SELECTION
+- Stage 4 (Feature Computation): FEATURE_COMPUTATION
+- Stage 5 (Pillar Scoring): PILLAR_SCORING
+- Stage 6 (Hard Gates): HARD_GATES
+- Stage 7 (Decision Logic): DECISION_LOGIC
+- Stage 8 (Paper Trading): PAPER_TRADING
 """
 
 from __future__ import annotations
@@ -42,42 +44,53 @@ from app.db.tables import (
 
 logger = logging.getLogger(__name__)
 
-# Stage mapping configuration
+# Stage mapping configuration (1:1 with backend pipeline stages)
 STAGE_MAPPING = {
     1: {
-        "name": "Discovery",
-        "description": "Initial contract universe filtering",
+        "name": "Opportunity Discovery",
+        "description": "Scanner-driven ticker identification",
         "internal_stages": [PipelineStage.OPPORTUNITY_DISCOVERY],
     },
     2: {
-        "name": "Initial Scoring",
-        "description": "Directional & volatility signal assessment",
+        "name": "Underlying Filters",
+        "description": "Remove low-quality underlyings",
         "internal_stages": [PipelineStage.UNDERLYING_FILTERS],
     },
     3: {
-        "name": "Structure Analysis",
-        "description": "Options-specific quality checks",
+        "name": "Contract Selection",
+        "description": "Select contracts per DTE/delta bucket",
         "internal_stages": [PipelineStage.CONTRACT_SELECTION],
     },
     4: {
-        "name": "Final Scoring",
-        "description": "Composite score calculation & ranking",
-        "internal_stages": [
-            PipelineStage.FEATURE_COMPUTATION,
-            PipelineStage.PILLAR_SCORING,
-            PipelineStage.HARD_GATES,
-        ],
+        "name": "Feature Computation",
+        "description": "Calculate scoring inputs (liquidity, volatility, catalyst)",
+        "internal_stages": [PipelineStage.FEATURE_COMPUTATION],
     },
     5: {
-        "name": "Output",
-        "description": "Final verdict determination",
+        "name": "Pillar Scoring",
+        "description": "Score Directional, Volatility, and Structure pillars",
+        "internal_stages": [PipelineStage.PILLAR_SCORING],
+    },
+    6: {
+        "name": "Hard Gates",
+        "description": "Binary pass/fail checks — any failure rejects",
+        "internal_stages": [PipelineStage.HARD_GATES],
+    },
+    7: {
+        "name": "Decision Logic",
+        "description": "Final verdict: APPROVE / WATCH / REJECT",
         "internal_stages": [PipelineStage.DECISION_LOGIC],
+    },
+    8: {
+        "name": "Paper Trading",
+        "description": "Track simulated performance of approved trades",
+        "internal_stages": [PipelineStage.PAPER_TRADING],
     },
 }
 
-# Gate definitions with their rules, organized by stage
+# Gate definitions with their rules, organized by display stage
 GATE_DEFINITIONS = {
-    # Stage 1 (Discovery) gates
+    # Stage 1 (Opportunity Discovery) gates
     "liquidity_gate": {
         "name": "Liquidity Gate",
         "stage": 1,
@@ -95,7 +108,7 @@ GATE_DEFINITIONS = {
             "Strike within expected move",
         ],
     },
-    # Stage 2 (Initial Scoring) gates
+    # Stage 2 (Underlying Filters) gates
     "directional_confidence": {
         "name": "Directional Confidence",
         "stage": 2,
@@ -114,7 +127,7 @@ GATE_DEFINITIONS = {
             "Theta Burden ≤ 4%",
         ],
     },
-    # Stage 3 (Structure Analysis) gates
+    # Stage 3 (Contract Selection) gates
     "premium_quality": {
         "name": "Premium Quality",
         "stage": 3,
@@ -132,14 +145,14 @@ GATE_DEFINITIONS = {
             "Max loss acceptable",
         ],
     },
-    # Stage 4 (Final Scoring) gates
+    # Stage 6 (Hard Gates) gates
     "composite_threshold": {
         "name": "Composite Threshold",
-        "stage": 4,
+        "stage": 6,
         "rules": [
             "Combined Score ≥ 75",
             "No Pillar Below 60",
-            "Confidence Interval Met",
+            "Pillar Spread ≤ 40",
         ],
     },
 }
@@ -178,8 +191,8 @@ class StageMapper:
         
         Args:
             events: List of stage events from the run
-            display_stage_id: The display stage ID (1-5)
-            
+            display_stage_id: The display stage ID (1-8)
+
         Returns:
             Tuple of (items_in, items_out, drop_reasons)
         """
@@ -276,28 +289,28 @@ class StageMapper:
     def _map_gate_id(self, gate_id: str) -> Optional[str]:
         """Map internal gate ID to display gate ID."""
         mapping = {
-            # Stage 1 - Discovery gates
+            # Stage 1 - Opportunity Discovery gates
             "GATE_MIN_OPEN_INTEREST": "liquidity_gate",
             "GATE_MIN_VOLUME": "liquidity_gate",
             "GATE_MAX_SPREAD_PCT": "liquidity_gate",
             "GATE_DTE_RANGE": "basic_eligibility",
-            # Stage 2 - Initial Scoring gates
+            # Stage 2 - Underlying Filters gates
             "GATE_DIRECTIONAL": "directional_confidence",
             "GATE_TREND_ALIGNMENT": "directional_confidence",
             "GATE_MOMENTUM": "directional_confidence",
             "GATE_IV_PERCENTILE_MAX": "volatility_assessment",
             "GATE_IV_RV_RATIO": "volatility_assessment",
             "GATE_THETA_BURDEN_MAX": "volatility_assessment",
-            # Stage 3 - Structure Analysis gates
+            # Stage 3 - Contract Selection gates
             "GATE_MOVE_SUFFICIENCY": "premium_quality",
             "GATE_EXPECTED_MOVE": "premium_quality",
             "GATE_GREEKS_COHERENCE": "risk_parameters",
             "GATE_DELTA_RANGE": "risk_parameters",
             "GATE_MAX_LOSS": "risk_parameters",
-            # Stage 4 - Final Scoring gates
+            # Stage 6 - Hard Gates
             "GATE_COMBINED_SCORE": "composite_threshold",
             "GATE_PILLAR_MINIMUM": "composite_threshold",
-            "GATE_CONFIDENCE_INTERVAL": "composite_threshold",
+            "GATE_PILLAR_SPREAD": "composite_threshold",
         }
         return mapping.get(gate_id)
 
@@ -364,10 +377,10 @@ class StageMapper:
 
     def _build_default_gates_for_stage(self, stage_id: int) -> list[DisplayGate]:
         """Build default empty gates for a stage when no data is available.
-        
+
         Args:
-            stage_id: The display stage ID (1-5)
-            
+            stage_id: The display stage ID (1-8)
+
         Returns:
             List of DisplayGate objects with zero counts
         """
@@ -412,34 +425,34 @@ class StageMapper:
         run_metadata: Optional[dict[str, Any]] = None,
     ) -> DisplayStage:
         """Build a display stage from internal data.
-        
+
         Args:
-            stage_id: Display stage ID (1-5)
+            stage_id: Display stage ID (1-8)
             events: Stage events from the run
             gate_results: Gate results for the run
             run_metadata: Optional run metadata for verdict counts
-            
+
         Returns:
             DisplayStage object
         """
         stage_def = STAGE_MAPPING[stage_id]
         items_in, items_out, drop_reasons = self.aggregate_stage_events(events, stage_id)
-        
-        is_final = stage_id == 5
+
+        is_final = stage_id == 8
         status, anomaly_msg = self.detect_anomaly(items_in, items_out, is_final)
-        
-        # Build gates for evaluation stage
+
+        # Build gates for stages that have them
         gates = await self.build_gates_for_stage("", stage_id, gate_results)
-        
-        # Build verdict breakdown for output stage
+
+        # Build verdict breakdown for Decision Logic stage (7)
         breakdown = None
-        if is_final and run_metadata:
+        if stage_id == 7 and run_metadata:
             breakdown = VerdictBreakdown(
                 approve=run_metadata.get("approves", 0),
                 watch=run_metadata.get("watches", 0),
                 reject=run_metadata.get("rejects", 0),
             )
-        
+
         return DisplayStage(
             id=stage_id,
             name=stage_def["name"],
@@ -479,9 +492,9 @@ class StageMapper:
             "rejects": run.total_rejects,
         }
         
-        # Build all 5 display stages
+        # Build all 8 display stages
         stages: list[DisplayStage] = []
-        for stage_id in range(1, 6):
+        for stage_id in range(1, 9):
             stage = await self.build_display_stage(
                 stage_id, events, gate_results, run_metadata
             )
@@ -603,7 +616,7 @@ class PipelineAggregator:
                         status=StageStatus.HEALTHY,
                         gates=self.mapper._build_default_gates_for_stage(i),
                     )
-                    for i in range(1, 6)
+                    for i in range(1, 9)
                 ],
             )
         
@@ -631,14 +644,14 @@ class PipelineAggregator:
         
         # Build aggregated stages
         stages: list[DisplayStage] = []
-        for stage_id in range(1, 6):
+        for stage_id in range(1, 9):
             items_in, items_out, _ = self.mapper.aggregate_stage_events(all_events, stage_id)
-            status, anomaly_msg = self.mapper.detect_anomaly(items_in, items_out, stage_id == 5)
-            
+            status, anomaly_msg = self.mapper.detect_anomaly(items_in, items_out, stage_id == 8)
+
             gates = await self.mapper.build_gates_for_stage("", stage_id, all_gate_results)
-            
+
             breakdown = None
-            if stage_id == 5:
+            if stage_id == 7:
                 breakdown = VerdictBreakdown(
                     approve=total_approves,
                     watch=total_watches,

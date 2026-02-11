@@ -17,12 +17,12 @@ interface PipelineVisualizationProps {
   onOverlapToggle: (gateId: string) => void
 }
 
-// Default empty stages with gates to show when no data is available
+// Default empty stages matching backend's 8-stage pipeline (1:1)
 const DEFAULT_STAGES: DisplayStage[] = [
   {
     id: 1,
-    name: 'Discovery',
-    description: 'Initial contract universe filtering',
+    name: 'Opportunity Discovery',
+    description: 'Scanner-driven ticker identification',
     input: 0,
     output: 0,
     status: 'healthy',
@@ -54,8 +54,8 @@ const DEFAULT_STAGES: DisplayStage[] = [
   },
   {
     id: 2,
-    name: 'Initial Scoring',
-    description: 'Directional & volatility signal assessment',
+    name: 'Underlying Filters',
+    description: 'Remove low-quality underlyings',
     input: 0,
     output: 0,
     status: 'healthy',
@@ -88,8 +88,8 @@ const DEFAULT_STAGES: DisplayStage[] = [
   },
   {
     id: 3,
-    name: 'Structure Analysis',
-    description: 'Options-specific quality checks',
+    name: 'Contract Selection',
+    description: 'Select contracts per DTE/delta bucket',
     input: 0,
     output: 0,
     status: 'healthy',
@@ -121,8 +121,24 @@ const DEFAULT_STAGES: DisplayStage[] = [
   },
   {
     id: 4,
-    name: 'Final Scoring',
-    description: 'Composite score calculation & ranking',
+    name: 'Feature Computation',
+    description: 'Calculate scoring inputs (liquidity, volatility, catalyst)',
+    input: 0,
+    output: 0,
+    status: 'healthy',
+  },
+  {
+    id: 5,
+    name: 'Pillar Scoring',
+    description: 'Score Directional, Volatility, and Structure pillars',
+    input: 0,
+    output: 0,
+    status: 'healthy',
+  },
+  {
+    id: 6,
+    name: 'Hard Gates',
+    description: 'Binary pass/fail checks — any failure rejects',
     input: 0,
     output: 0,
     status: 'healthy',
@@ -135,16 +151,24 @@ const DEFAULT_STAGES: DisplayStage[] = [
         rules: [
           { name: 'Combined Score ≥ 75', passed: 0, failed: 0, severity: 'normal' },
           { name: 'No Pillar Below 60', passed: 0, failed: 0, severity: 'normal' },
-          { name: 'Confidence Interval Met', passed: 0, failed: 0, severity: 'normal' },
+          { name: 'Pillar Spread ≤ 40', passed: 0, failed: 0, severity: 'normal' },
         ],
         overlaps: [],
       },
     ],
   },
   {
-    id: 5,
-    name: 'Output',
-    description: 'Final verdict determination',
+    id: 7,
+    name: 'Decision Logic',
+    description: 'Final verdict: APPROVE / WATCH / REJECT',
+    input: 0,
+    output: 0,
+    status: 'healthy',
+  },
+  {
+    id: 8,
+    name: 'Paper Trading',
+    description: 'Track simulated performance of approved trades',
     input: 0,
     output: 0,
     status: 'healthy',
@@ -186,7 +210,7 @@ export function PipelineVisualization({
               </div>
             ))}
           </div>
-          {[1, 2, 3, 4, 5].map(i => (
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
             <div key={i} className="mb-4">
               <div className="h-24 bg-[var(--bg-hover)] rounded-lg" />
             </div>

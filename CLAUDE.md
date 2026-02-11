@@ -152,11 +152,11 @@ The backend runs as a single Lambda with three invocation modes:
 
 ## Known Issues / Future Work
 
-### Pipeline Monitor Restructure (Planned)
-- Plan exists at `.claude/plans/memoized-gliding-finch.md`
-- Goal: align Pipeline Monitor from 5 display stages → 8 stages matching backend 1:1
-- Add UV scanner as 4th scanner at Stage 1, normalize UV drop reason keys, add Stage 3 passthrough event for UV runs
-- Add per-filter drop tracking to contract selection (Stage 3)
+### Pipeline Monitor Restructure (Done)
+- Pipeline Monitor now displays all 8 backend stages 1:1 (was 5 compressed stages)
+- Stage mapper (`stage_mapper.py`) passes through all 8 stages individually
+- Remaining: Add UV scanner as 4th scanner at Stage 1, normalize UV drop reason keys, add Stage 3 passthrough event for UV runs
+- Remaining: Add per-filter drop tracking to contract selection (Stage 3)
 
 ### Pending Verification
 - Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
