@@ -106,16 +106,23 @@ class HardGatesStage:
         
         # Get gate failure breakdown
         failure_summary = self._calculator.get_failure_summary(results)
-        
+
+        # Get per-gate pass counts (for Pipeline Monitor display)
+        pass_summary: dict[str, int] = {}
+        for gate_eval in results.values():
+            for gr in gate_eval.gate_results:
+                if gr.passed:
+                    pass_summary[gr.gate_id] = pass_summary.get(gr.gate_id, 0) + 1
+
         # Get drop reasons (failure reason codes)
         drop_reasons: dict[str, int] = {}
         for gate_eval in results.values():
             for reason_code in gate_eval.failed_reason_codes:
                 drop_reasons[reason_code] = drop_reasons.get(reason_code, 0) + 1
-        
+
         # Total gate results created
         total_gate_results = sum(len(ge.gate_results) for ge in results.values())
-        
+
         # Record stage event
         await self._orchestrator.record_stage_event(
             run_id=run_id,
@@ -128,6 +135,7 @@ class HardGatesStage:
                 "passed_all_gates": passed_count,
                 "failed_any_gate": failed_count,
                 "failure_by_gate": failure_summary,
+                "pass_by_gate": pass_summary,
                 "feature_sets_available": len(feature_map),
                 "opportunities_available": len(opportunity_map),
             },

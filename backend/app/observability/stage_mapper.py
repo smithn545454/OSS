@@ -89,6 +89,9 @@ STAGE_MAPPING = {
 }
 
 # Gate definitions with their rules, organized by display stage
+# Reverse mapping: rule name → parent gate ID (derived from GATE_DEFINITIONS below)
+RULE_TO_GATE_ID: dict[str, str] = {}
+
 GATE_DEFINITIONS = {
     # Stage 1 (Opportunity Discovery) gates
     "liquidity_gate": {
@@ -156,6 +159,11 @@ GATE_DEFINITIONS = {
         ],
     },
 }
+
+# Populate RULE_TO_GATE_ID from GATE_DEFINITIONS
+for _gate_id, _gate_def in GATE_DEFINITIONS.items():
+    for _rule_name in _gate_def["rules"]:
+        RULE_TO_GATE_ID[_rule_name] = _gate_id
 
 
 class StageMapper:
@@ -233,14 +241,21 @@ class StageMapper:
         run_id: str,
         stage_id: int,
         gate_results: list[GateResult],
+        events: list[StageEvent] | None = None,
     ) -> list[DisplayGate]:
-        """Build gate display data from gate results.
-        
+        """Build gate display data from gate results or stage event metadata.
+
+        All gates are evaluated in Stage 6 (Hard Gates) but displayed across
+        stages 1-6 using _map_gate_id(). When individual GateResult records
+        aren't available (list_by_run not implemented), we fall back to
+        reading pass_by_gate / failure_by_gate from the Stage 6 event metadata.
+
         Args:
             run_id: The pipeline run ID
             stage_id: The display stage ID
             gate_results: List of gate results for the run
-            
+            events: Stage events (used to extract gate metadata fallback)
+
         Returns:
             List of DisplayGate objects for the specified stage
         """
@@ -249,33 +264,39 @@ class StageMapper:
             gid: gdef for gid, gdef in GATE_DEFINITIONS.items()
             if gdef.get("stage") == stage_id
         }
-        
+
         if not stage_gates:
             return []
-        
-        # Group results by gate
+
+        # If we have individual GateResult objects, use them directly
+        if gate_results:
+            return self._build_gates_from_results(stage_gates, gate_results)
+
+        # Fallback: read per-gate counts from Stage 6 event metadata
+        if events:
+            return self._build_gates_from_metadata(stage_gates, events)
+
+        return self._build_default_gates_for_stage(stage_id)
+
+    def _build_gates_from_results(
+        self,
+        stage_gates: dict[str, dict],
+        gate_results: list[GateResult],
+    ) -> list[DisplayGate]:
+        """Build gate display from individual GateResult objects."""
         results_by_gate: dict[str, list[GateResult]] = defaultdict(list)
         for result in gate_results:
-            # Map gate_id to our gate definitions
             gate_key = self._map_gate_id(result.gate_id)
             if gate_key:
                 results_by_gate[gate_key].append(result)
-        
+
         gates: list[DisplayGate] = []
-        
         for gate_id, gate_def in stage_gates.items():
             results = results_by_gate.get(gate_id, [])
-            
-            # Build rules from results
             rules = self._build_rules(gate_def["rules"], results)
-            
-            # Calculate totals
             total_passed = sum(1 for r in results if r.passed)
             total_failed = sum(1 for r in results if not r.passed)
-            
-            # Build overlap data
             overlaps = self._compute_overlaps(results)
-            
             gates.append(DisplayGate(
                 id=gate_id,
                 name=gate_def["name"],
@@ -284,7 +305,73 @@ class StageMapper:
                 rules=rules,
                 overlaps=overlaps,
             ))
-        
+        return gates
+
+    def _build_gates_from_metadata(
+        self,
+        stage_gates: dict[str, dict],
+        events: list[StageEvent],
+    ) -> list[DisplayGate]:
+        """Build gate display from Stage 6 event metadata.
+
+        Stage 6 records pass_by_gate and failure_by_gate in its metadata,
+        keyed by backend gate IDs (e.g. GATE_MIN_VOLUME). We aggregate
+        these into the display gate categories using _map_gate_id().
+        """
+        # Collect pass/fail counts from all HARD_GATES events
+        pass_by_gate: dict[str, int] = {}
+        fail_by_gate: dict[str, int] = {}
+        for event in events:
+            if event.stage == PipelineStage.HARD_GATES:
+                meta = event.metadata or {}
+                for gid, count in meta.get("pass_by_gate", {}).items():
+                    pass_by_gate[gid] = pass_by_gate.get(gid, 0) + int(count)
+                for gid, count in meta.get("failure_by_gate", {}).items():
+                    fail_by_gate[gid] = fail_by_gate.get(gid, 0) + int(count)
+
+        # Group backend gate IDs into display gate categories
+        display_passed: dict[str, int] = defaultdict(int)
+        display_failed: dict[str, int] = defaultdict(int)
+        for gid, count in pass_by_gate.items():
+            display_key = self._map_gate_id(gid)
+            if display_key:
+                display_passed[display_key] += count
+        for gid, count in fail_by_gate.items():
+            display_key = self._map_gate_id(gid)
+            if display_key:
+                display_failed[display_key] += count
+
+        gates: list[DisplayGate] = []
+        for gate_id, gate_def in stage_gates.items():
+            total_passed = display_passed.get(gate_id, 0)
+            total_failed = display_failed.get(gate_id, 0)
+
+            # Build rules with proportional counts
+            total = total_passed + total_failed
+            rule_count = len(gate_def["rules"])
+            rules = []
+            for rule_name in gate_def["rules"]:
+                # Distribute evenly across rules within the gate category
+                rules.append(DisplayRule(
+                    name=rule_name,
+                    passed=total_passed // rule_count if rule_count else 0,
+                    failed=total_failed // rule_count if rule_count else 0,
+                    severity=(
+                        RuleSeverity.CRITICAL
+                        if total_passed == 0 and total_failed > 0
+                        else RuleSeverity.NORMAL
+                    ),
+                ))
+
+            gates.append(DisplayGate(
+                id=gate_id,
+                name=gate_def["name"],
+                passed=total_passed,
+                failed=total_failed,
+                rules=rules,
+                overlaps=[],
+            ))
+
         return gates
 
     def _map_gate_id(self, gate_id: str) -> Optional[str]:
@@ -443,7 +530,7 @@ class StageMapper:
         status, anomaly_msg = self.detect_anomaly(items_in, items_out, is_final, stage_id=stage_id)
 
         # Build gates for stages that have them
-        gates = await self.build_gates_for_stage("", stage_id, gate_results)
+        gates = await self.build_gates_for_stage("", stage_id, gate_results, events=events)
 
         # Build verdict breakdown for Decision Logic stage (7)
         breakdown = None
@@ -649,7 +736,9 @@ class PipelineAggregator:
             items_in, items_out, _ = self.mapper.aggregate_stage_events(all_events, stage_id)
             status, anomaly_msg = self.mapper.detect_anomaly(items_in, items_out, stage_id == 8, stage_id=stage_id)
 
-            gates = await self.mapper.build_gates_for_stage("", stage_id, all_gate_results)
+            gates = await self.mapper.build_gates_for_stage(
+                "", stage_id, all_gate_results, events=all_events,
+            )
 
             breakdown = None
             if stage_id == 7:
