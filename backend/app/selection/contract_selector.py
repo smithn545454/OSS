@@ -264,6 +264,28 @@ class ContractSelector:
         """
         # Start telemetry for this ticker
         self._telemetry.start_ticker(ticker, underlying_price, len(chain))
+        logger.info(
+            f"[SELECT] {ticker}: chain={len(chain)} contracts, price=${underlying_price:.2f}"
+        )
+
+        # Log first contract structure for diagnostics
+        if chain:
+            c = chain[0]
+            d = c.get("day", {})
+            q = c.get("last_quote", {})
+            g = c.get("greeks", {})
+            det = c.get("details", {})
+            logger.info(
+                f"[SELECT] {ticker} sample contract: "
+                f"ticker={det.get('ticker')}, type={det.get('contract_type')}, "
+                f"strike={det.get('strike_price')}, exp={det.get('expiration_date')}, "
+                f"day_keys={list(d.keys())}, "
+                f"bid={d.get('last_bid', 'MISSING')}/{q.get('bid', 'MISSING')}, "
+                f"ask={d.get('last_ask', 'MISSING')}/{q.get('ask', 'MISSING')}, "
+                f"greeks_delta={g.get('delta', 'MISSING')}, "
+                f"oi={c.get('open_interest', 'MISSING')}, "
+                f"iv={g.get('implied_volatility', 'MISSING')}/{c.get('implied_volatility', 'MISSING')}"
+            )
 
         all_selected: list[ContractCandidate] = []
 
@@ -342,6 +364,9 @@ class ContractSelector:
 
         # Parse contracts and apply Step 1: DTE Filter
         dte_filtered: list[ContractCandidate] = []
+        parse_fail_count = 0
+        side_mismatch_count = 0
+        dte_mismatch_count = 0
 
         for contract_data in chain:
             candidate = self._parse_contract(
@@ -352,14 +377,18 @@ class ContractSelector:
             )
 
             if candidate is None:
+                parse_fail_count += 1
                 continue
 
             # Filter by side
             if candidate.option_type != side:
+                side_mismatch_count += 1
                 continue
 
             # Step 1: DTE Filter
+            dte_mismatch_count += 1
             if min_dte <= candidate.dte <= max_dte:
+                dte_mismatch_count -= 1  # Undo: it passed
                 candidate = ContractCandidate(
                     **{**candidate.__dict__, "dte_bucket": bucket}
                 )
@@ -382,6 +411,15 @@ class ContractSelector:
         # Step 5: Ranking + Top-K Selection
         selected = self._rank_and_select(moneyness_filtered, side)
         stats.selected_count = len(selected)
+
+        # Diagnostic logging for selection pipeline
+        if len(dte_filtered) > 0 or bucket == DTEBucket.B:
+            logger.info(
+                f"[SELECT] {ticker} {bucket.value}/{side.value}: "
+                f"dte={len(dte_filtered)} -> delta={len(delta_filtered)} -> "
+                f"liq={len(liquidity_filtered)} -> money={len(moneyness_filtered)} -> "
+                f"top_k={len(selected)}"
+            )
 
         # Record selected contracts in telemetry
         for candidate in selected:
@@ -454,27 +492,44 @@ class ContractSelector:
             if dte < 0:
                 return None
 
-            # Extract price data
-            bid = day.get("last_bid", 0) or contract_data.get("last_quote", {}).get("bid", 0) or 0
-            ask = day.get("last_ask", 0) or contract_data.get("last_quote", {}).get("ask", 0) or 0
+            # Extract price data — try multiple sources
+            quote = contract_data.get("last_quote", {})
+            bid = (
+                day.get("last_bid", 0)
+                or quote.get("bid", 0)
+                or 0
+            )
+            ask = (
+                day.get("last_ask", 0)
+                or quote.get("ask", 0)
+                or 0
+            )
 
-            # Handle missing bid/ask
+            # Fallback: use day close as mid proxy when no bid/ask available
+            # Polygon basic tier may not include last_quote in snapshot data
             if bid <= 0 or ask <= 0:
-                return None
+                day_close = day.get("close", 0) or 0
+                if day_close > 0:
+                    # Estimate spread at 5% of price (conservative)
+                    half_spread = day_close * 0.025
+                    bid = day_close - half_spread
+                    ask = day_close + half_spread
+                else:
+                    return None
 
             mid = (bid + ask) / 2
             spread_abs = ask - bid
             spread_pct = (spread_abs / mid * 100) if mid > 0 else 999
 
-            # Extract Greeks
+            # Extract Greeks — check both greeks dict and top-level
             iv = greeks.get("implied_volatility", 0) or contract_data.get("implied_volatility", 0) or 0
             delta = greeks.get("delta", 0) or 0
             gamma = greeks.get("gamma", 0) or 0
             theta = greeks.get("theta", 0) or 0
             vega = greeks.get("vega", 0) or 0
 
-            # Validate delta is present and reasonable
-            if delta == 0:
+            # Skip contracts with no delta AND no IV (truly no data)
+            if delta == 0 and iv == 0:
                 return None
 
             # Extract liquidity

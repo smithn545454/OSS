@@ -48,7 +48,7 @@ class FeatureComputationStage:
         self._polygon = polygon_client
         self._orchestrator = orchestrator
         self._config = config or FeatureConfig()
-        self._computer = FeatureComputer(polygon_client, config)
+        self._computer = FeatureComputer(polygon_client, config=config)
     
     async def execute(
         self,
