@@ -176,7 +176,7 @@ class TestPolicyConfigDefaults:
         assert cfg.min_price == 5.00
         assert cfg.min_avg_dollar_volume == 20_000_000
         assert cfg.max_missing_bars == 2
-        assert cfg.exclude_earnings_within_days == 0
+        assert cfg.exclude_earnings_within_days == 5
 
     def test_gate_config_defaults(self):
         cfg = GateConfig()

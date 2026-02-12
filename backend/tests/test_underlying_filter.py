@@ -17,6 +17,7 @@ from app.filters.underlying import (
     FILTER_FAIL_UNDERLYING_PRICE,
     FILTER_FAIL_DOLLAR_VOLUME,
     FILTER_FAIL_MISSING_BARS,
+    FILTER_FAIL_EARNINGS_WINDOW,
 )
 from app.services.polygon import DailyBar
 
@@ -276,3 +277,76 @@ class TestUnderlyingFilterIntegration:
         assert FILTER_FAIL_UNDERLYING_PRICE in result.failed_filters
         assert FILTER_FAIL_DOLLAR_VOLUME in result.failed_filters
         assert FILTER_FAIL_MISSING_BARS in result.failed_filters
+
+
+class TestEarningsCacheIntegration:
+    """Tests for earnings cache wiring into UnderlyingFilter."""
+
+    def test_accepts_earnings_cache_parameter(self):
+        """UnderlyingFilter constructor accepts earnings_cache kwarg."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        mock_cache = AsyncMock()
+        uf = UnderlyingFilter(config, earnings_cache=mock_cache)
+        assert uf._earnings_cache is mock_cache
+
+    def test_no_earnings_cache_defaults_to_none(self):
+        """Without earnings_cache kwarg, _earnings_cache is None."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        uf = UnderlyingFilter(config)
+        assert uf._earnings_cache is None
+
+    @pytest.mark.asyncio
+    async def test_earnings_filter_within_window(self):
+        """Ticker with earnings within window should be filtered out."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        mock_cache = AsyncMock()
+        mock_cache.get_days_to_earnings.return_value = 3  # 3 days <= 5 days
+        uf = UnderlyingFilter(config, earnings_cache=mock_cache)
+
+        metrics: dict = {}
+        result = await uf._check_earnings_window("AAPL", metrics)
+
+        assert result is False
+        assert metrics["days_to_earnings"] == 3
+        assert metrics["earnings_window_passed"] is False
+
+    @pytest.mark.asyncio
+    async def test_earnings_filter_outside_window(self):
+        """Ticker with earnings outside window should pass."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        mock_cache = AsyncMock()
+        mock_cache.get_days_to_earnings.return_value = 20  # 20 days > 5 days
+        uf = UnderlyingFilter(config, earnings_cache=mock_cache)
+
+        metrics: dict = {}
+        result = await uf._check_earnings_window("AAPL", metrics)
+
+        assert result is True
+        assert metrics["days_to_earnings"] == 20
+        assert metrics["earnings_window_passed"] is True
+
+    @pytest.mark.asyncio
+    async def test_earnings_filter_fails_open_on_error(self):
+        """If earnings cache raises, ticker should pass (fail-open)."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        mock_cache = AsyncMock()
+        mock_cache.get_days_to_earnings.side_effect = RuntimeError("API down")
+        uf = UnderlyingFilter(config, earnings_cache=mock_cache)
+
+        metrics: dict = {}
+        result = await uf._check_earnings_window("AAPL", metrics)
+
+        assert result is True
+        assert metrics["earnings_window_passed"] is True
+
+    @pytest.mark.asyncio
+    async def test_earnings_filter_no_cache_passes(self):
+        """If no earnings cache is set, ticker should pass."""
+        config = UnderlyingFilterConfig(exclude_earnings_within_days=5)
+        uf = UnderlyingFilter(config, earnings_cache=None)
+
+        metrics: dict = {}
+        result = await uf._check_earnings_window("AAPL", metrics)
+
+        assert result is True
+        assert metrics["earnings_window_passed"] is True

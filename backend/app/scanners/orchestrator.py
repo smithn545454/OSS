@@ -333,8 +333,13 @@ class ScannerOrchestrator:
                         try:
                             from app.services.finnhub import FinnhubClient
                             from app.services.earnings_cache import EarningsCacheService
-                            finnhub = FinnhubClient()
-                            earnings_cache = EarningsCacheService(finnhub_client=finnhub)
+                            if not settings.finnhub_api_key:
+                                logger.warning(
+                                    "Finnhub API key not configured, earnings filter disabled"
+                                )
+                            else:
+                                finnhub = FinnhubClient(api_key=settings.finnhub_api_key)
+                                earnings_cache = EarningsCacheService(finnhub_client=finnhub)
                         except Exception as e:
                             logger.warning(f"Could not initialize earnings cache: {e}")
 
@@ -367,6 +372,13 @@ class ScannerOrchestrator:
                     error_msg = f"Underlying filter stage failed: {e}"
                     logger.error(error_msg)
                     errors.append(error_msg)
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.UNDERLYING_FILTERS,
+                        items_in=len(opportunities),
+                        items_out=0,
+                        metadata={"error": str(e), "status": "failed"},
+                    )
                     filtered_opportunities = opportunities  # Fall through with unfiltered
 
                 # ================================================================
@@ -423,6 +435,13 @@ class ScannerOrchestrator:
                         error_msg = f"Contract selection stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.CONTRACT_SELECTION,
+                            items_in=len(filtered_opportunities),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
 
                 # ================================================================
                 # STAGE 4: Feature Computation
@@ -458,6 +477,21 @@ class ScannerOrchestrator:
                         error_msg = f"Feature computation stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.FEATURE_COMPUTATION,
+                            items_in=len(evaluations),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
+                else:
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.FEATURE_COMPUTATION,
+                        items_in=0,
+                        items_out=0,
+                        metadata={"status": "skipped", "reason": "no_evaluations"},
+                    )
 
                 # ================================================================
                 # STAGE 5: Pillar Scoring
@@ -483,6 +517,21 @@ class ScannerOrchestrator:
                         error_msg = f"Pillar scoring stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.PILLAR_SCORING,
+                            items_in=len(evaluations),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
+                else:
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.PILLAR_SCORING,
+                        items_in=0,
+                        items_out=0,
+                        metadata={"status": "skipped", "reason": "missing_prerequisites"},
+                    )
 
                 # ================================================================
                 # STAGE 6: Hard Gates
@@ -502,7 +551,6 @@ class ScannerOrchestrator:
                             orchestrator=self._pipeline,
                             config=policy_config.gates,
                             persist_results=True,
-                            pillar_results=pillar_results if pillar_results else None,
                         )
 
                         passed_count = sum(
@@ -516,6 +564,21 @@ class ScannerOrchestrator:
                         error_msg = f"Hard gates stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.HARD_GATES,
+                            items_in=len(evaluations),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
+                else:
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.HARD_GATES,
+                        items_in=0,
+                        items_out=0,
+                        metadata={"status": "skipped", "reason": "missing_prerequisites"},
+                    )
 
                 # ================================================================
                 # STAGE 7: Decision Logic (includes LLM thesis generation)
@@ -539,7 +602,7 @@ class ScannerOrchestrator:
                             gate_evaluations=gate_evaluations,
                             orchestrator=self._pipeline,
                             decision_config=policy_config.decision,
-                            pillar_weights=policy_config.pillar.weights,
+                            pillar_weights=policy_config.pillars.weights,
                             thesis_config=policy_config.thesis,
                             scanner_triggers=scanner_triggers_map,
                             features=features_map,
@@ -570,6 +633,21 @@ class ScannerOrchestrator:
                         error_msg = f"Decision logic stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.DECISION_LOGIC,
+                            items_in=len(evaluations),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
+                else:
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.DECISION_LOGIC,
+                        items_in=0,
+                        items_out=0,
+                        metadata={"status": "skipped", "reason": "missing_prerequisites"},
+                    )
 
                 # ================================================================
                 # STAGE 8: Paper Trading
@@ -597,6 +675,21 @@ class ScannerOrchestrator:
                         error_msg = f"Paper trading stage failed: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+                        await self._pipeline.record_stage_event(
+                            run_id=run_id,
+                            stage=PipelineStage.PAPER_TRADING,
+                            items_in=len(evaluations),
+                            items_out=0,
+                            metadata={"error": str(e), "status": "failed"},
+                        )
+                else:
+                    await self._pipeline.record_stage_event(
+                        run_id=run_id,
+                        stage=PipelineStage.PAPER_TRADING,
+                        items_in=0,
+                        items_out=0,
+                        metadata={"status": "skipped", "reason": "missing_prerequisites"},
+                    )
 
                 # Mark pipeline run as complete
                 await self._pipeline.complete_run(run_id, status="completed")

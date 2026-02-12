@@ -468,5 +468,70 @@ class TestPipelineOutputs:
                     assert hasattr(decision, "final_score")
 
 
+# ============================================================================
+# Regression Tests for Pipeline Bugs
+# ============================================================================
+
+
+class TestPipelineBugRegressions:
+    """Regression tests for bugs introduced by commit e04e81a."""
+
+    def test_run_hard_gates_rejects_pillar_results_kwarg(self):
+        """Bug 2: run_hard_gates must NOT accept pillar_results parameter.
+
+        The orchestrator previously passed pillar_results=... to run_hard_gates,
+        which caused a TypeError since the function doesn't accept that kwarg.
+        """
+        import inspect
+        from app.gates.stage import run_hard_gates
+
+        sig = inspect.signature(run_hard_gates)
+        assert "pillar_results" not in sig.parameters, (
+            "run_hard_gates should NOT accept pillar_results parameter"
+        )
+
+    def test_policy_config_has_pillars_not_pillar(self):
+        """Bug 3: PolicyConfig has 'pillars' (plural), not 'pillar'.
+
+        The orchestrator referenced policy_config.pillar.weights which would
+        raise AttributeError since the field is 'pillars'.
+        """
+        config = PolicyConfig()
+        assert hasattr(config, "pillars"), "PolicyConfig must have 'pillars' attribute"
+        assert hasattr(config.pillars, "weights"), "PillarConfig must have 'weights'"
+        assert not hasattr(config, "pillar"), (
+            "PolicyConfig should NOT have singular 'pillar' attribute"
+        )
+
+    def test_pillar_weights_default_pass_validation(self):
+        """Bug 5: Default pillar weights must pass the sum-to-1.0 validator."""
+        from app.core.schemas import PillarWeights
+
+        # Should not raise
+        pw = PillarWeights()
+        assert abs(pw.directional + pw.volatility + pw.structure - 1.0) < 1e-4
+
+    def test_pillar_weights_tiny_drift_passes(self):
+        """Bug 5: Small floating-point drift should be tolerated."""
+        from app.core.schemas import PillarWeights
+
+        # Simulate Decimal→float roundtrip drift within 1e-4
+        pw = PillarWeights(
+            directional=0.350001,
+            volatility=0.350001,
+            structure=0.299998,
+        )
+        total = pw.directional + pw.volatility + pw.structure
+        assert abs(total - 1.0) < 1e-4
+
+    def test_pillar_weights_large_drift_fails(self):
+        """Bug 5: Weights that genuinely don't sum to 1.0 must still be rejected."""
+        from app.core.schemas import PillarWeights
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            PillarWeights(directional=0.40, volatility=0.40, structure=0.30)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

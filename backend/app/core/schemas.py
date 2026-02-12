@@ -480,7 +480,7 @@ class UnderlyingFilterConfig(OSSBaseModel):
     min_price: float = 5.00
     min_avg_dollar_volume: float = 20_000_000
     max_missing_bars: int = 2
-    exclude_earnings_within_days: int = 0  # 0 = disabled
+    exclude_earnings_within_days: int = 5  # Days before earnings to exclude (0 = disabled)
 
 
 class DTEBucketRange(OSSBaseModel):
@@ -569,7 +569,7 @@ class PillarWeights(OSSBaseModel):
     @model_validator(mode="after")
     def _weights_must_sum_to_one(self) -> "PillarWeights":
         total = self.directional + self.volatility + self.structure
-        if abs(total - 1.0) > 1e-6:
+        if abs(total - 1.0) > 1e-4:
             raise ValueError(
                 f"Pillar weights must sum to 1.0, got {total:.6f} "
                 f"(directional={self.directional}, volatility={self.volatility}, "
@@ -604,7 +604,7 @@ class DirectionalPillarConfig(OSSBaseModel):
             + self.signal_confirmation_weight + self.relative_strength_weight
             + self.catalyst_weight
         )
-        if abs(total - 1.0) > 1e-6:
+        if abs(total - 1.0) > 1e-4:
             raise ValueError(
                 f"Directional subscore weights must sum to 1.0, got {total:.6f}"
             )
@@ -629,7 +629,7 @@ class VolatilityPillarConfig(OSSBaseModel):
             self.iv_vs_rv_weight + self.iv_percentile_weight
             + self.iv_regime_weight + self.theta_adjusted_edge_weight
         )
-        if abs(total - 1.0) > 1e-6:
+        if abs(total - 1.0) > 1e-4:
             raise ValueError(
                 f"Volatility subscore weights must sum to 1.0, got {total:.6f}"
             )
@@ -656,7 +656,7 @@ class StructurePillarConfig(OSSBaseModel):
             + self.volume_weight + self.theta_burden_weight
             + self.liquidity_trend_weight
         )
-        if abs(total - 1.0) > 1e-6:
+        if abs(total - 1.0) > 1e-4:
             raise ValueError(
                 f"Structure subscore weights must sum to 1.0, got {total:.6f}"
             )

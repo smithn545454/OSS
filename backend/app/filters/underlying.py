@@ -75,15 +75,18 @@ class UnderlyingFilter:
         self,
         config: UnderlyingFilterConfig,
         polygon_client: Optional[PolygonClient] = None,
+        earnings_cache: Optional[Any] = None,
     ) -> None:
         """Initialize the underlying filter.
-        
+
         Args:
             config: Filter configuration from policy
             polygon_client: Optional Polygon client (will be set externally if not provided)
+            earnings_cache: Optional EarningsCacheService for earnings window filter
         """
         self._config = config
         self._polygon: Optional[PolygonClient] = polygon_client
+        self._earnings_cache = earnings_cache
         self._stats = UnderlyingFilterStats()
 
     def set_polygon_client(self, client: PolygonClient) -> None:
@@ -330,31 +333,54 @@ class UnderlyingFilter:
         metrics: dict[str, Any],
     ) -> bool:
         """Check earnings window filter.
-        
+
         If enabled, exclude tickers with earnings within X days.
-        
-        Note: This requires external earnings data which may not be available
-        from Polygon basic tier. For now, we'll pass all tickers and log
-        that earnings data is not available.
-        
+        Fails open: if earnings data is unavailable, the ticker passes.
+
         Args:
             ticker: The ticker symbol
             metrics: Dict to store filter metrics
-            
+
         Returns:
             True if passes filter (or data not available), False otherwise
         """
         exclude_days = self._config.exclude_earnings_within_days
-
-        # TODO: Implement earnings calendar lookup
-        # For now, pass all tickers since earnings data requires additional API
         metrics["earnings_window_days"] = exclude_days
-        metrics["days_to_earnings"] = None  # Not available
-        metrics["earnings_window_passed"] = True
-        metrics["earnings_window_note"] = "Earnings data not available"
 
-        logger.debug(f"Earnings filter skipped for {ticker} - data not available")
-        return True
+        if not self._earnings_cache:
+            metrics["days_to_earnings"] = None
+            metrics["earnings_window_passed"] = True
+            metrics["earnings_window_note"] = "Earnings cache not available"
+            logger.debug(f"Earnings filter skipped for {ticker} - no earnings cache")
+            return True
+
+        try:
+            days_to_earnings = await self._earnings_cache.get_days_to_earnings(ticker)
+            metrics["days_to_earnings"] = days_to_earnings
+
+            if days_to_earnings is None:
+                metrics["earnings_window_passed"] = True
+                metrics["earnings_window_note"] = "No earnings date found"
+                logger.debug(f"Earnings filter pass for {ticker} - no earnings date")
+                return True
+
+            passed = days_to_earnings > exclude_days
+            metrics["earnings_window_passed"] = passed
+
+            if not passed:
+                logger.debug(
+                    f"Filter fail: {ticker} earnings in {days_to_earnings} days "
+                    f"<= {exclude_days} day window"
+                )
+
+            return passed
+
+        except Exception as e:
+            logger.warning(f"Earnings check failed for {ticker}, failing open: {e}")
+            metrics["days_to_earnings"] = None
+            metrics["earnings_window_passed"] = True
+            metrics["earnings_window_note"] = f"Error: {e}"
+            return True
 
     def get_drop_reasons(self) -> dict[str, int]:
         """Get drop reasons for telemetry.

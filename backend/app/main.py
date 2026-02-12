@@ -31,10 +31,11 @@ from app.api.routes import policies as policies_routes
 from app.api.routes import scanners as scanners_routes
 from app.config import get_settings
 
-# Configure logging
+# Configure logging (force=True required in Lambda where runtime pre-configures handlers)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
@@ -348,5 +349,11 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             logger.warning(f"Unknown scheduler action: {action}")
             return {"status": "error", "error": f"Unknown action: {action}"}
     
-    # Otherwise, handle as API Gateway request via Mangum
+    # Ensure an event loop exists for Mangum (Python 3.12+ requires this)
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    # Handle as API Gateway request via Mangum
     return _mangum_handler(event, context)
