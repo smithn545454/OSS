@@ -22,15 +22,19 @@ ENV_NAME="${ENV_NAME:-dev}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SKIP_TESTS="${SKIP_TESTS:-false}"
 
-# Parse flags
+# Parse flags — collect non-flag args into ARGS array
+ARGS=()
 for arg in "$@"; do
     case $arg in
         --skip-tests)
             SKIP_TESTS="true"
-            shift
+            ;;
+        *)
+            ARGS+=("$arg")
             ;;
     esac
 done
+set -- "${ARGS[@]}"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  OSS Deployment Script (Lambda)${NC}"
