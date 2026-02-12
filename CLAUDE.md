@@ -47,9 +47,13 @@ cdk deploy --all     # Deploy all stacks
 
 ### Deployment
 ```bash
-./scripts/deploy.sh all       # Full deployment
-./scripts/deploy.sh backend   # Backend only
-./scripts/deploy.sh frontend  # Frontend only
+./scripts/deploy.sh backend              # Backend deploy (runs tests first)
+./scripts/deploy.sh backend --skip-tests # Backend deploy without tests (emergencies only)
+./scripts/deploy.sh frontend             # Frontend deploy
+./scripts/deploy.sh all                  # Full deployment (infra + backend + frontend)
+./scripts/deploy.sh rollback             # Rollback to previous Lambda version
+./scripts/deploy.sh rollback N           # Rollback to specific Lambda version N
+./scripts/deploy.sh versions             # List all published Lambda versions
 ```
 
 ## Architecture
@@ -150,40 +154,146 @@ The backend runs as a single Lambda with three invocation modes:
 - Production API: `https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/` (no `/prod` suffix)
 - Frontend CloudFront: `https://d3upsbalspxt4n.cloudfront.net`
 
-## Post-Deploy Verification (Required)
+## Deployment Protocol (MANDATORY)
 
-After every backend deploy that touches pipeline logic, API routes, or data flow, verify the change works **end-to-end** — not just in CloudWatch logs, but through the actual API endpoints the frontend calls. Do not declare a fix complete until both checks pass.
+Claude Code MUST follow this protocol for every deployment. Do NOT skip steps, combine steps, or declare success early. The user is not an engineer — walk them through what is happening at each step and report results clearly before proceeding to the next step.
 
-### Backend Verification
-1. Check CloudWatch for the next pipeline run:
-   ```bash
-   AWS_REGION=us-west-1 aws logs filter-log-events --log-group-name "/aws/lambda/oss-dev-backend" \
-     --filter-pattern '"Stage"' --start-time <epoch_ms> --limit 30 --query 'events[*].message' --output text
-   ```
-2. Confirm no ERROR-level logs for the changed stages
-3. Verify stage events are recorded under a proper UUID run_id (not `worker-xxx`)
+### When to Deploy
 
-### Frontend/API Verification
-1. Check the Pipeline Monitor API returns the new run in the sidebar:
-   ```bash
-   curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/pipeline/runs?limit=5" | python3 -m json.tool
-   ```
-2. Check stage data is populated for all 8 stages:
-   ```bash
-   curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/pipeline/runs/{run_id}" | python3 -c "
-   import sys, json
-   data = json.load(sys.stdin)
-   for s in data['data']['stages']:
-       print(f\"Stage {s['id']}: {s['name']:25s}  In: {s['input']:>4}  Out: {s['output']:>4}  {s['status']}\")
-   "
-   ```
-3. If the change affects Evaluations or Opportunities pages, also verify those API endpoints return expected data
+- Deploy after each logical change, not multiple changes batched together
+- If something breaks, you know exactly which change caused it
+- Never deploy untested code. Never deploy with failing tests
 
-### What "Verified" Means
-- The run appears in the sidebar with a non-zero contract count (unless all are legitimately filtered)
-- All 8 stages show In/Out counts (not all zeros for stages 3-8)
-- No false anomaly flags on fan-out stages (Stage 3: Contract Selection)
-- Data matches what CloudWatch logs show
+### Step 1: Pre-Deploy Checks
+
+Run these checks BEFORE committing. If any fail, stop and fix.
+
+```bash
+# Backend: run tests and lint
+cd backend && pytest tests/ --tb=short -q
+cd backend && ruff check app/
+
+# Frontend: build and lint (if frontend files changed)
+cd frontend && npm run build
+cd frontend && npm run lint
+```
+
+**If tests fail:** Fix the failing tests. Do NOT use --skip-tests to work around them. Tell the user which tests failed and why.
+
+**If lint fails:** Fix the lint errors. These are code quality issues that should be resolved before deploying.
+
+### Step 2: Commit and Push
+
+```bash
+git add <specific files that changed>    # NEVER use git add -A blindly
+git commit -m "type: description"        # Use conventional commits (fix:, feat:, docs:, etc.)
+git push
+```
+
+After pushing, check that GitHub Actions CI is green:
+```bash
+gh run list --limit 1
+```
+
+If CI fails, do NOT proceed to deploy. Fix the issue first.
+
+### Step 3: Deploy
+
+```bash
+./scripts/deploy.sh backend    # For backend changes
+./scripts/deploy.sh frontend   # For frontend changes
+```
+
+The deploy script will:
+1. Run pytest automatically (aborts if tests fail)
+2. Package and upload code to Lambda
+3. Wait for Lambda to finish updating
+4. Record the git commit hash in the Lambda description
+5. Publish a numbered Lambda version (immutable snapshot for rollback)
+6. Print the version number — report this to the user
+
+### Step 4: Verify (REQUIRED — do NOT skip)
+
+Wait 1-2 minutes after deploy, then run ALL of these checks. Do NOT declare the deploy successful until every check passes.
+
+#### 4a. Check CloudWatch for errors
+```bash
+# Get logs from the last 5 minutes
+AWS_REGION=us-west-1 aws logs filter-log-events \
+  --log-group-name "/aws/lambda/oss-dev-backend" \
+  --filter-pattern "ERROR" \
+  --start-time $(python3 -c "import time; print(int((time.time()-300)*1000))") \
+  --limit 20 --query 'events[*].message' --output text
+```
+If there are ERROR logs related to the change, the deploy has a problem. Investigate before continuing.
+
+#### 4b. Check Pipeline Monitor API (for pipeline changes)
+```bash
+# Get the latest pipeline run
+curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/observability/pipeline/latest" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+run = data.get('data', data)
+print(f\"Run ID: {run.get('run_id', 'N/A')}\")
+print(f\"Status: {run.get('status', 'N/A')}\")
+for s in run.get('stages', []):
+    print(f\"  Stage {s['id']}: {s['name']:25s}  In: {s['input']:>4}  Out: {s['output']:>4}  {s['status']}\")
+"
+```
+
+**What to look for:**
+- All 8 stages should show In/Out counts (not all zeros for stages 3-8)
+- No false anomaly flags on fan-out stages (Stage 3: Contract Selection, Stage 8: Paper Trading)
+- Run should have a proper UUID run_id (not `worker-xxx`)
+
+#### 4c. Check health endpoint
+```bash
+curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/health" | python3 -m json.tool
+```
+
+#### 4d. Report results to user
+Tell the user exactly what you found:
+- Which version was published
+- Whether CloudWatch shows errors
+- What the Pipeline Monitor stages look like
+- Whether the deploy is confirmed working or needs attention
+
+### Step 5: If Something Goes Wrong
+
+If verification fails, take these steps in order:
+
+#### Option A: Rollback Lambda (fastest, ~30 seconds)
+```bash
+./scripts/deploy.sh rollback
+```
+This reverts to the previous Lambda version. Verify again after rollback.
+
+#### Option B: Rollback to a specific version
+```bash
+./scripts/deploy.sh versions          # List all versions with descriptions
+./scripts/deploy.sh rollback N        # Rollback to version N
+```
+
+#### Option C: Restore known-good code (nuclear option)
+```bash
+git checkout pipeline-stable-2026-02-12 -- backend/
+# Then redeploy using Step 3
+```
+
+After any rollback, tell the user:
+- What went wrong
+- What version was rolled back to
+- What the current state is (verified working or still investigating)
+
+### Deployment Safety Rules
+
+1. **One change at a time** — deploy after each logical change
+2. **Never skip tests** — `--skip-tests` is for emergencies only, with explicit user approval
+3. **Never declare success without verification** — always run Step 4
+4. **Always report the Lambda version number** — the user needs this for rollback
+5. **If CI is red, do not deploy** — fix the CI failure first
+6. **If unsure, ask** — it's better to pause and ask the user than to deploy broken code
+7. **Tag milestones** — when the pipeline is working well after a significant change, suggest tagging: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
 
 ### Pipeline Run ID Flow (Critical Context)
 - **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
