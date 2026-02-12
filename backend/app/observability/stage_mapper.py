@@ -161,25 +161,31 @@ GATE_DEFINITIONS = {
 class StageMapper:
     """Maps internal pipeline stages to display format."""
 
+    # Stages where output > input is normal (fan-out stages)
+    FAN_OUT_STAGES = {3, 8}  # Contract Selection, Paper Trading
+
     def detect_anomaly(
-        self, stage_input: int, stage_output: int, is_final: bool = False
+        self, stage_input: int, stage_output: int, is_final: bool = False,
+        stage_id: int = 0,
     ) -> tuple[StageStatus, Optional[str]]:
         """Detect anomalies per spec section 5.11.1.
-        
+
         Returns:
             Tuple of (status, anomaly_message)
         """
         if stage_output == 0 and stage_input > 0:
             return StageStatus.ANOMALY, f"Zero contracts passed — all {stage_input} filtered out"
-        
-        if stage_output > stage_input:
+
+        # Fan-out stages (e.g. Contract Selection: 10 tickers → 173 contracts)
+        # legitimately produce more outputs than inputs
+        if stage_output > stage_input and stage_id not in self.FAN_OUT_STAGES:
             return StageStatus.ANOMALY, "Data integrity issue: output exceeds input"
-        
-        if not is_final and stage_input > 0:
+
+        if not is_final and stage_input > 0 and stage_id not in self.FAN_OUT_STAGES:
             pass_rate = (stage_output / stage_input) * 100
             if pass_rate < 1:
                 return StageStatus.ANOMALY, f"Unusually low pass rate: {pass_rate:.1f}%"
-        
+
         return StageStatus.HEALTHY, None
 
     def aggregate_stage_events(
@@ -188,7 +194,10 @@ class StageMapper:
         display_stage_id: int,
     ) -> tuple[int, int, dict[str, int]]:
         """Aggregate metrics from internal stages to a display stage.
-        
+
+        Handles multiple events for the same stage (from multiple workers
+        or multiple runs in aggregate view) by summing their counts.
+
         Args:
             events: List of stage events from the run
             display_stage_id: The display stage ID (1-8)
@@ -197,34 +206,26 @@ class StageMapper:
             Tuple of (items_in, items_out, drop_reasons)
         """
         internal_stages = STAGE_MAPPING[display_stage_id]["internal_stages"]
-        
+
         # Find matching events
         matching_events = [
-            e for e in events 
+            e for e in events
             if e.stage in internal_stages
         ]
-        
+
         if not matching_events:
             return 0, 0, {}
-        
-        # For combined stages (like Evaluation), chain the metrics
-        if len(matching_events) == 1:
-            event = matching_events[0]
-            return event.items_in, event.items_out, event.drop_reasons
-        
-        # Sort by stage order to get first input and last output
-        stage_order = list(internal_stages)
-        matching_events.sort(key=lambda e: stage_order.index(e.stage))
-        
-        items_in = matching_events[0].items_in
-        items_out = matching_events[-1].items_out
-        
+
+        # Sum across all matching events (handles multiple workers/runs)
+        items_in = sum(e.items_in for e in matching_events)
+        items_out = sum(e.items_out for e in matching_events)
+
         # Combine all drop reasons
         combined_reasons: dict[str, int] = {}
         for event in matching_events:
             for reason, count in event.drop_reasons.items():
                 combined_reasons[reason] = combined_reasons.get(reason, 0) + count
-        
+
         return items_in, items_out, combined_reasons
 
     async def build_gates_for_stage(
@@ -439,7 +440,7 @@ class StageMapper:
         items_in, items_out, drop_reasons = self.aggregate_stage_events(events, stage_id)
 
         is_final = stage_id == 8
-        status, anomaly_msg = self.detect_anomaly(items_in, items_out, is_final)
+        status, anomaly_msg = self.detect_anomaly(items_in, items_out, is_final, stage_id=stage_id)
 
         # Build gates for stages that have them
         gates = await self.build_gates_for_stage("", stage_id, gate_results)
@@ -646,7 +647,7 @@ class PipelineAggregator:
         stages: list[DisplayStage] = []
         for stage_id in range(1, 9):
             items_in, items_out, _ = self.mapper.aggregate_stage_events(all_events, stage_id)
-            status, anomaly_msg = self.mapper.detect_anomaly(items_in, items_out, stage_id == 8)
+            status, anomaly_msg = self.mapper.detect_anomaly(items_in, items_out, stage_id == 8, stage_id=stage_id)
 
             gates = await self.mapper.build_gates_for_stage("", stage_id, all_gate_results)
 

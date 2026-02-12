@@ -102,80 +102,57 @@ def _chunk_list(items: list, chunk_size: int) -> list[list]:
 
 async def _run_coordinator_scan() -> dict[str, Any]:
     """Coordinator: Split tickers into chunks and invoke worker Lambdas in parallel.
-    
+
     This enables scanning 1000+ tickers within Lambda timeout limits by
     distributing work across multiple Lambda invocations.
-    
+
     Returns:
         Aggregated scan result summary
     """
     import boto3
     from app.core.watchlist import WatchlistManager
+    from app.core.pipeline import PipelineOrchestrator
     from app.db.tables import PolicyTable
-    
+
     logger.info("Starting COORDINATOR scan - will distribute to workers")
-    
+
     try:
         # Load policy and get tickers
         policy = await PolicyTable.get_active()
         if policy is None:
             raise ValueError("No active policy found")
-        
+
         watchlist = WatchlistManager.from_policy(policy.config)
         tickers = watchlist.tickers
-        
+
         logger.info(f"Coordinator: {len(tickers)} total tickers, chunk_size={CHUNK_SIZE}")
-        
+
         if len(tickers) <= CHUNK_SIZE:
-            # Small enough to process directly
+            # Small enough to process directly — let orchestrator create its own run
             logger.info("Ticker count below threshold, processing directly")
             return await _run_worker_scan(tickers)
-        
+
+        # Multiple chunks: create a shared PipelineRun for all workers
+        pipeline = PipelineOrchestrator()
+        pipeline_run = await pipeline.start_run(policy.config_version)
+        coordinator_run_id = pipeline_run.run_id
+        logger.info(f"Coordinator created run {coordinator_run_id}")
+
         # Split into chunks
         chunks = _chunk_list(tickers, CHUNK_SIZE)
         logger.info(f"Split into {len(chunks)} chunks for parallel processing")
-        
+
         # Get this Lambda's function name to invoke workers
         function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
-        
+
         # Invoke worker Lambdas in parallel
         lambda_client = boto3.client("lambda")
-        
-        async def invoke_worker(chunk_tickers: list[str], chunk_idx: int) -> dict[str, Any]:
-            """Invoke a worker Lambda for a chunk of tickers."""
-            payload = {
-                "source": "oss.scheduler",
-                "action": "worker_scan",
-                "tickers": chunk_tickers,
-                "chunk_index": chunk_idx,
-            }
-            
-            # Invoke asynchronously (InvocationType='Event' for fire-and-forget)
-            # Or 'RequestResponse' for synchronous with results
-            response = lambda_client.invoke(
-                FunctionName=function_name,
-                InvocationType="RequestResponse",  # Wait for result
-                Payload=json.dumps(payload),
-            )
-            
-            result_payload = json.loads(response["Payload"].read())
-            logger.info(f"Chunk {chunk_idx} completed: {result_payload.get('tickers_scanned', 0)} tickers")
-            return result_payload
-        
-        # Run all workers in parallel using asyncio
-        loop = asyncio.get_event_loop()
-        worker_tasks = [
-            loop.run_in_executor(None, lambda c=chunk, i=idx: asyncio.run(invoke_worker(c, i)))
-            for idx, chunk in enumerate(chunks)
-        ]
-        
-        # Actually, for Lambda we need to use synchronous invocations
-        # Let's use ThreadPoolExecutor for parallel Lambda invocations
+
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        
+
         results: list[dict[str, Any]] = []
         errors: list[str] = []
-        
+
         def invoke_worker_sync(chunk_tickers: list[str], chunk_idx: int) -> dict[str, Any]:
             """Synchronously invoke worker Lambda."""
             payload = {
@@ -183,23 +160,24 @@ async def _run_coordinator_scan() -> dict[str, Any]:
                 "action": "worker_scan",
                 "tickers": chunk_tickers,
                 "chunk_index": chunk_idx,
+                "run_id": coordinator_run_id,
             }
-            
+
             response = lambda_client.invoke(
                 FunctionName=function_name,
                 InvocationType="RequestResponse",
                 Payload=json.dumps(payload),
             )
-            
+
             result_payload = json.loads(response["Payload"].read())
             return result_payload
-        
+
         with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as executor:
             future_to_chunk = {
                 executor.submit(invoke_worker_sync, chunk, idx): idx
                 for idx, chunk in enumerate(chunks)
             }
-            
+
             for future in as_completed(future_to_chunk):
                 chunk_idx = future_to_chunk[future]
                 try:
@@ -210,15 +188,22 @@ async def _run_coordinator_scan() -> dict[str, Any]:
                     error_msg = f"Chunk {chunk_idx} failed: {e}"
                     logger.error(error_msg)
                     errors.append(error_msg)
-        
+
+        # Complete the coordinator run with aggregated counts
+        await pipeline.complete_run(
+            coordinator_run_id,
+            status="completed" if not errors else "failed",
+        )
+
         # Aggregate results
         total_tickers = sum(r.get("tickers_scanned", 0) for r in results)
         total_opportunities = sum(r.get("opportunities_created", 0) for r in results)
         total_duration = max((r.get("duration_ms", 0) for r in results), default=0)
-        
+
         return {
             "status": "success" if not errors else "partial_success",
             "mode": "coordinator",
+            "run_id": coordinator_run_id,
             "chunks_processed": len(results),
             "chunks_failed": len(errors),
             "tickers_scanned": total_tickers,
@@ -226,7 +211,7 @@ async def _run_coordinator_scan() -> dict[str, Any]:
             "duration_ms": total_duration,
             "errors": errors if errors else None,
         }
-        
+
     except Exception as e:
         logger.error(f"Coordinator scan failed: {e}")
         return {
@@ -236,35 +221,41 @@ async def _run_coordinator_scan() -> dict[str, Any]:
         }
 
 
-async def _run_worker_scan(tickers: list[str] | None = None) -> dict[str, Any]:
+async def _run_worker_scan(
+    tickers: list[str] | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
     """Worker: Process a specific chunk of tickers.
-    
+
     Args:
         tickers: List of tickers to scan (uses watchlist if None)
-    
+        run_id: Optional coordinator-provided run_id. If None, orchestrator
+                creates its own PipelineRun (used for single-worker mode).
+
     Returns:
         Scan result summary for this chunk
     """
     from app.scanners.orchestrator import ScannerOrchestrator
-    
+
     ticker_count = len(tickers) if tickers else "all"
-    logger.info(f"Starting WORKER scan for {ticker_count} tickers")
-    
+    logger.info(f"Starting WORKER scan for {ticker_count} tickers, run_id={run_id or 'auto'}")
+
     try:
         orchestrator = ScannerOrchestrator()
         result = await orchestrator.run_scan(
             tickers=tickers,
-            run_id=f"worker-{asyncio.get_event_loop().time()}",
+            run_id=run_id,  # None → orchestrator creates PipelineRun; set → reuse coordinator's
         )
-        
+
         logger.info(
             f"Worker scan complete: {result.tickers_scanned} tickers, "
             f"{result.opportunities_created} opportunities"
         )
-        
+
         return {
             "status": "success",
             "mode": "worker",
+            "run_id": result.run_id,
             "tickers_scanned": result.tickers_scanned,
             "opportunities_created": result.opportunities_created,
             "evaluations_created": result.evaluations_created,
@@ -336,9 +327,10 @@ def handler(event: dict[str, Any], context: Any) -> Any:
         elif action == "worker_scan":
             # Worker: process specific chunk of tickers
             tickers = event.get("tickers")
+            run_id = event.get("run_id")  # Coordinator-provided run_id (if chunked)
             chunk_idx = event.get("chunk_index", 0)
             logger.info(f"Received worker_scan event for chunk {chunk_idx} ({len(tickers) if tickers else 0} tickers)")
-            return asyncio.run(_run_worker_scan(tickers))
+            return asyncio.run(_run_worker_scan(tickers, run_id=run_id))
 
         elif action == "paper_update":
             # Paper trading daily update: fetch prices, update positions
