@@ -150,6 +150,49 @@ The backend runs as a single Lambda with three invocation modes:
 - Production API: `https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/` (no `/prod` suffix)
 - Frontend CloudFront: `https://d3upsbalspxt4n.cloudfront.net`
 
+## Post-Deploy Verification (Required)
+
+After every backend deploy that touches pipeline logic, API routes, or data flow, verify the change works **end-to-end** — not just in CloudWatch logs, but through the actual API endpoints the frontend calls. Do not declare a fix complete until both checks pass.
+
+### Backend Verification
+1. Check CloudWatch for the next pipeline run:
+   ```bash
+   AWS_REGION=us-west-1 aws logs filter-log-events --log-group-name "/aws/lambda/oss-dev-backend" \
+     --filter-pattern '"Stage"' --start-time <epoch_ms> --limit 30 --query 'events[*].message' --output text
+   ```
+2. Confirm no ERROR-level logs for the changed stages
+3. Verify stage events are recorded under a proper UUID run_id (not `worker-xxx`)
+
+### Frontend/API Verification
+1. Check the Pipeline Monitor API returns the new run in the sidebar:
+   ```bash
+   curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/pipeline/runs?limit=5" | python3 -m json.tool
+   ```
+2. Check stage data is populated for all 8 stages:
+   ```bash
+   curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/pipeline/runs/{run_id}" | python3 -c "
+   import sys, json
+   data = json.load(sys.stdin)
+   for s in data['data']['stages']:
+       print(f\"Stage {s['id']}: {s['name']:25s}  In: {s['input']:>4}  Out: {s['output']:>4}  {s['status']}\")
+   "
+   ```
+3. If the change affects Evaluations or Opportunities pages, also verify those API endpoints return expected data
+
+### What "Verified" Means
+- The run appears in the sidebar with a non-zero contract count (unless all are legitimately filtered)
+- All 8 stages show In/Out counts (not all zeros for stages 3-8)
+- No false anomaly flags on fan-out stages (Stage 3: Contract Selection)
+- Data matches what CloudWatch logs show
+
+### Pipeline Run ID Flow (Critical Context)
+- **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
+- If tickers ≤ CHUNK_SIZE (100): processes directly, orchestrator creates PipelineRun with UUID
+- If tickers > CHUNK_SIZE: coordinator creates PipelineRun, passes run_id to workers in payload
+- **Workers** record all stage events under the coordinator's run_id
+- **UV scanner** is a separate Lambda pipeline — its runs appear in the sidebar too but only have Stages 1-2
+- The Pipeline Monitor queries `PipelineRunTable` for sidebar items and `StageEventTable.list_by_run(run_id)` for stage data
+
 ## Known Issues / Future Work
 
 ### Pipeline Monitor Restructure (Done)
@@ -158,7 +201,17 @@ The backend runs as a single Lambda with three invocation modes:
 - Remaining: Add UV scanner as 4th scanner at Stage 1, normalize UV drop reason keys, add Stage 3 passthrough event for UV runs
 - Remaining: Add per-filter drop tracking to contract selection (Stage 3)
 
+### Pipeline Fixes Applied (Feb 12, 2026)
+- Stages 2, 6, 7 TypeError crashes fixed (earnings_cache kwarg, pillar_results kwarg, pillar→pillars typo)
+- Stage 3: Polygon basic tier has no bid/ask in snapshot — added day.close fallback with 5% spread estimate
+- Stage 4: FeatureComputer positional arg bug (config passed as catalyst_service)
+- Worker run_id flow: workers now use orchestrator-created UUID (was invisible `worker-xxx` IDs)
+- Stage mapper: aggregate sums events correctly; fan-out stages (3, 8) don't trigger false anomalies
+- All 8 stages flow data end-to-end; Stage 6 currently rejects all (gates working, thresholds may need tuning)
+
 ### Pending Verification
 - Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
 - AI Trade Thesis generation should work on next pipeline run (PillarResult→PillarScore conversion was fixed)
 - Gate threshold relaxations applied: breakout_volume_min 1.5→1.0, combined_score_min 75→60, pillar_minimum 60→45, pillar_spread_max 30→40
+- Stage 6 rejecting 100% of evaluations — investigate which gates are failing (likely spread/liquidity from fallback pricing)
+- FinnhubClient "not initialized" errors (needs async context manager usage) — fails open, noisy but non-blocking
