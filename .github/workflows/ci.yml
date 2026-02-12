@@ -36,7 +36,7 @@ jobs:
           AWS_ACCESS_KEY_ID: testing
           AWS_SECRET_ACCESS_KEY: testing
           DYNAMODB_TABLE_PREFIX: oss-test
-        run: pytest tests/ --tb=short -q
+        run: pytest tests/ --tb=short -q --no-cov
 
   frontend:
     name: Frontend Build
