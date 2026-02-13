@@ -39,12 +39,9 @@ jobs:
           DYNAMODB_TABLE_PREFIX: oss-test
         run: |
           pytest tests/ --tb=short -q --no-cov \
-            --ignore=tests/test_calibration.py \
-            --ignore=tests/test_calibration_route.py \
             --ignore=tests/test_catalyst_service.py \
             --ignore=tests/test_db_integration.py \
-            --ignore=tests/test_gate_calculator.py \
-            --ignore=tests/test_reporter.py
+            --ignore=tests/test_gate_calculator.py
 
   frontend:
     name: Frontend Build

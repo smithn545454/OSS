@@ -18,6 +18,17 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.calibration.models import SuggestionStatus
+
+
+def _find_suggestion_in_report(
+    report: dict,
+    suggestion_id: str,
+) -> Optional[dict]:
+    """Find a suggestion by ID within a report dict."""
+    for s in report.get("suggestions", []):
+        if s.get("suggestion_id") == suggestion_id:
+            return s
+    return None
 from app.calibration.reporter import CalibrationReporter
 from app.core.policy import PolicyService
 from app.core.schemas import PolicyConfig
@@ -171,9 +182,14 @@ async def approve_suggestion(suggestion_id: str) -> dict[str, Any]:
 
     # Claim the suggestion (set to APPROVED)
     report_id = report["report_id"]
-    await CalibrationReportTable.update_suggestion_status(
+    updated = await CalibrationReportTable.update_suggestion_status(
         report_id, suggestion_id, SuggestionStatus.APPROVED.value
     )
+    if updated is False:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Suggestion {suggestion_id} was already claimed by another request",
+        )
 
     # Get active policy and validate field_path
     ps = PolicyService()

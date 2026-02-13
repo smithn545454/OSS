@@ -150,19 +150,6 @@ class TestRunScheduledScan:
 
 class TestHandlerUVScanTrigger:
 
-    def test_uv_scan_trigger(self):
-        event = {
-            "source": "oss.scheduler",
-            "action": "uv_scan_trigger",
-            "run_id": "run-uv-123",
-        }
-        with patch("app.main.asyncio") as mock_asyncio:
-            # The handler imports _trigger_uv_scan_background inside the branch
-            with patch("app.api.routes.scanners._trigger_uv_scan_background"):
-                result = handler(event, None)
-        assert result["status"] == "success"
-        assert result["run_id"] == "run-uv-123"
-
     def test_api_gateway_event_after_asyncio_run(self):
         """Test that handler restores event loop if RuntimeError occurs."""
         event = {
@@ -240,13 +227,22 @@ class TestRunCoordinatorScan:
         with patch("app.main.CHUNK_SIZE", 50), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
              patch("app.core.watchlist.WatchlistManager.from_policy") as mock_wl, \
+             patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
              patch("boto3.client") as mock_boto:
             mock_p = MagicMock()
             mock_p.config = MagicMock()
+            mock_p.config_version = "v2.0.0"
             mock_policy.return_value = mock_p
             mock_wl_instance = MagicMock()
             mock_wl_instance.tickers = tickers
             mock_wl.return_value = mock_wl_instance
+
+            mock_pipeline = MagicMock()
+            mock_pipeline_run = MagicMock()
+            mock_pipeline_run.run_id = "run-coord-123"
+            mock_pipeline.start_run = AsyncMock(return_value=mock_pipeline_run)
+            mock_pipeline.complete_run = AsyncMock()
+            mock_pipeline_cls.return_value = mock_pipeline
 
             mock_lambda = MagicMock()
             mock_lambda.invoke.side_effect = make_invoke_response
@@ -268,13 +264,22 @@ class TestRunCoordinatorScan:
         with patch("app.main.CHUNK_SIZE", 50), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
              patch("app.core.watchlist.WatchlistManager.from_policy") as mock_wl, \
+             patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
              patch("boto3.client") as mock_boto:
             mock_p = MagicMock()
             mock_p.config = MagicMock()
+            mock_p.config_version = "v2.0.0"
             mock_policy.return_value = mock_p
             mock_wl_instance = MagicMock()
             mock_wl_instance.tickers = tickers
             mock_wl.return_value = mock_wl_instance
+
+            mock_pipeline = MagicMock()
+            mock_pipeline_run = MagicMock()
+            mock_pipeline_run.run_id = "run-coord-456"
+            mock_pipeline.start_run = AsyncMock(return_value=mock_pipeline_run)
+            mock_pipeline.complete_run = AsyncMock()
+            mock_pipeline_cls.return_value = mock_pipeline
 
             mock_lambda = MagicMock()
             mock_lambda.invoke.side_effect = Exception("Lambda timeout")

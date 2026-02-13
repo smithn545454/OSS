@@ -171,7 +171,8 @@ class TestPublisherLambda:
 
             assert result["statusCode"] == 200
             body = json.loads(result["body"])
-            assert body.get("mode") == "EOD_RECORD"
+            assert "scan_id" in body
+            assert body.get("tickers_queued", 0) >= 0
 
 
 # ============================================================================

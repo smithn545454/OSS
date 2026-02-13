@@ -11,13 +11,15 @@ Simulates the effect of threshold adjustments:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from app.calibration.models import (
+    CounterfactualResult,
     EstimatedImpact,
     GateAnalysis,
     RecommendationType,
+    ScoreThresholdResult,
     ThresholdSuggestion,
 )
 from app.core.schemas import Evaluation, GateResult, Policy
@@ -66,53 +68,56 @@ class SimulationResult:
 
 class ThresholdSimulator:
     """Simulates threshold changes to estimate impact.
-    
+
     Per Section 20.2 - Threshold Sensitivity Analysis:
     - Simulate +/-10-20% adjustments
     - Estimate additional approvals
     - Estimate win rate impact
     """
-    
+
     def __init__(
         self,
         policy: Policy,
         evaluations: list[Evaluation],
         gate_results: list[list[GateResult]],
+        eval_decisions: Optional[dict[str, dict]] = None,
     ):
         """Initialize simulator with data.
-        
+
         Args:
             policy: Current active policy
             evaluations: List of recent evaluations
             gate_results: Gate results for each evaluation (parallel lists)
+            eval_decisions: Optional dict mapping eval_id to decision data
+                           (verdict, final_score, failed_gates)
         """
         self.policy = policy
         self.evaluations = evaluations
         self.gate_results = gate_results
-        
+        self.eval_decisions = eval_decisions or {}
+
         # Build lookup for gate results by evaluation
         self._gate_results_map: dict[str, list[GateResult]] = {}
         for i, eval in enumerate(evaluations):
             if i < len(gate_results):
                 self._gate_results_map[eval.evaluation_id] = gate_results[i]
-    
+
     def simulate_threshold_change(
         self,
         gate_id: str,
         change_pct: float,
     ) -> SimulationResult:
         """Simulate changing a gate threshold.
-        
+
         Args:
             gate_id: The gate to adjust
             change_pct: Percentage change (-20 to +20)
-            
+
         Returns:
             SimulationResult with estimated impact
         """
         field_path = GATE_FIELD_MAPPINGS.get(gate_id)
         if not field_path:
-            # Gate doesn't have a single threshold to adjust
             return SimulationResult(
                 gate_id=gate_id,
                 current_value=0,
@@ -122,46 +127,33 @@ class ThresholdSimulator:
                 additional_failures=0,
                 estimated_win_rate_change=0,
             )
-        
-        # Get current threshold value
+
         current_value = self._get_threshold_value(field_path)
         new_value = current_value * (1 + change_pct / 100)
-        
-        # Count how many evaluations would change outcome
+
         additional_passes = 0
         additional_failures = 0
-        
+
         for eval_id, gates in self._gate_results_map.items():
             gate_result = next((g for g in gates if g.gate_id == gate_id), None)
             if not gate_result or not gate_result.enabled:
                 continue
-            
-            # Determine if outcome would change with new threshold
+
             would_pass = self._would_pass_with_threshold(
-                gate_result,
-                new_value,
-                gate_id,
+                gate_result, new_value, gate_id,
             )
-            
+
             if gate_result.passed and not would_pass:
                 additional_failures += 1
             elif not gate_result.passed and would_pass:
                 additional_passes += 1
-        
-        # Estimate win rate impact
-        # This is a simplified heuristic - real implementation would use
-        # historical correlation between gate passage and winning trades
+
         estimated_win_rate_change = 0.0
-        
-        if additional_passes > 0:
-            # Adding more evaluations generally slightly decreases win rate
-            # as we're including more marginal cases
+        if additional_passes > 0 and len(self.evaluations) > 0:
             estimated_win_rate_change = -0.5 * (additional_passes / len(self.evaluations)) * 100
-        elif additional_failures > 0:
-            # Removing evaluations generally slightly increases win rate
-            # as we're removing marginal cases
+        elif additional_failures > 0 and len(self.evaluations) > 0:
             estimated_win_rate_change = 0.3 * (additional_failures / len(self.evaluations)) * 100
-        
+
         return SimulationResult(
             gate_id=gate_id,
             current_value=current_value,
@@ -171,48 +163,174 @@ class ThresholdSimulator:
             additional_failures=additional_failures,
             estimated_win_rate_change=estimated_win_rate_change,
         )
-    
+
+    def simulate_gate_counterfactual(
+        self,
+        gate_id: str,
+        change_pct: float,
+    ) -> CounterfactualResult:
+        """Simulate a gate threshold change and compute verdict transitions.
+
+        Args:
+            gate_id: The gate to adjust
+            change_pct: Percentage change (negative = loosen, positive = tighten)
+
+        Returns:
+            CounterfactualResult with verdict transition counts
+        """
+        field_path = GATE_FIELD_MAPPINGS.get(gate_id)
+        if not field_path:
+            return CounterfactualResult(
+                gate_id=gate_id,
+                original_value=0.0,
+                new_value=0.0,
+                scenario_label="loosened" if change_pct < 0 else "tightened",
+            )
+
+        current_value = self._get_threshold_value(field_path)
+        new_value = current_value * (1 + change_pct / 100)
+        scenario_label = "loosened" if change_pct < 0 else "tightened"
+
+        if not self.eval_decisions:
+            return CounterfactualResult(
+                gate_id=gate_id,
+                original_value=current_value,
+                new_value=new_value,
+                scenario_label=scenario_label,
+            )
+
+        verdict_changes: dict[str, int] = {}
+        default_approve_threshold = 75.0
+
+        for eval in self.evaluations:
+            eid = eval.evaluation_id
+            decision = self.eval_decisions.get(eid)
+            if not decision:
+                continue
+
+            original_verdict = decision.get("verdict", "REJECT")
+            final_score = decision.get("final_score", 0.0)
+            failed_gates = decision.get("failed_gates", [])
+
+            gates = self._gate_results_map.get(eid, [])
+            gr = next((g for g in gates if g.gate_id == gate_id), None)
+            if not gr:
+                continue
+
+            would_pass = self._would_pass_with_threshold(gr, new_value, gate_id)
+            originally_passed = gr.passed
+
+            if originally_passed and not would_pass:
+                # Gate now fails — verdict becomes REJECT
+                if original_verdict != "REJECT":
+                    key = f"{original_verdict}_to_REJECT"
+                    verdict_changes[key] = verdict_changes.get(key, 0) + 1
+            elif not originally_passed and would_pass:
+                # Gate now passes — recompute verdict
+                remaining_failed = [g for g in failed_gates if g != gate_id]
+                if not remaining_failed and final_score >= default_approve_threshold:
+                    new_verdict = "APPROVE"
+                elif not remaining_failed:
+                    new_verdict = "WATCH"
+                else:
+                    new_verdict = "REJECT"
+                if new_verdict != original_verdict:
+                    key = f"{original_verdict}_to_{new_verdict}"
+                    verdict_changes[key] = verdict_changes.get(key, 0) + 1
+
+        return CounterfactualResult(
+            gate_id=gate_id,
+            original_value=current_value,
+            new_value=new_value,
+            scenario_label=scenario_label,
+            verdict_changes=verdict_changes,
+        )
+
+    def simulate_score_threshold(
+        self,
+        approve_threshold: float,
+        watch_threshold: Optional[float] = None,
+    ) -> ScoreThresholdResult:
+        """Simulate changing score thresholds and compute verdict transitions.
+
+        Args:
+            approve_threshold: New approve score threshold
+            watch_threshold: New watch score threshold (defaults to approve - 15)
+
+        Returns:
+            ScoreThresholdResult with verdict transition and count data
+        """
+        if watch_threshold is None:
+            watch_threshold = approve_threshold - 15
+
+        verdict_changes: dict[str, int] = {}
+        counts: dict[str, int] = {"APPROVE": 0, "WATCH": 0, "REJECT": 0}
+
+        for eval in self.evaluations:
+            eid = eval.evaluation_id
+            decision = self.eval_decisions.get(eid)
+            if not decision:
+                continue
+
+            original_verdict = decision.get("verdict", "REJECT")
+            final_score = decision.get("final_score", 0.0)
+            failed_gates = decision.get("failed_gates", [])
+
+            # If gates failed, verdict stays REJECT regardless of score
+            if failed_gates:
+                counts["REJECT"] = counts.get("REJECT", 0) + 1
+                continue
+
+            # Determine new verdict based on score thresholds
+            if final_score >= approve_threshold:
+                new_verdict = "APPROVE"
+            elif final_score >= watch_threshold:
+                new_verdict = "WATCH"
+            else:
+                new_verdict = "REJECT"
+
+            counts[new_verdict] = counts.get(new_verdict, 0) + 1
+
+            if new_verdict != original_verdict:
+                key = f"{original_verdict}_to_{new_verdict}"
+                verdict_changes[key] = verdict_changes.get(key, 0) + 1
+
+        return ScoreThresholdResult(
+            approve_threshold=approve_threshold,
+            watch_threshold=watch_threshold,
+            verdict_changes=verdict_changes,
+            counterfactual_counts=counts,
+        )
+
     def generate_suggestions(
         self,
         gate_analyses: list[GateAnalysis],
     ) -> list[ThresholdSuggestion]:
-        """Generate threshold suggestions based on gate analysis.
-        
-        Args:
-            gate_analyses: Analysis results for each gate
-            
-        Returns:
-            List of threshold suggestions
-        """
+        """Generate threshold suggestions based on gate analysis."""
         suggestions = []
-        
+
         for analysis in gate_analyses:
             if analysis.recommendation == RecommendationType.NO_CHANGE:
                 continue
-            
+
             field_path = GATE_FIELD_MAPPINGS.get(analysis.gate_id)
             if not field_path:
                 continue
-            
-            # Determine adjustment direction and magnitude
+
             higher_is_stricter = GATE_HIGHER_IS_STRICTER.get(analysis.gate_id, True)
-            
+
             if analysis.recommendation == RecommendationType.LOOSEN:
-                # Make gate less strict
                 change_pct = -15 if higher_is_stricter else 15
                 reason = f"High false negative rate ({analysis.false_negative_rate:.1f}%) suggests gate is too strict"
-            else:  # TIGHTEN
-                # Make gate more strict
+            else:
                 change_pct = 15 if higher_is_stricter else -15
                 reason = f"Low rejection rate ({analysis.rejection_rate:.1f}%) with good precision allows tightening"
-            
-            # Simulate the change
+
             sim_result = self.simulate_threshold_change(analysis.gate_id, change_pct)
-            
-            # Only suggest if it would have meaningful impact
+
             if abs(sim_result.additional_passes) + abs(sim_result.additional_failures) < 1:
                 continue
-            
+
             suggestion = ThresholdSuggestion.create(
                 gate_id=analysis.gate_id,
                 field_path=field_path,
@@ -225,56 +343,37 @@ class ThresholdSimulator:
                 reason=reason,
             )
             suggestions.append(suggestion)
-        
+
         return suggestions
-    
+
     def _get_threshold_value(self, field_path: str) -> float:
-        """Get threshold value from policy config.
-        
-        Args:
-            field_path: Dot-separated path (e.g., "gates.min_open_interest")
-            
-        Returns:
-            Current threshold value
-        """
+        """Get threshold value from policy config."""
         parts = field_path.split(".")
         value = self.policy.config
-        
+
         for part in parts:
             if hasattr(value, part):
                 value = getattr(value, part)
             else:
                 return 0.0
-        
+
         return float(value) if isinstance(value, (int, float)) else 0.0
-    
+
     def _would_pass_with_threshold(
         self,
         gate_result: GateResult,
         new_threshold: float,
         gate_id: str,
     ) -> bool:
-        """Determine if a gate would pass with a new threshold.
-        
-        Args:
-            gate_result: The original gate result
-            new_threshold: The new threshold value
-            gate_id: The gate ID
-            
-        Returns:
-            True if would pass with new threshold
-        """
+        """Determine if a gate would pass with a new threshold."""
         measured = gate_result.measured_value
-        operator = gate_result.operator
-        
-        # Apply operator logic
-        if operator.value == "gte":
+        operator = str(gate_result.operator)
+
+        if operator == "gte":
             return measured >= new_threshold
-        elif operator.value == "lte":
+        elif operator == "lte":
             return measured <= new_threshold
-        elif operator.value == "between":
-            # For between, we'd need both min and max
-            # Simplify to checking against the modified bound
-            return True  # Skip complex between logic
-        
+        elif operator == "between":
+            return True
+
         return gate_result.passed

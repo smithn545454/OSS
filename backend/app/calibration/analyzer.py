@@ -67,14 +67,19 @@ class GateAnalyzer:
             if not gate.passed:
                 self._gate_failures[gate.gate_id] += 1
     
-    def add_shadow_position(self, position: PaperPosition) -> None:
+    def add_shadow_position(
+        self,
+        position: PaperPosition,
+        failed_gates: list[str] | None = None,
+    ) -> None:
         """Add a shadow position for false negative analysis.
-        
+
         Shadow positions are sampled REJECTs that we track to see
         if they would have been winners (false negatives).
-        
+
         Args:
             position: A shadow paper position
+            failed_gates: Optional list of gate IDs that caused rejection
         """
         self._shadow_positions.append(position)
     

@@ -118,6 +118,59 @@ class ThresholdSuggestion:
 
 
 @dataclass
+class CounterfactualResult:
+    """Result of a gate counterfactual simulation (verdict-level transitions)."""
+    gate_id: str
+    original_value: float
+    new_value: float
+    scenario_label: str
+    verdict_changes: dict = field(default_factory=dict)
+
+
+@dataclass
+class ScoreThresholdResult:
+    """Result of simulating a score threshold change."""
+    approve_threshold: float
+    watch_threshold: float
+    verdict_changes: dict = field(default_factory=dict)
+    counterfactual_counts: dict = field(default_factory=dict)
+
+
+@dataclass
+class CounterfactualSummary:
+    """Summary of counterfactual simulations."""
+    gate_scenarios: list = field(default_factory=list)
+    score_scenarios: list = field(default_factory=list)
+    watch_to_approve: Optional[WatchToApproveAnalysis] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "gate_scenarios": self.gate_scenarios,
+            "score_scenarios": self.score_scenarios,
+            "watch_to_approve": self.watch_to_approve.to_dict() if self.watch_to_approve else None,
+        }
+
+
+@dataclass
+class WatchToApproveAnalysis:
+    """Result of analyzing WATCH evaluations near the APPROVE boundary."""
+    total_watch: int = 0
+    rate: float = 0.0
+    would_flip_count: int = 0
+    threshold_tested: float = 0.0
+    near_boundary_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "total_watch": self.total_watch,
+            "rate": round(self.rate, 2),
+            "would_flip_count": self.would_flip_count,
+            "threshold_tested": self.threshold_tested,
+            "near_boundary_count": self.near_boundary_count,
+        }
+
+
+@dataclass
 class ScoreBandAnalysis:
     """Performance analysis for a score band.
     

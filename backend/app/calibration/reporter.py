@@ -18,9 +18,12 @@ from typing import Optional
 from app.calibration.analyzer import GateAnalyzer
 from app.calibration.models import (
     CalibrationReport,
+    CounterfactualSummary,
     GateAnalysis,
+    RecommendationType,
     ScoreBandAnalysis,
     ThresholdSuggestion,
+    WatchToApproveAnalysis,
 )
 from app.calibration.simulator import ThresholdSimulator
 from app.core.schemas import (
@@ -61,6 +64,7 @@ class CalibrationReporter:
         self._evaluations: list[dict] = []
         self._gate_results: dict[str, list[GateResult]] = {}
         self._policy: Optional[Policy] = None
+        self._simulator: Optional[ThresholdSimulator] = None
     
     async def generate_report(
         self,
@@ -177,7 +181,7 @@ class CalibrationReporter:
         # Shadow positions are tracked REJECTs
         shadow_positions = [
             p for p in self._positions
-            if str(p.verdict_at_entry.value) == "REJECT"
+            if str(getattr(p.verdict_at_entry, 'value', p.verdict_at_entry)) == "REJECT"
         ]
         for pos in shadow_positions:
             analyzer.add_shadow_position(pos)
@@ -226,6 +230,94 @@ class CalibrationReporter:
         
         return simulator.generate_suggestions(gate_analyses)
     
+    def _build_eval_decisions(self) -> dict[str, dict]:
+        """Extract decision data from evaluations.
+
+        Returns:
+            Dict mapping eval_id to {verdict, final_score, failed_gates}
+        """
+        decisions: dict[str, dict] = {}
+        for eval_dict in self._evaluations:
+            eid = eval_dict.get("evaluation_id")
+            decision = eval_dict.get("decision")
+            if eid and decision:
+                decisions[eid] = decision
+        return decisions
+
+    def _analyze_watch_to_approve(self) -> WatchToApproveAnalysis:
+        """Analyze WATCH evaluations near the APPROVE boundary.
+
+        Returns:
+            WatchToApproveAnalysis with flip analysis
+        """
+        watch_evals = [
+            e for e in self._evaluations
+            if e.get("decision", {}).get("verdict") == "WATCH"
+        ]
+        total_watch = len(watch_evals)
+        if total_watch == 0:
+            return WatchToApproveAnalysis(total_watch=0, rate=0.0, would_flip_count=0)
+
+        # Get approve threshold from policy
+        default_threshold = 75.0
+        if self._policy:
+            try:
+                default_threshold = self._policy.config.decision.approve_threshold
+            except (AttributeError, TypeError):
+                pass
+
+        test_threshold = default_threshold - 5
+
+        would_flip = 0
+        for e in watch_evals:
+            decision = e.get("decision", {})
+            score = decision.get("final_score", 0.0)
+            failed = decision.get("failed_gates", [])
+            if score >= test_threshold and not failed:
+                would_flip += 1
+
+        rate = would_flip / total_watch * 100 if total_watch > 0 else 0.0
+        return WatchToApproveAnalysis(
+            total_watch=total_watch,
+            rate=rate,
+            would_flip_count=would_flip,
+        )
+
+    def _generate_counterfactual_summary(
+        self,
+        analyses: list[GateAnalysis],
+    ) -> CounterfactualSummary:
+        """Generate counterfactual simulation summary.
+
+        Args:
+            analyses: Gate analysis results
+
+        Returns:
+            CounterfactualSummary with gate and score scenarios
+        """
+        if self._simulator is None:
+            return CounterfactualSummary(gate_scenarios=[], score_scenarios=[])
+
+        gate_scenarios = []
+        for analysis in analyses:
+            if analysis.recommendation == RecommendationType.NO_CHANGE:
+                continue
+            change_pct = -15 if analysis.recommendation == RecommendationType.LOOSEN else 15
+            result = self._simulator.simulate_gate_counterfactual(
+                analysis.gate_id, change_pct,
+            )
+            gate_scenarios.append(result)
+
+        score_scenarios = []
+        for threshold in [70, 80]:
+            result = self._simulator.simulate_score_threshold(threshold)
+            score_scenarios.append(result)
+
+        return CounterfactualSummary(
+            gate_scenarios=gate_scenarios,
+            score_scenarios=score_scenarios,
+        )
+
     def _analyze_score_bands(
         self,
         positions: list[PaperPosition],

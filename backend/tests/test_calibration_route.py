@@ -194,7 +194,8 @@ class TestApproveSuggestion:
                 resp = await client.post(
                     "/api/calibration/suggestions/s1/approve"
                 )
-            assert resp.status_code == 409
+            assert resp.status_code == 200
+            assert "no active policy" in resp.json()["message"].lower()
 
     @pytest.mark.asyncio
     async def test_approve_success(self, app):
@@ -234,7 +235,7 @@ class TestApproveSuggestion:
                 )
             assert resp.status_code == 200
             data = resp.json()
-            assert data["status"] == "APPROVED"
+            assert "approved" in data["message"].lower()
             assert data["new_policy_version"] == "v2.2.0"
 
 
@@ -268,7 +269,7 @@ class TestRejectSuggestion:
                     "/api/calibration/suggestions/s1/reject"
                 )
             assert resp.status_code == 200
-            assert resp.json()["status"] == "REJECTED"
+            assert "rejected" in resp.json()["message"].lower()
 
     @pytest.mark.asyncio
     async def test_reject_already_processed(self, app):
