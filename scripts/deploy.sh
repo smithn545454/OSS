@@ -19,7 +19,7 @@ NC='\033[0m' # No Color
 # Configuration
 PROJECT_NAME="${PROJECT_NAME:-oss}"
 ENV_NAME="${ENV_NAME:-dev}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-us-west-1}"
 SKIP_TESTS="${SKIP_TESTS:-false}"
 
 # Parse flags — collect non-flag args into ARGS array
@@ -377,7 +377,7 @@ deploy_frontend() {
 
     DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
         --stack-name ${PROJECT_NAME}-${ENV_NAME}-frontend \
-        --query "Stacks[0].Outputs[?ExportName=='${PROJECT_NAME}-${ENV_NAME}-frontend-url'].OutputValue" \
+        --query "Stacks[0].Outputs[?ExportName=='${PROJECT_NAME}-${ENV_NAME}-distribution-id'].OutputValue" \
         --output text \
         --region ${AWS_REGION})
 
@@ -399,7 +399,7 @@ deploy_frontend() {
     echo "VITE_API_URL=${BACKEND_URL}" > .env.production
 
     npm ci
-    npm run build
+    npx vite build
 
     # Sync to S3
     aws s3 sync dist/ s3://${BUCKET_NAME}/ --delete --region ${AWS_REGION}
