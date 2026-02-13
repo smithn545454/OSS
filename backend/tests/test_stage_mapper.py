@@ -11,15 +11,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.schemas import (
-    GateOperator,
-    GateResult,
     PipelineStage,
     StageEvent,
     StageStatus,
 )
 from app.observability.stage_mapper import (
-    GATE_DEFINITIONS,
-    RULE_TO_GATE_ID,
+    GATE_DEFS_BY_STAGE,
+    STAGE_2_GATES,
+    STAGE_6_GATES,
     STAGE_MAPPING,
     StageMapper,
 )
@@ -117,7 +116,7 @@ class TestAggregateStageEvents:
 
 
 # ---------------------------------------------------------------------------
-# Tests: STAGE_MAPPING / GATE_DEFINITIONS constants
+# Tests: STAGE_MAPPING / gate definition constants
 # ---------------------------------------------------------------------------
 
 
@@ -132,15 +131,27 @@ class TestMappingConstants:
                 f"Stage {stage_id} should map to exactly 1 internal stage"
             )
 
-    def test_gate_definitions_have_rules(self):
-        for gid, gdef in GATE_DEFINITIONS.items():
-            assert "rules" in gdef
-            assert "stage" in gdef
+    def test_stage6_has_all_9_backend_gates(self):
+        """Stage 6 should map all 9 real backend gate IDs."""
+        all_backend_ids = set()
+        for gate_def in STAGE_6_GATES.values():
+            for _display_name, backend_id in gate_def["rules"]:
+                all_backend_ids.add(backend_id)
+        expected = {
+            "GATE_MIN_OPEN_INTEREST", "GATE_MIN_VOLUME", "GATE_MAX_SPREAD_PCT",
+            "GATE_DTE_RANGE", "GATE_MOVE_SUFFICIENCY", "GATE_BREAKOUT_VOLUME",
+            "GATE_GREEKS_COHERENCE", "GATE_IV_PERCENTILE_MAX", "GATE_THETA_BURDEN_MAX",
+        }
+        assert all_backend_ids == expected
 
-    def test_rule_to_gate_id_keys_exist_in_definitions(self):
-        """All rules in RULE_TO_GATE_ID should exist in some gate definition."""
-        all_rules = set()
-        for gdef in GATE_DEFINITIONS.values():
-            all_rules.update(gdef["rules"])
-        for rule_name in RULE_TO_GATE_ID:
-            assert rule_name in all_rules, f"Rule {rule_name} not in any gate definition"
+    def test_stage2_has_filter_rules(self):
+        """Stage 2 should have underlying quality filter rules."""
+        gate_def = STAGE_2_GATES["underlying_quality"]
+        assert len(gate_def["rules"]) == 4
+        backend_keys = {r[1] for r in gate_def["rules"]}
+        assert "FILTER_FAIL_UNDERLYING_PRICE" in backend_keys
+        assert "FILTER_FAIL_DOLLAR_VOLUME" in backend_keys
+
+    def test_gate_defs_by_stage_only_has_stages_with_gates(self):
+        """Only stages 1, 2, 6 should have gate definitions."""
+        assert set(GATE_DEFS_BY_STAGE.keys()) == {1, 2, 6}
