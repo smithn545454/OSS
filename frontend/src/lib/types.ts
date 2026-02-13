@@ -894,6 +894,7 @@ export interface ApproveEvaluation extends Evaluation {
   thetaAdjustedEV: number
   urgency: UrgencyLevel
   headline: string | null
+  approvalCount?: number
   // Computed client-side
   convictionScore?: number
   convictionBreakdown?: ConvictionScoreBreakdown

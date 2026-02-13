@@ -387,18 +387,36 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 }}
               >
                 <td style={{ padding: '12px 16px' }}>
-                  <span style={{ 
-                    fontWeight: 600, 
-                    fontFamily: 'var(--font-primary)',
-                    color: 'var(--text-primary)',
-                  }}>
-                    {formatContractId(
-                      evaluation.underlying_ticker,
-                      evaluation.strike,
-                      evaluation.option_type,
-                      evaluation.expiration_date
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontWeight: 600,
+                      fontFamily: 'var(--font-primary)',
+                      color: 'var(--text-primary)',
+                    }}>
+                      {formatContractId(
+                        evaluation.underlying_ticker,
+                        evaluation.strike,
+                        evaluation.option_type,
+                        evaluation.expiration_date
+                      )}
+                    </span>
+                    {(evaluation.approvalCount ?? 1) > 1 && (
+                      <span
+                        title={`Approved in ${evaluation.approvalCount} separate scans`}
+                        style={{
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          color: 'var(--accent-primary)',
+                          background: 'var(--bg-tertiary)',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-default)',
+                        }}
+                      >
+                        {evaluation.approvalCount}x
+                      </span>
                     )}
-                  </span>
+                  </div>
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <OptionTypeBadge type={evaluation.option_type} />

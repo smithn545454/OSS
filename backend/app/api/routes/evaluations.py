@@ -638,7 +638,26 @@ async def list_approve_evaluations(
     """
     # Fetch APPROVE evaluations
     items = await EvaluationTable.list_by_verdict("APPROVE", limit=500)
-    
+
+    # Deduplicate by contract — keep only the most recent evaluation per option_ticker.
+    # Results are already sorted by evaluated_at descending (scan_forward=False),
+    # so the first occurrence of each contract is the latest.
+    contract_counts: dict[str, int] = {}
+    for item in items:
+        key = item.get("option_ticker", "")
+        if key:
+            contract_counts[key] = contract_counts.get(key, 0) + 1
+
+    seen_contracts: set[str] = set()
+    unique_items: list[dict[str, Any]] = []
+    for item in items:
+        key = item.get("option_ticker", "")
+        if key and key not in seen_contracts:
+            seen_contracts.add(key)
+            item["approvalCount"] = contract_counts.get(key, 1)
+            unique_items.append(item)
+    items = unique_items
+
     # Filter by scanner if specified
     if scanner:
         scanner_upper = scanner.upper()

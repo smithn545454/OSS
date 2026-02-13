@@ -81,6 +81,25 @@ function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
         ))}
         <ConvergenceBadge count={evaluation.scannerConvergence} />
         <UrgencyBadge urgency={evaluation.urgency} size="small" />
+        {(evaluation.approvalCount ?? 1) > 1 && (
+          <span
+            title={`Approved in ${evaluation.approvalCount} separate pipeline scans`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: 'var(--accent-primary)',
+              background: 'var(--bg-tertiary)',
+              borderRadius: '10px',
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            {evaluation.approvalCount}x scans
+          </span>
+        )}
       </div>
     </div>
   )
