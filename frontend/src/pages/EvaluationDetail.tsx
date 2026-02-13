@@ -543,7 +543,7 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
                 {Object.entries(trigger.metrics).map(([key, value]) => (
                   <div key={key} className="flex justify-between text-xs">
                     <span className="text-oss-muted">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-oss-text">{value.toFixed(2)}</span>
+                    <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toFixed(2) : String(value)}</span>
                   </div>
                 ))}
               </div>

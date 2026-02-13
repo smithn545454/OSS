@@ -71,7 +71,7 @@ function TraceSampleCard({ sample }: { sample: TraceSample }) {
   
   return (
     <Link
-      to={`/evaluation/${sample.ticker}/${sample.timestamp}/${sample.evaluation_id}`}
+      to={`/evaluation/${sample.ticker}/${sample.evaluation_id}`}
       className="group block rounded-lg bg-oss-bg p-3 transition-colors hover:bg-oss-bg/80"
     >
       <div className="flex items-center justify-between">
