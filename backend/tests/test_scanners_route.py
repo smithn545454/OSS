@@ -48,10 +48,12 @@ class TestGetScanStatus:
 
     @pytest.mark.asyncio
     async def test_status_not_found(self, app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.get("/api/scanners/status/missing-id")
+        with patch("app.api.routes.scanners.ScanStatusTable") as mock_table:
+            mock_table.get = AsyncMock(return_value=None)
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get("/api/scanners/status/missing-id")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio

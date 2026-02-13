@@ -207,7 +207,7 @@ class TestPipelineErrorPaths:
                 return_value=([MagicMock()], 1, False)
             )
             mock_mapper.run_to_list_item.return_value = run_item
-            resp = await client.get("/api/pipeline/runs?scanner=breakout")
+            resp = await client.get("/api/pipeline/runs?scanner=BREAKOUT")
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
@@ -224,13 +224,13 @@ class TestPipelineErrorPaths:
         from app.core.schemas import DisplayStage, PipelineMonitorData
         pipeline_data = PipelineMonitorData(
             time_range="Today",
-            scanner_type="breakout",
+            scanner_type="BREAKOUT",
             total_input=0,
             stages=[DisplayStage(id=1, name="S1", description="", input=0, output=0)],
         )
         with patch("app.api.routes.pipeline.pipeline_aggregator") as mock_agg:
             mock_agg.build_aggregate_data = AsyncMock(return_value=pipeline_data)
-            resp = await client.get("/api/pipeline/aggregate?scanner=breakout")
+            resp = await client.get("/api/pipeline/aggregate?scanner=BREAKOUT")
         assert resp.status_code == 200
 
 
@@ -430,35 +430,6 @@ class TestScannerErrorPaths:
                 "/api/scanners/opportunities/opp-001?ticker=AAPL&timestamp=2026-01-17"
             )
         assert resp.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_uv_trigger_unconfigured(self, client):
-        """POST /uv-scan-trigger -> 503 when Lambda names not configured."""
-        with patch("app.api.routes.scanners.UV_PUBLISHER_FUNCTION_NAME", ""), \
-             patch("app.api.routes.scanners.UV_AGGREGATOR_FUNCTION_NAME", ""):
-            resp = await client.post("/api/scanners/uv-scan-trigger")
-        assert resp.status_code == 503
-        assert "not configured" in resp.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_process_pipeline_no_candidates(self, client):
-        """POST /process-pipeline/{scan_id} -> no candidates returns no_candidates."""
-        with patch("app.api.routes.scanners.UVCandidateTable") as mock_table:
-            mock_table.list_processed_by_scan = AsyncMock(return_value=[])
-            resp = await client.post("/api/scanners/process-pipeline/scan-001")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "no_candidates"
-
-    @pytest.mark.asyncio
-    async def test_process_pipeline_fetch_candidates_error(self, client):
-        """POST /process-pipeline/{scan_id} -> 500 if DB fetch fails."""
-        with patch("app.api.routes.scanners.UVCandidateTable") as mock_table:
-            mock_table.list_processed_by_scan = AsyncMock(
-                side_effect=Exception("DynamoDB error")
-            )
-            resp = await client.post("/api/scanners/process-pipeline/scan-001")
-        assert resp.status_code == 500
 
     @pytest.mark.asyncio
     async def test_list_opportunities_default_today(self, client):

@@ -16,7 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.schemas import DirectionHint
-from app.db.tables import OpportunityTable
+from app.db.tables import OpportunityTable, ScanStatusTable
 from app.scanners.orchestrator import ScannerOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,10 @@ async def get_scan_status(run_id: str) -> ScanStatusResponse:
         Current status of the scan
     """
     status = _scan_status.get(run_id)
+
+    if status is None:
+        # Fallback to DynamoDB
+        status = await ScanStatusTable.get(run_id)
 
     if status is None:
         raise HTTPException(

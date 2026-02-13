@@ -41,6 +41,8 @@ OI_HISTORY_TABLE = "oi-history"
 TRADE_THESIS_TABLE = "trade-thesis"
 LLM_USAGE_TABLE = "llm-usage"
 PAPER_SNAPSHOTS_TABLE = "paper-snapshots"
+CALIBRATION_REPORTS_TABLE = "calibration-reports"
+SCAN_STATUS_TABLE = "scan-status"
 
 
 class PolicyTable:
@@ -248,6 +250,32 @@ class EvaluationTable:
             limit=limit,
             scan_forward=False,
             index_name="GSI1",
+        )
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+        return items
+
+    @staticmethod
+    async def list_by_date(
+        date: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """List evaluations for a date.
+
+        Args:
+            date: Date string in YYYY-MM-DD format
+            limit: Maximum results to return
+
+        Returns:
+            List of evaluation dicts
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            EvaluationTable.TABLE,
+            f"DATE#{date}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI2",
         )
         for item in items:
             for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
@@ -1243,3 +1271,206 @@ class PaperSnapshotTable:
             item.pop("PK", None)
             item.pop("SK", None)
         return items
+
+
+class CalibrationReportTable:
+    """Operations for the calibration-reports table.
+
+    Stores weekly calibration reports with threshold suggestions.
+    PK=REPORT, SK={generated_at}#{report_id}
+    """
+
+    TABLE = CALIBRATION_REPORTS_TABLE
+
+    @staticmethod
+    async def put(report: dict[str, Any] | Any) -> None:
+        """Store a calibration report.
+
+        Args:
+            report: CalibrationReport (with to_dict) or dict
+        """
+        db = get_dynamodb()
+        if hasattr(report, "to_dict"):
+            item = report.to_dict()
+            report_id = report.report_id
+            generated_at = report.generated_at
+        else:
+            item = dict(report)
+            report_id = item["report_id"]
+            generated_at = item.get("generated_at", "")
+        item["PK"] = "REPORT"
+        item["SK"] = f"{generated_at}#{report_id}"
+        await db.put_item(CalibrationReportTable.TABLE, item)
+
+    @staticmethod
+    async def get(report_id: str) -> Optional[dict[str, Any]]:
+        """Get a calibration report by report_id.
+
+        Queries PK=REPORT and scans for matching report_id.
+
+        Args:
+            report_id: The report ID
+
+        Returns:
+            Report dict or None
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            CalibrationReportTable.TABLE,
+            "REPORT",
+            limit=100,
+            scan_forward=False,
+        )
+        for item in items:
+            if item.get("report_id") == report_id:
+                item.pop("PK", None)
+                item.pop("SK", None)
+                return item
+        return None
+
+    @staticmethod
+    async def list_recent(limit: int = 20) -> list[dict[str, Any]]:
+        """List recent calibration reports.
+
+        Args:
+            limit: Maximum reports to return
+
+        Returns:
+            List of report dicts, most recent first
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            CalibrationReportTable.TABLE,
+            "REPORT",
+            limit=limit,
+            scan_forward=False,
+        )
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
+
+    @staticmethod
+    async def update_suggestion_status(
+        report_id: str,
+        suggestion_id: str,
+        new_status: str,
+        expected_current_status: Optional[str] = None,
+    ) -> bool:
+        """Update a suggestion's status within a report.
+
+        Args:
+            report_id: The report containing the suggestion
+            suggestion_id: The suggestion to update
+            new_status: New status value
+            expected_current_status: If set, only update if current status matches
+
+        Returns:
+            True if updated, False if not found or status mismatch
+        """
+        db = get_dynamodb()
+        # Find the report
+        items = await db.query(
+            CalibrationReportTable.TABLE,
+            "REPORT",
+            limit=100,
+            scan_forward=False,
+        )
+        target_item = None
+        for item in items:
+            if item.get("report_id") == report_id:
+                target_item = item
+                break
+
+        if target_item is None:
+            return False
+
+        suggestions = target_item.get("suggestions", [])
+        for i, s in enumerate(suggestions):
+            if s.get("suggestion_id") == suggestion_id:
+                if expected_current_status and s.get("status") != expected_current_status:
+                    return False
+                suggestions[i]["status"] = new_status
+                await db.update_item(
+                    CalibrationReportTable.TABLE,
+                    target_item["PK"],
+                    target_item["SK"],
+                    {"suggestions": suggestions},
+                )
+                return True
+
+        return False
+
+
+class ScanStatusTable:
+    """Operations for the scan-status table.
+
+    Stores scan run statuses for persistence beyond in-memory.
+    PK=SCAN, SK={started_at}#{run_id}
+    """
+
+    TABLE = SCAN_STATUS_TABLE
+
+    @staticmethod
+    async def get(run_id: str) -> Optional[dict[str, Any]]:
+        """Get scan status by run_id.
+
+        Queries PK=SCAN and scans for matching run_id.
+
+        Args:
+            run_id: The scan run ID
+
+        Returns:
+            Status dict or None
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            ScanStatusTable.TABLE,
+            "SCAN",
+            limit=100,
+            scan_forward=False,
+        )
+        for item in items:
+            if item.get("run_id") == run_id:
+                item.pop("PK", None)
+                item.pop("SK", None)
+                return item
+        return None
+
+    @staticmethod
+    async def list_recent(limit: int = 20) -> list[dict[str, Any]]:
+        """List recent scan statuses.
+
+        Args:
+            limit: Maximum statuses to return
+
+        Returns:
+            List of status dicts, most recent first
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            ScanStatusTable.TABLE,
+            "SCAN",
+            limit=limit,
+            scan_forward=False,
+        )
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
+
+    @staticmethod
+    async def put(run_id: str, data: dict[str, Any]) -> None:
+        """Store scan status.
+
+        Args:
+            run_id: The scan run ID
+            data: Status data dict (should contain started_at, status, etc.)
+        """
+        db = get_dynamodb()
+        item = dict(data)
+        item["run_id"] = run_id
+        item["PK"] = "SCAN"
+        started_at = data.get("started_at", datetime.now(timezone.utc).isoformat())
+        item["SK"] = f"{started_at}#{run_id}"
+        await db.put_item(ScanStatusTable.TABLE, item)

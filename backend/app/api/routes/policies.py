@@ -32,6 +32,45 @@ async def get_active_policy() -> dict[str, Any]:
     return policy.model_dump()
 
 
+@router.post("/seed")
+async def seed_policy() -> dict[str, Any]:
+    """Seed the default policy if it doesn't exist.
+
+    Checks for the default policy version. If it exists and is active,
+    returns without changes. If it exists but isn't active, activates it.
+    If it doesn't exist, creates and activates it.
+    """
+    default_version = "v2.0.0"
+    existing = await policy_service.get_version(default_version)
+
+    if existing:
+        if existing.is_active:
+            return {
+                "message": f"Policy {default_version} already active",
+                "activated": False,
+                "policy": existing.model_dump(),
+            }
+        else:
+            await policy_service.activate_version(default_version)
+            return {
+                "message": f"Policy {default_version} activated",
+                "activated": True,
+                "policy": existing.model_dump(),
+            }
+
+    # Create new default policy
+    new_policy = await policy_service.create_version(
+        config=PolicyConfig(),
+        user="seed",
+    )
+    await policy_service.activate_version(new_policy.version)
+    return {
+        "message": f"Policy {new_policy.version} created and activated",
+        "activated": True,
+        "policy": new_policy.model_dump(),
+    }
+
+
 @router.get("/{version}")
 async def get_policy(version: str) -> dict[str, Any]:
     """Get a specific policy version."""

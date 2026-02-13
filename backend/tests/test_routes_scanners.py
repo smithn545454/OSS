@@ -46,7 +46,9 @@ class TestGetScanStatus:
 
     @pytest.mark.asyncio
     async def test_status_not_found_returns_404(self, client):
-        resp = await client.get("/api/scanners/status/nonexistent-id")
+        with patch("app.api.routes.scanners.ScanStatusTable") as mock_table:
+            mock_table.get = AsyncMock(return_value=None)
+            resp = await client.get("/api/scanners/status/nonexistent-id")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio

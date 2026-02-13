@@ -11,26 +11,74 @@ Provides endpoints for:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.calibration.models import CalibrationReport, SuggestionStatus
+from app.calibration.models import SuggestionStatus
 from app.calibration.reporter import CalibrationReporter
-from app.db.dynamodb import get_dynamodb
+from app.core.policy import PolicyService
+from app.core.schemas import PolicyConfig
+from app.db.tables import CalibrationReportTable
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# In-memory storage for reports (in production, use DynamoDB)
-_reports_store: dict[str, CalibrationReport] = {}
-_suggestions_store: dict[str, dict] = {}
 
 
 class RunCalibrationRequest(BaseModel):
     """Request body for running calibration."""
     week_start: Optional[str] = None
     week_end: Optional[str] = None
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+def _find_suggestion_in_reports(
+    reports: list[dict[str, Any]], suggestion_id: str
+) -> tuple[Optional[dict], Optional[dict]]:
+    """Find a suggestion across all reports.
+
+    Returns:
+        Tuple of (report_dict, suggestion_dict) or (None, None)
+    """
+    for report in reports:
+        for s in report.get("suggestions", []):
+            if s.get("suggestion_id") == suggestion_id:
+                return report, s
+    return None, None
+
+
+def _set_nested_value(d: dict, path: str, value: Any) -> bool:
+    """Set a value in a nested dict using dot-separated path.
+
+    Returns True if the path was valid, False otherwise.
+    """
+    keys = path.split(".")
+    current = d
+    for key in keys[:-1]:
+        if not isinstance(current, dict) or key not in current:
+            return False
+        current = current[key]
+    if not isinstance(current, dict) or keys[-1] not in current:
+        return False
+    current[keys[-1]] = value
+    return True
+
+
+def _get_nested_value(d: dict, path: str) -> Any:
+    """Get a value from a nested dict using dot-separated path."""
+    keys = path.split(".")
+    current = d
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
 
 
 # ============================================================================
@@ -43,36 +91,23 @@ async def run_calibration(
     request: Optional[RunCalibrationRequest] = None,
 ) -> dict[str, Any]:
     """Trigger weekly calibration analysis.
-    
+
     Per Section 20.1 - Automated weekly analysis.
-    
-    Args:
-        request: Optional request with week start/end dates
-        
-    Returns:
-        Generated calibration report
     """
     reporter = CalibrationReporter()
-    
+
     week_start = request.week_start if request else None
     week_end = request.week_end if request else None
-    
+
     try:
         report = await reporter.generate_report(
             week_start=week_start,
             week_end=week_end,
         )
-        
-        # Store report
-        _reports_store[report.report_id] = report
-        
-        # Store suggestions for approval workflow
-        for suggestion in report.suggestions:
-            _suggestions_store[suggestion.suggestion_id] = {
-                "report_id": report.report_id,
-                "suggestion": suggestion,
-            }
-        
+
+        # Persist report to DynamoDB
+        await CalibrationReportTable.put(report)
+
         return {
             "message": "Calibration analysis completed",
             "report": report.to_dict(),
@@ -88,44 +123,24 @@ async def run_calibration(
 async def list_reports(
     limit: int = 10,
 ) -> dict[str, Any]:
-    """List calibration reports.
-    
-    Args:
-        limit: Maximum reports to return
-        
-    Returns:
-        List of calibration reports
-    """
-    reports = list(_reports_store.values())
-    
-    # Sort by generated_at descending
-    reports.sort(key=lambda r: r.generated_at, reverse=True)
-    reports = reports[:limit]
-    
+    """List calibration reports."""
+    reports = await CalibrationReportTable.list_recent(limit=limit)
     return {
-        "reports": [r.to_dict() for r in reports],
+        "reports": reports,
         "count": len(reports),
     }
 
 
 @router.get("/reports/{report_id}")
 async def get_report(report_id: str) -> dict[str, Any]:
-    """Get a specific calibration report.
-    
-    Args:
-        report_id: The report ID
-        
-    Returns:
-        Calibration report details
-    """
-    report = _reports_store.get(report_id)
+    """Get a specific calibration report."""
+    report = await CalibrationReportTable.get(report_id)
     if not report:
         raise HTTPException(
             status_code=404,
             detail=f"Report not found: {report_id}",
         )
-    
-    return report.to_dict()
+    return report
 
 
 # ============================================================================
@@ -135,97 +150,103 @@ async def get_report(report_id: str) -> dict[str, Any]:
 
 @router.post("/suggestions/{suggestion_id}/approve")
 async def approve_suggestion(suggestion_id: str) -> dict[str, Any]:
-    """Approve a threshold suggestion.
-    
+    """Approve a threshold suggestion and create a new policy version.
+
     Per Section 20 - No auto-apply, human approval required.
-    
-    This marks the suggestion as approved. In a full implementation,
-    this would also create a new policy version with the suggested change.
-    
-    Args:
-        suggestion_id: The suggestion ID to approve
-        
-    Returns:
-        Updated suggestion with APPROVED status
     """
-    if suggestion_id not in _suggestions_store:
+    reports = await CalibrationReportTable.list_recent(limit=50)
+    report, suggestion = _find_suggestion_in_reports(reports, suggestion_id)
+
+    if suggestion is None:
         raise HTTPException(
             status_code=404,
             detail=f"Suggestion not found: {suggestion_id}",
         )
-    
-    suggestion_data = _suggestions_store[suggestion_id]
-    suggestion = suggestion_data["suggestion"]
-    
-    if suggestion.status != SuggestionStatus.PENDING:
+
+    if suggestion.get("status") != SuggestionStatus.PENDING.value:
         raise HTTPException(
             status_code=400,
-            detail=f"Suggestion is not pending: {suggestion.status.value}",
+            detail=f"Suggestion is not pending: {suggestion.get('status')}",
         )
-    
-    # Mark as approved
-    suggestion.status = SuggestionStatus.APPROVED
-    
-    # In production, this would:
-    # 1. Create a new policy version with the suggested threshold
-    # 2. Optionally activate the new policy
-    
-    # Update in report
-    report_id = suggestion_data["report_id"]
-    if report_id in _reports_store:
-        report = _reports_store[report_id]
-        for i, s in enumerate(report.suggestions):
-            if s.suggestion_id == suggestion_id:
-                report.suggestions[i] = suggestion
-                break
-    
-    return {
-        "message": "Suggestion approved",
-        "suggestion": suggestion.to_dict(),
-        "note": "Create new policy version manually to apply this change",
-    }
+
+    # Claim the suggestion (set to APPROVED)
+    report_id = report["report_id"]
+    await CalibrationReportTable.update_suggestion_status(
+        report_id, suggestion_id, SuggestionStatus.APPROVED.value
+    )
+
+    # Get active policy and validate field_path
+    ps = PolicyService()
+    active_policy = await ps.get_active()
+    if not active_policy:
+        return {
+            "message": "Suggestion approved (no active policy to update)",
+            "suggestion_id": suggestion_id,
+        }
+
+    config_dict = active_policy.config.model_dump()
+    field_path = suggestion.get("field_path", "")
+    current_value = _get_nested_value(config_dict, field_path)
+
+    if current_value is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid field path: {field_path}",
+        )
+
+    # Coerce type if needed
+    suggested_value = suggestion.get("suggested_value")
+    if isinstance(current_value, int) and not isinstance(suggested_value, int):
+        suggested_value = int(round(suggested_value))
+
+    # Apply the suggested value
+    _set_nested_value(config_dict, field_path, suggested_value)
+
+    # Create new policy version
+    try:
+        new_config = PolicyConfig(**config_dict)
+        new_policy = await ps.create_version(
+            config=new_config,
+            user="calibration-auto",
+        )
+        return {
+            "message": "Suggestion approved and policy version created",
+            "suggestion_id": suggestion_id,
+            "new_policy_version": new_policy.version,
+            "policy_hash": new_policy.policy_hash,
+        }
+    except Exception as e:
+        # Rollback: revert suggestion status to PENDING
+        await CalibrationReportTable.update_suggestion_status(
+            report_id, suggestion_id, SuggestionStatus.PENDING.value
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create policy version: {str(e)}",
+        )
 
 
 @router.post("/suggestions/{suggestion_id}/reject")
 async def reject_suggestion(suggestion_id: str) -> dict[str, Any]:
-    """Reject a threshold suggestion.
-    
-    Args:
-        suggestion_id: The suggestion ID to reject
-        
-    Returns:
-        Updated suggestion with REJECTED status
-    """
-    if suggestion_id not in _suggestions_store:
+    """Reject a threshold suggestion."""
+    reports = await CalibrationReportTable.list_recent(limit=50)
+    _, suggestion = _find_suggestion_in_reports(reports, suggestion_id)
+
+    if suggestion is None:
         raise HTTPException(
             status_code=404,
             detail=f"Suggestion not found: {suggestion_id}",
         )
-    
-    suggestion_data = _suggestions_store[suggestion_id]
-    suggestion = suggestion_data["suggestion"]
-    
-    if suggestion.status != SuggestionStatus.PENDING:
+
+    if suggestion.get("status") != SuggestionStatus.PENDING.value:
         raise HTTPException(
             status_code=400,
-            detail=f"Suggestion is not pending: {suggestion.status.value}",
+            detail=f"Suggestion is not pending: {suggestion.get('status')}",
         )
-    
-    # Mark as rejected
-    suggestion.status = SuggestionStatus.REJECTED
-    
-    # Update in report
-    report_id = suggestion_data["report_id"]
-    if report_id in _reports_store:
-        report = _reports_store[report_id]
-        for i, s in enumerate(report.suggestions):
-            if s.suggestion_id == suggestion_id:
-                report.suggestions[i] = suggestion
-                break
-    
+
     return {
         "message": "Suggestion rejected",
-        "suggestion": suggestion.to_dict(),
+        "suggestion_id": suggestion_id,
     }
 
 
@@ -236,25 +257,22 @@ async def reject_suggestion(suggestion_id: str) -> dict[str, Any]:
 
 @router.get("/summary")
 async def get_calibration_summary() -> dict[str, Any]:
-    """Get a summary of calibration status.
-    
-    Returns:
-        Summary with latest report info and pending suggestions
-    """
-    reports = list(_reports_store.values())
-    reports.sort(key=lambda r: r.generated_at, reverse=True)
-    
+    """Get a summary of calibration status."""
+    reports = await CalibrationReportTable.list_recent(limit=50)
+
     latest_report = reports[0] if reports else None
-    
-    pending_suggestions = [
-        s["suggestion"].to_dict()
-        for s in _suggestions_store.values()
-        if s["suggestion"].status == SuggestionStatus.PENDING
-    ]
-    
+
+    pending_count = 0
+    pending_details = []
+    for report in reports:
+        for s in report.get("suggestions", []):
+            if s.get("status") == SuggestionStatus.PENDING.value:
+                pending_count += 1
+                pending_details.append(s)
+
     return {
         "total_reports": len(reports),
-        "latest_report": latest_report.to_dict() if latest_report else None,
-        "pending_suggestions": len(pending_suggestions),
-        "pending_suggestion_details": pending_suggestions,
+        "latest_report": latest_report,
+        "pending_suggestions": pending_count,
+        "pending_suggestion_details": pending_details,
     }
