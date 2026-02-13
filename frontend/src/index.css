@@ -733,19 +733,18 @@ body {
 .gate-journey {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   position: relative;
 }
 
 .gate-journey::before {
   content: '';
   position: absolute;
-  top: 50%;
+  top: 16px;
   left: 20px;
   right: 20px;
   height: 2px;
   background: var(--border-default);
-  transform: translateY(-50%);
   z-index: 0;
 }
 
