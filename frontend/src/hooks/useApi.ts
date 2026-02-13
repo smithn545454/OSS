@@ -4,8 +4,9 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
-import type { 
-  PolicyConfig, 
+import { enhanceWithConvictionScores } from '@/lib/convictionScore'
+import type {
+  PolicyConfig,
   EvaluationFilters,
   TimeRangeOption,
   PipelineMonitorScannerType,
@@ -385,9 +386,12 @@ export function useApproveEvaluations(
         limit: options.limit,
       })
 
-      // Sort by backend final_score descending
-      const sorted = [...(response.evaluations as ApproveEvaluation[])].sort(
-        (a, b) => (b.decision?.final_score ?? 0) - (a.decision?.final_score ?? 0)
+      // Calculate conviction scores client-side, then sort by conviction descending
+      const enhanced = enhanceWithConvictionScores(
+        response.evaluations as ApproveEvaluation[]
+      )
+      const sorted = [...enhanced].sort(
+        (a, b) => (b.convictionScore ?? 0) - (a.convictionScore ?? 0)
       )
 
       return {

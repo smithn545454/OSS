@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OSS (Option Scanner System) — a deterministic, fully observable system that identifies single-leg long options trades. Python/FastAPI backend, React/TypeScript frontend, DynamoDB database, deployed to AWS via CDK.
 
+## Design Philosophy
+
+For each proposed change, examine the existing system and redesign it into the most elegant solution that would have emerged if the change had been a foundational assumption from the start. Do not bolt features onto the side — reshape the system so the new capability feels native and inevitable. Ask questions to clarify where there is uncertainty, ambiguity, or lack of direction before proceeding with implementation.
+
 ## Common Commands
 
 ### Backend (from `backend/`)
