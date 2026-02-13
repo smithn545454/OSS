@@ -263,7 +263,7 @@ deploy_backend() {
     echo -e "${GREEN}  Lambda version: ${VERSION_NUMBER}${NC}"
     echo -e "${GREEN}  Git commit: ${GIT_COMMIT}${NC}"
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${YELLOW}  Rollback with: AWS_REGION=${AWS_REGION} ./scripts/deploy.sh rollback${NC}"
+    echo -e "${YELLOW}  Rollback with: ./scripts/deploy.sh rollback${NC}"
 }
 
 # Rollback to a previous Lambda version
@@ -364,11 +364,8 @@ list_versions() {
         --output table
 }
 
-# Build and deploy frontend
-deploy_frontend() {
-    echo -e "\n${YELLOW}Building and deploying frontend...${NC}"
-
-    # Get S3 bucket name and CloudFront distribution ID
+# Get frontend stack outputs (shared by deploy/rollback-frontend)
+get_frontend_config() {
     BUCKET_NAME=$(aws cloudformation describe-stacks \
         --stack-name ${PROJECT_NAME}-${ENV_NAME}-frontend \
         --query "Stacks[0].Outputs[?ExportName=='${PROJECT_NAME}-${ENV_NAME}-frontend-bucket'].OutputValue" \
@@ -381,16 +378,41 @@ deploy_frontend() {
         --output text \
         --region ${AWS_REGION})
 
+    if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
+        echo -e "${RED}Error: Could not get S3 bucket. Deploy infrastructure first.${NC}"
+        exit 1
+    fi
+}
+
+# Invalidate CloudFront cache and report
+invalidate_cloudfront() {
+    if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
+        echo "Invalidating CloudFront cache..."
+        aws cloudfront create-invalidation \
+            --distribution-id ${DISTRIBUTION_ID} \
+            --paths "/*" > /dev/null
+        echo -e "${GREEN}CloudFront invalidation started (takes ~1-2 min)${NC}"
+    else
+        echo -e "${YELLOW}Warning: No CloudFront distribution ID found, skipping invalidation${NC}"
+    fi
+}
+
+# Build and deploy frontend
+deploy_frontend() {
+    echo -e "\n${YELLOW}Building and deploying frontend...${NC}"
+
+    get_frontend_config
+
     BACKEND_URL=$(aws cloudformation describe-stacks \
         --stack-name ${PROJECT_NAME}-${ENV_NAME}-backend \
         --query "Stacks[0].Outputs[?ExportName=='${PROJECT_NAME}-${ENV_NAME}-backend-url'].OutputValue" \
         --output text \
         --region ${AWS_REGION})
 
-    if [ -z "$BUCKET_NAME" ]; then
-        echo -e "${RED}Error: Could not get S3 bucket. Deploy infrastructure first.${NC}"
-        exit 1
-    fi
+    # Git info for tracking
+    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+    DEPLOY_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     # Build frontend
     cd frontend
@@ -401,20 +423,65 @@ deploy_frontend() {
     npm ci
     npx vite build
 
-    # Sync to S3
-    aws s3 sync dist/ s3://${BUCKET_NAME}/ --delete --region ${AWS_REGION}
-
-    # Invalidate CloudFront cache
-    if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
-        aws cloudfront create-invalidation \
-            --distribution-id ${DISTRIBUTION_ID} \
-            --paths "/*" \
-            --region ${AWS_REGION}
-    fi
-
     cd ..
 
-    echo -e "${GREEN}Frontend deployed!${NC}"
+    # Snapshot current live files for rollback (exclude _previous/ and _deploy-info.json)
+    echo "Backing up current frontend for rollback..."
+    aws s3 rm "s3://${BUCKET_NAME}/_previous/" --recursive --region ${AWS_REGION} --quiet 2>/dev/null || true
+    aws s3 cp "s3://${BUCKET_NAME}/" "s3://${BUCKET_NAME}/_previous/" --recursive --region ${AWS_REGION} --quiet \
+        --exclude "_previous/*" --exclude "_deploy-info.json"
+
+    # Sync new build to S3 (preserve _previous/ and _deploy-info.json)
+    aws s3 sync frontend/dist/ "s3://${BUCKET_NAME}/" --delete --region ${AWS_REGION} \
+        --exclude "_previous/*" --exclude "_deploy-info.json"
+
+    # Upload deploy metadata
+    echo "{\"commit\":\"${GIT_COMMIT}\",\"branch\":\"${GIT_BRANCH}\",\"deployed\":\"${DEPLOY_TIME}\"}" \
+        | aws s3 cp - "s3://${BUCKET_NAME}/_deploy-info.json" --region ${AWS_REGION}
+
+    invalidate_cloudfront
+
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Frontend deployed!${NC}"
+    echo -e "${GREEN}  Git commit: ${GIT_COMMIT} (${GIT_BRANCH})${NC}"
+    echo -e "${GREEN}  Deployed at: ${DEPLOY_TIME}${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${YELLOW}  Rollback with: ./scripts/deploy.sh rollback-frontend${NC}"
+}
+
+# Rollback frontend to previous version
+rollback_frontend() {
+    echo -e "\n${YELLOW}Rolling back frontend...${NC}"
+
+    get_frontend_config
+
+    # Check that a previous snapshot exists
+    PREVIOUS_COUNT=$(aws s3 ls "s3://${BUCKET_NAME}/_previous/" --region ${AWS_REGION} 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$PREVIOUS_COUNT" = "0" ]; then
+        echo -e "${RED}Error: No previous frontend snapshot found. Nothing to rollback to.${NC}"
+        exit 1
+    fi
+
+    # Show what we're rolling back from
+    CURRENT_META=$(aws s3 cp "s3://${BUCKET_NAME}/_deploy-info.json" - --region ${AWS_REGION} 2>/dev/null || echo "{}")
+    echo "Current deploy: ${CURRENT_META}"
+
+    # Restore previous files
+    echo "Restoring previous frontend version..."
+    aws s3 sync "s3://${BUCKET_NAME}/_previous/" "s3://${BUCKET_NAME}/" --delete --region ${AWS_REGION} \
+        --exclude "_previous/*" --exclude "_deploy-info.json"
+
+    # Update deploy metadata to reflect rollback
+    ROLLBACK_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "{\"rollback_from\":${CURRENT_META},\"rolled_back_at\":\"${ROLLBACK_TIME}\"}" \
+        | aws s3 cp - "s3://${BUCKET_NAME}/_deploy-info.json" --region ${AWS_REGION}
+
+    invalidate_cloudfront
+
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Frontend rollback complete!${NC}"
+    echo -e "${GREEN}  Rolled back at: ${ROLLBACK_TIME}${NC}"
+    echo -e "${GREEN}========================================${NC}"
 }
 
 # Set Polygon API key in Secrets Manager
@@ -499,6 +566,9 @@ case "${1:-all}" in
     rollback)
         rollback_backend "$@"
         ;;
+    rollback-frontend)
+        rollback_frontend
+        ;;
     versions)
         list_versions
         ;;
@@ -518,13 +588,14 @@ case "${1:-all}" in
         print_info
         ;;
     *)
-        echo "Usage: $0 {prereq|bootstrap|infra|backend|frontend|rollback [VERSION]|versions|secret|all|info} [--skip-tests]"
+        echo "Usage: $0 {prereq|bootstrap|infra|backend|frontend|rollback [VERSION]|rollback-frontend|versions|secret|all|info} [--skip-tests]"
         echo ""
         echo "Commands:"
         echo "  backend              Deploy backend Lambda (runs tests first)"
         echo "  backend --skip-tests Deploy backend Lambda without running tests"
         echo "  rollback             Rollback to previous Lambda version"
         echo "  rollback N           Rollback to specific Lambda version N"
+        echo "  rollback-frontend    Rollback frontend to previous deploy"
         echo "  versions             List published Lambda versions"
         echo "  frontend             Build and deploy frontend"
         echo "  all                  Full deployment (infra + backend + frontend)"

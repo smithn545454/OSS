@@ -57,6 +57,7 @@ cdk deploy --all     # Deploy all stacks
 ./scripts/deploy.sh all                  # Full deployment (infra + backend + frontend)
 ./scripts/deploy.sh rollback             # Rollback to previous Lambda version
 ./scripts/deploy.sh rollback N           # Rollback to specific Lambda version N
+./scripts/deploy.sh rollback-frontend    # Rollback frontend to previous deploy
 ./scripts/deploy.sh versions             # List all published Lambda versions
 ```
 
