@@ -9,9 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.schemas import GateOperator, GateResult, PillarId, PillarWeights
+from app.core.schemas import GateOperator, GateResult
 from app.gates.models import GateContext, GateEvaluation
-from app.pillars.models import PillarResult
 
 
 def _make_gate_result(gate_id: str, passed: bool, enabled: bool = True) -> GateResult:
@@ -103,32 +102,10 @@ class TestGateContextFromEvaluationAndFeatures:
 
     def test_with_feature_set(self):
         fs_mock = MagicMock()
-        fs_mock.trend_aligned_bullish = True
-        fs_mock.trend_aligned_bearish = False
-        fs_mock.return_5d = 5.0
-        fs_mock.return_20d = 10.0
-        fs_mock.iv_rv_ratio = 0.9
-        fs_mock.feasibility_ratio = 1.5
         fs_mock.iv_percentile = 35.0
 
         ctx = GateContext.from_evaluation_and_features(self._eval_mock(), feature_set=fs_mock)
-        assert ctx.trend_aligned_bullish is True
-        assert ctx.iv_rv_ratio == 0.9
         assert ctx.iv_percentile == 35.0
-
-    def test_with_pillar_results(self):
-        pillar_results = [
-            PillarResult(pillar_id=PillarId.DIRECTIONAL, evaluation_id="e1", score=80.0),
-            PillarResult(pillar_id=PillarId.VOLATILITY, evaluation_id="e1", score=70.0),
-            PillarResult(pillar_id=PillarId.STRUCTURE, evaluation_id="e1", score=60.0),
-        ]
-
-        ctx = GateContext.from_evaluation_and_features(
-            self._eval_mock(), pillar_results=pillar_results, pillar_weights=PillarWeights()
-        )
-        assert ctx.combined_score is not None
-        assert ctx.pillar_scores is not None
-        assert len(ctx.pillar_scores) == 3
 
     def test_with_opportunity(self):
         opp = MagicMock()

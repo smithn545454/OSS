@@ -54,17 +54,26 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 
     # Format the underlying section
     underlying = data["underlying"]
+    sma20 = f"${underlying['sma20']:.2f}" if underlying['sma20'] else "N/A"
+    sma50 = f"${underlying['sma50']:.2f}" if underlying['sma50'] else "N/A"
+    ret_5d = f"{underlying['return_5d']:.1f}%" if underlying['return_5d'] else "N/A"
+    ret_20d = f"{underlying['return_20d']:.1f}%" if underlying['return_20d'] else "N/A"
     underlying_text = f"""
 **Underlying Stock: {underlying['ticker']}**
 - Current Price: ${underlying['price']:.2f}
-- 20-Day SMA: ${underlying['sma20']:.2f if underlying['sma20'] else 'N/A'}
-- 50-Day SMA: ${underlying['sma50']:.2f if underlying['sma50'] else 'N/A'}
-- 5-Day Return: {underlying['return_5d']:.1f}% if underlying['return_5d'] else 'N/A'
-- 20-Day Return: {underlying['return_20d']:.1f}% if underlying['return_20d'] else 'N/A'
+- 20-Day SMA: {sma20}
+- 50-Day SMA: {sma50}
+- 5-Day Return: {ret_5d}
+- 20-Day Return: {ret_20d}
 """
 
     # Format the contract section
     contract = data["contract"]
+    gamma = f"{contract['gamma']:.4f}" if contract['gamma'] else "N/A"
+    vega = f"{contract['vega']:.3f}" if contract['vega'] else "N/A"
+    oi = f"{contract['open_interest']:,}" if contract['open_interest'] else "N/A"
+    vol = f"{contract['volume']:,}" if contract['volume'] else "N/A"
+    spread = f"{contract['spread_pct']:.1f}%" if contract['spread_pct'] else "N/A"
     contract_text = f"""
 **Option Contract**
 - Type: {contract['type']}
@@ -75,11 +84,11 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 - Implied Volatility: {contract['iv'] * 100:.1f}%
 - Delta: {contract['delta']:.3f}
 - Theta: ${contract['theta']:.3f}
-- Gamma: {contract['gamma']:.4f if contract['gamma'] else 'N/A'}
-- Vega: {contract['vega']:.3f if contract['vega'] else 'N/A'}
-- Open Interest: {contract['open_interest']:,} if contract['open_interest'] else 'N/A'
-- Volume: {contract['volume']:,} if contract['volume'] else 'N/A'
-- Bid-Ask Spread: {contract['spread_pct']:.1f}% if contract['spread_pct'] else 'N/A'
+- Gamma: {gamma}
+- Vega: {vega}
+- Open Interest: {oi}
+- Volume: {vol}
+- Bid-Ask Spread: {spread}
 """
 
     # Format the scores section
@@ -91,6 +100,7 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 - Volatility Score: {scores['volatility']:.1f}/100
 - Structure Score: {scores['structure']:.1f}/100
 - Quality Tier: {data['quality_tier'] or 'N/A'}
+- Policy Version: {data.get('policy_version', 'N/A')}
 """
 
     # Format pillar contributors
@@ -107,7 +117,8 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
             triggers_text += f"- {trigger['type']}: {', '.join(trigger['reasons'])}\n"
             if trigger["metrics"]:
                 for k, v in trigger["metrics"].items():
-                    triggers_text += f"  - {k}: {v:.2f if isinstance(v, float) else v}\n"
+                    formatted_v = f"{v:.2f}" if isinstance(v, float) else str(v)
+                    triggers_text += f"  - {k}: {formatted_v}\n"
     else:
         triggers_text += "- No specific scanner triggers\n"
 

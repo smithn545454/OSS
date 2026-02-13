@@ -98,7 +98,7 @@ class HardGatesStage:
         
         # Persist gate results if requested
         if persist_results and results:
-            await self._persist_results(results)
+            await self._persist_results(run_id, results)
         
         # Calculate stage statistics
         passed_count = sum(1 for ge in results.values() if ge.all_passed)
@@ -150,18 +150,34 @@ class HardGatesStage:
     
     async def _persist_results(
         self,
+        run_id: str,
         results: dict[str, GateEvaluation],
     ) -> None:
         """Persist gate results to DynamoDB.
-        
+
+        Stamps run_id on each GateResult before writing so results
+        can be queried by run via the GSI.
+
         Args:
+            run_id: Pipeline run ID to stamp on each result
             results: Dict mapping evaluation_id to GateEvaluation
+
+        Raises:
+            RuntimeError: If any batch write fails
         """
+        errors: list[str] = []
         for evaluation_id, gate_eval in results.items():
             try:
-                await GateResultTable.put_batch(gate_eval.gate_results)
+                stamped = [
+                    gr.model_copy(update={"run_id": run_id})
+                    for gr in gate_eval.gate_results
+                ]
+                await GateResultTable.put_batch(stamped)
             except Exception as e:
                 logger.error(f"Error persisting gate results for {evaluation_id}: {e}")
+                errors.append(evaluation_id)
+        if errors:
+            raise RuntimeError(f"Failed to persist gate results for: {', '.join(errors)}")
 
 
 async def run_hard_gates(
