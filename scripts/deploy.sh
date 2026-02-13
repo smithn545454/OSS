@@ -147,7 +147,6 @@ run_backend_tests() {
             --ignore=tests/test_catalyst_service.py \
             --ignore=tests/test_db_integration.py \
             --ignore=tests/test_gate_calculator.py \
-            --ignore=tests/test_pipeline_route.py \
             --ignore=tests/test_reporter.py 2>&1; then
         echo -e "${GREEN}Tests passed!${NC}"
         cd ..

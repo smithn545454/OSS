@@ -78,14 +78,14 @@ class TestHardGatesStage:
         assert results == {}
 
     @pytest.mark.asyncio
-    async def test_all_19_gates_evaluated(
+    async def test_all_9_gates_evaluated(
         self,
         mock_orchestrator,
         sample_evaluation,
         sample_opportunity,
         sample_feature_set,
     ):
-        """All 19 registered gates should appear in gate results."""
+        """All 9 registered gates should appear in gate results."""
         with patch("app.gates.stage.GateResultTable"):
             stage = HardGatesStage(mock_orchestrator)
             results = await stage.execute(
@@ -96,7 +96,7 @@ class TestHardGatesStage:
                 persist_results=False,
             )
         ge = results[sample_evaluation.evaluation_id]
-        assert len(ge.gate_results) == 19
+        assert len(ge.gate_results) == 9
 
 
 class TestGateHelperFunctions:

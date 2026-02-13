@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.routes.pipeline import _parse_scanner_type, parse_time_range
-from app.core.schemas import ScannerType, TimeRangeOption
+from app.api.routes.pipeline import parse_time_range
+from app.core.schemas import TimeRangeOption
 from app.main import create_app
 
 
@@ -21,25 +21,6 @@ def app():
 # Pure function tests
 # ---------------------------------------------------------------------------
 
-
-class TestParseScannerType:
-    def test_none(self):
-        assert _parse_scanner_type(None) is None
-
-    def test_all(self):
-        assert _parse_scanner_type("all") is None
-
-    def test_upper(self):
-        assert _parse_scanner_type("BREAKOUT") == ScannerType.BREAKOUT
-
-    def test_lower_frontend(self):
-        assert _parse_scanner_type("unusual_volume") == ScannerType.UNUSUAL_VOLUME
-
-    def test_compression(self):
-        assert _parse_scanner_type("compression") == ScannerType.COMPRESSION_EXPANSION
-
-    def test_unknown(self):
-        assert _parse_scanner_type("doesnt_exist") is None
 
 
 class TestParseTimeRange:

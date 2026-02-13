@@ -173,7 +173,7 @@ class TestGateExceptions:
         gate_eval = calc.evaluate_gates(ctx, [])
         # Should complete without crashing
         assert gate_eval is not None
-        assert len(gate_eval.gate_results) == 19
+        assert len(gate_eval.gate_results) == 9
 
 
 # ============================================================================

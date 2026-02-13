@@ -117,8 +117,9 @@ class TestExtractTicker:
     def test_quarterly(self):
         assert extract_ticker_from_filename("AAPL_2025_q1_option_chain.txt") == "AAPL"
 
-    def test_monthly(self):
-        assert extract_ticker_from_filename("MSFT_month_option_chain.txt") == "MSFT"
+    def test_monthly_not_matched(self):
+        # FILENAME_PATTERN only matches {TICKER}_{YEAR}_q{Q}_option_chain.txt
+        assert extract_ticker_from_filename("MSFT_month_option_chain.txt") is None
 
     def test_lowercase(self):
         assert extract_ticker_from_filename("aapl_2025_q3_option_chain.txt") == "AAPL"
@@ -139,24 +140,24 @@ class TestExtractTicker:
 class TestParseOptionChainRow:
 
     def _valid_row(self):
-        return [
-            "2026-01-15",  # trade_date
-            "185.0",  # strike
-            "2026-03-20",  # expiry
-            "c",  # call/put
-            "8.50",  # last
-            "8.30",  # bid
-            "8.70",  # ask
-            "0.28",  # bid_iv
-            "0.32",  # ask_iv
-            "5000",  # oi
-            "500",  # volume
-            "0.55",  # delta
-            "0.03",  # gamma
-            "0.25",  # vega
-            "-0.08",  # theta
-            "0.01",  # rho
-        ]
+        return {
+            "Trade Date": "2026-01-15",
+            "Strike": "185.0",
+            "Expiry Date": "2026-03-20",
+            "Call/Put": "c",
+            "Last Trade Price": "8.50",
+            "Bid Price": "8.30",
+            "Ask Price": "8.70",
+            "Bid Implied Volatility": "0.28",
+            "Ask Implied Volatility": "0.32",
+            "Open Interest": "5000",
+            "Volume": "500",
+            "Delta": "0.55",
+            "Gamma": "0.03",
+            "Vega": "0.25",
+            "Theta": "-0.08",
+            "Rho": "0.01",
+        }
 
     def test_valid_row(self):
         result = parse_option_chain_row(self._valid_row())
@@ -167,39 +168,39 @@ class TestParseOptionChainRow:
 
     def test_put_option(self):
         row = self._valid_row()
-        row[3] = "put"
+        row["Call/Put"] = "put"
         result = parse_option_chain_row(row)
         assert result is not None
         assert result.call_put == "p"
 
     def test_too_few_columns(self):
-        assert parse_option_chain_row(["a", "b"]) is None
+        assert parse_option_chain_row({}) is None
 
     def test_invalid_date(self):
         row = self._valid_row()
-        row[0] = "not-a-date"
+        row["Trade Date"] = "not-a-date"
         assert parse_option_chain_row(row) is None
 
     def test_invalid_strike(self):
         row = self._valid_row()
-        row[1] = ""
+        row["Strike"] = ""
         assert parse_option_chain_row(row) is None
 
     def test_invalid_call_put(self):
         row = self._valid_row()
-        row[3] = "x"
+        row["Call/Put"] = "x"
         assert parse_option_chain_row(row) is None
 
     def test_call_string(self):
         row = self._valid_row()
-        row[3] = "call"
+        row["Call/Put"] = "call"
         result = parse_option_chain_row(row)
         assert result.call_put == "c"
 
     def test_missing_optional_fields(self):
         row = self._valid_row()
-        row[4] = ""  # last trade price
-        row[7] = ""  # bid_iv
+        row["Last Trade Price"] = ""
+        row["Bid Implied Volatility"] = ""
         result = parse_option_chain_row(row)
         assert result is not None
         assert result.last_trade_price is None
@@ -300,11 +301,11 @@ class TestBuildOptionTicker:
 
     def test_call_option(self):
         result = build_option_ticker("AAPL", "2026-03-20", "c", 185.0)
-        assert result == "AAPL260320C00185000"
+        assert result == "O:AAPL260320C00185000"
 
     def test_put_option(self):
         result = build_option_ticker("AAPL", "2026-03-20", "p", 185.0)
-        assert result == "AAPL260320P00185000"
+        assert result == "O:AAPL260320P00185000"
 
     def test_fractional_strike(self):
         result = build_option_ticker("SPY", "2026-01-17", "c", 580.5)
@@ -324,7 +325,9 @@ class TestProcessOptionChainFile:
 
     def test_valid_file(self, tmp_path):
         """Process a valid option chain file."""
-        content = "2026-01-15,185.0,2026-02-28,c,8.5,8.3,8.7,0.28,0.32,5000,500,0.50,0.03,0.25,-0.08,0.01\n"
+        header = "Trade Date,Strike,Expiry Date,Call/Put,Last Trade Price,Bid Price,Ask Price,Bid Implied Volatility,Ask Implied Volatility,Open Interest,Volume,Delta,Gamma,Vega,Theta,Rho\n"
+        content = header
+        content += "2026-01-15,185.0,2026-02-28,c,8.5,8.3,8.7,0.28,0.32,5000,500,0.50,0.03,0.25,-0.08,0.01\n"
         content += "2026-01-15,185.0,2026-02-28,p,7.5,7.3,7.7,0.30,0.34,3000,300,-0.50,0.03,0.25,-0.08,0.01\n"
         fpath = tmp_path / "AAPL_2025_q4_option_chain.txt"
         fpath.write_text(content)
@@ -348,9 +351,11 @@ class TestProcessOptionChainFile:
         assert oi == []
 
     def test_malformed_rows_skipped(self, tmp_path):
-        content = "bad,data,only,three,columns\n"
+        header = "Trade Date,Strike,Expiry Date,Call/Put,Last Trade Price,Bid Price,Ask Price,Bid Implied Volatility,Ask Implied Volatility,Open Interest,Volume,Delta,Gamma,Vega,Theta,Rho\n"
+        content = header
+        content += "bad,data,only,three,columns\n"
         content += "2026-01-15,185.0,2026-02-28,c,8.5,8.3,8.7,0.28,0.32,5000,500,0.50,0.03,0.25,-0.08,0.01\n"
-        fpath = tmp_path / "TSLA_month_option_chain.txt"
+        fpath = tmp_path / "TSLA_2025_q1_option_chain.txt"
         fpath.write_text(content)
         iv, oi = process_option_chain_file(fpath)
         assert len(oi) == 1  # Only the valid row
@@ -365,7 +370,7 @@ class TestFindFiles:
 
     def test_find_files(self, tmp_path):
         (tmp_path / "AAPL_2025_q1_option_chain.txt").write_text("")
-        (tmp_path / "MSFT_month_option_chain.txt").write_text("")
+        (tmp_path / "MSFT_2025_q2_option_chain.txt").write_text("")
         (tmp_path / "random.txt").write_text("")
         files = list(find_option_chain_files(tmp_path))
         assert len(files) == 2

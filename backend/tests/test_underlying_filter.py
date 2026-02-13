@@ -54,13 +54,20 @@ def sample_opportunity() -> Opportunity:
 
 @pytest.fixture
 def sample_bars() -> list[DailyBar]:
-    """Sample daily bars for testing."""
+    """Sample daily bars for testing.
+
+    Dates are generated relative to today so they always fall within
+    the 30-day lookback window used by _check_data_completeness.
+    """
+    from datetime import timedelta
     bars = []
+    today = datetime.now(timezone.utc).date()
     for i in range(30):
+        bar_date = today - timedelta(days=29 - i)
         bars.append(
             DailyBar(
                 ticker="AAPL",
-                date=f"2026-01-{(i + 1):02d}",
+                date=bar_date.strftime("%Y-%m-%d"),
                 open=175.0 + i * 0.1,
                 high=176.0 + i * 0.1,
                 low=174.0 + i * 0.1,

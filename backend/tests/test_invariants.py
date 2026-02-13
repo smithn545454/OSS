@@ -233,10 +233,10 @@ class TestVerdictInvariants:
 class TestGateInvariants:
     """Invariants: gate behavior must be safe and consistent."""
 
-    def test_all_19_gates_registered(self):
-        """INV-15: ALL_GATES must contain exactly 19 gates."""
+    def test_all_9_gates_registered(self):
+        """INV-15: ALL_GATES must contain exactly 9 gates."""
         from app.gates.gates import ALL_GATES
-        assert len(ALL_GATES) == 19
+        assert len(ALL_GATES) == 9
 
     def test_gate_error_defaults_to_fail(self):
         """INV-16: If a gate function throws, the result must be passed=False.
@@ -267,11 +267,7 @@ class TestGateInvariants:
             time_adjusted_feasibility=0.5,
             iv_percentile=50.0,
             theta_pct=2.0,
-            iv_rv_ratio=1.0,
-            feasibility_ratio=0.5,
             volume_ratio=2.0,
-            combined_score=None,  # This will cause score-dependent gates to error
-            pillar_scores={},  # Empty: pillar minimum gate will handle None
         )
 
         config = GateConfig()
@@ -473,7 +469,7 @@ class TestGreeksCoherenceInvariants:
             bid=5.0, ask=5.4, mid=5.0, spread_pct=5.0,
             open_interest=500, volume=100,
             time_adjusted_feasibility=0.5, iv_percentile=50.0,
-            iv=0.30, iv_rv_ratio=1.0, feasibility_ratio=0.5,
+            iv=0.30,
             volume_ratio=2.0, theta_pct=2.0,
         )
 
