@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { usePolicies, useActivePolicy, useActivatePolicy, useCreatePolicy, usePolicyDiff } from '@/hooks/useApi'
+import { formatDate, formatDateTime } from '@/lib/formatTime'
 import type { Policy, PolicyConfig as PolicyConfigType } from '@/lib/types'
 import clsx from 'clsx'
 
@@ -181,7 +182,7 @@ function PolicyVersionList({
                 </div>
                 <p className="text-xs text-oss-muted">
                   Created by {policy.created_by} •{' '}
-                  {new Date(policy.created_at).toLocaleDateString()}
+                  {formatDate(policy.created_at)}
                 </p>
               </div>
             </div>
@@ -329,7 +330,7 @@ function ChangelogPanel({ changelog }: ChangelogPanelProps) {
                   {change.field_path}
                 </span>
                 <span className="text-xs text-oss-muted">
-                  {new Date(change.changed_at).toLocaleString()}
+                  {formatDateTime(change.changed_at)}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs">

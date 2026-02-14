@@ -20,6 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from app.config import get_settings
 from app.core.schemas import (
     DisplayFailureOverlap,
     DisplayGate,
@@ -681,7 +682,11 @@ class PipelineAggregator:
     def _format_time_range(self, start: datetime, end: datetime) -> str:
         """Format time range for display."""
         now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        pacific = get_settings().display_tz
+        now_local = now.astimezone(pacific)
+        today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(
+            timezone.utc
+        )
 
         if start >= today_start:
             return "Today"

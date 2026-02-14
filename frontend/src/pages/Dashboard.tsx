@@ -1,6 +1,7 @@
 import { TrendingUp, Activity, Eye, XCircle, CheckCircle } from 'lucide-react'
 import { usePipelineStats, useActivePolicy, usePipelineRuns } from '@/hooks/useApi'
 import RepresentativeTraces from '@/components/RepresentativeTraces'
+import { formatDateTime, formatDate } from '@/lib/formatTime'
 import clsx from 'clsx'
 
 interface StatCardProps {
@@ -140,7 +141,7 @@ function RecentRuns() {
                     {run.policy_version}
                   </p>
                   <p className="text-xs text-oss-muted">
-                    {new Date(run.started_at).toLocaleString()}
+                    {formatDateTime(run.started_at)}
                   </p>
                 </div>
               </div>
@@ -190,7 +191,7 @@ export default function Dashboard() {
                 </p>
                 <p className="text-xs text-oss-muted">
                   Created by {policy.created_by} on{' '}
-                  {new Date(policy.created_at).toLocaleDateString()}
+                  {formatDate(policy.created_at)}
                 </p>
               </div>
             </div>

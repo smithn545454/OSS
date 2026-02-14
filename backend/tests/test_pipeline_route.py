@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.api.routes.pipeline import parse_time_range
+from app.config import get_settings
 from app.core.schemas import TimeRangeOption
 from app.main import create_app
 
@@ -30,7 +32,9 @@ class TestParseTimeRange:
 
     def test_today(self):
         start, end = parse_time_range(TimeRangeOption.TODAY)
-        assert start.hour == 0
+        pacific = get_settings().display_tz
+        start_local = start.astimezone(pacific)
+        assert start_local.hour == 0
 
     def test_yesterday(self):
         start, end = parse_time_range(TimeRangeOption.YESTERDAY)

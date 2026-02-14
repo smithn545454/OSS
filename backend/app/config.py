@@ -6,6 +6,7 @@ import logging
 import os
 from functools import lru_cache
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings
 
@@ -83,6 +84,13 @@ class Settings(BaseSettings):
     # DynamoDB
     dynamodb_endpoint: Optional[str] = None  # For local development
     dynamodb_table_prefix: str = "oss"
+
+    # Display timezone for day boundaries and user-facing labels
+    display_timezone: str = "America/Los_Angeles"
+
+    @property
+    def display_tz(self) -> ZoneInfo:
+        return ZoneInfo(self.display_timezone)
 
     # Polygon.io - can be set directly or via POLYGON_SECRET_ARN
     polygon_api_key: Optional[str] = None

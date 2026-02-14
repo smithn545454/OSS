@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.config import get_settings
 from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
     GetAggregateResponse,
@@ -47,7 +48,13 @@ def parse_time_range(
         Tuple of (start_datetime, end_datetime)
     """
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Compute "today" as Pacific midnight converted to UTC so that
+    # at e.g. 7:40 PM PT (3:40 AM next-day UTC) we still see today's runs.
+    pacific = get_settings().display_tz
+    now_local = now.astimezone(pacific)
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(
+        timezone.utc
+    )
     
     if time_range == TimeRangeOption.LAST_HOUR:
         return now - timedelta(hours=1), now

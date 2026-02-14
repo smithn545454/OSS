@@ -7,25 +7,13 @@
 import { AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import type { PipelineRunListItem } from '@/lib/types'
+import { formatDateTime } from '@/lib/formatTime'
 
 interface RecentRunsSidebarProps {
   runs: PipelineRunListItem[]
   selectedRunId: string | null
   onSelectRun: (run: PipelineRunListItem) => void
   isLoading: boolean
-}
-
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso)
-  return date.toLocaleString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
 }
 
 function formatScannerType(type: string | null): string {
@@ -102,7 +90,7 @@ export function RecentRunsSidebar({
                     className="text-[12px]"
                     style={{ color: 'var(--text-muted)' }}
                   >
-                    {formatTimestamp(run.timestamp)}
+                    {formatDateTime(run.timestamp)}
                   </span>
                   {hasAnomaly && (
                     <AlertTriangle 

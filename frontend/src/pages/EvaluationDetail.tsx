@@ -23,6 +23,7 @@ import type {
 } from '@/lib/types'
 import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
+import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 
 // ============================================================================
 // Score Bar Component
@@ -461,7 +462,7 @@ function PaperTrackingPanel({ position }: PaperTrackingPanelProps) {
         <div className="space-y-1">
           <p className="text-xs text-oss-muted">Entry Price</p>
           <p className="font-mono text-lg text-oss-text">${position.entry_price.toFixed(2)}</p>
-          <p className="text-xs text-oss-muted">{position.entry_date}</p>
+          <p className="text-xs text-oss-muted">{formatDate(position.entry_date)}</p>
         </div>
         <div className="space-y-1">
           <p className="text-xs text-oss-muted">Current Price</p>
@@ -500,7 +501,7 @@ function PaperTrackingPanel({ position }: PaperTrackingPanelProps) {
             </div>
             <div className="space-y-1">
               <p className="text-xs text-oss-muted">Exit Date</p>
-              <p className="text-sm text-oss-text">{position.exit_date}</p>
+              <p className="text-sm text-oss-text">{formatDate(position.exit_date!)}</p>
             </div>
           </div>
         </div>
@@ -534,7 +535,7 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
               <span className="text-sm font-medium text-oss-accent">
                 {trigger.scanner_type.replace(/_/g, ' ')}
               </span>
-              <span className="text-xs text-oss-muted">{trigger.triggered_at}</span>
+              <span className="text-xs text-oss-muted">{formatDateTime(trigger.triggered_at)}</span>
             </div>
             <div className="flex flex-wrap gap-1 mb-2">
               {trigger.reason_codes.map((code) => (
@@ -771,7 +772,7 @@ function HeroSection({ evaluation, decision }: HeroSectionProps) {
         
         {/* Contract details */}
         <div className="text-lg text-oss-muted" style={{ fontFamily: 'var(--font-primary)' }}>
-          ${evaluation.strike} Strike · Exp {new Date(evaluation.expiration_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          ${evaluation.strike} Strike · Exp {formatExpirationDate(evaluation.expiration_date)}
         </div>
         
         {/* Greeks Row */}
