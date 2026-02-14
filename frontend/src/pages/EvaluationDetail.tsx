@@ -392,7 +392,15 @@ function PillarCard({ pillar }: PillarCardProps) {
               </span>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-oss-muted">
-                  {typeof c.raw_value === 'number' ? c.raw_value.toFixed(2) : String(c.raw_value)}
+                  {typeof c.raw_value === 'number'
+                    ? c.raw_value.toFixed(2)
+                    : typeof c.raw_value === 'object' && c.raw_value !== null
+                      ? (() => {
+                          const vals = Object.values(c.raw_value as Record<string, unknown>)
+                          const num = vals.find((v): v is number => typeof v === 'number')
+                          return num !== undefined ? num.toFixed(2) : '—'
+                        })()
+                      : String(c.raw_value ?? '—')}
                 </span>
                 <span className={clsx(
                   'font-mono text-xs',
