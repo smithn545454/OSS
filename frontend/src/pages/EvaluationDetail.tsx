@@ -911,9 +911,6 @@ export default function EvaluationDetail() {
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />
 
-      {/* Gate Results (Detailed) */}
-      <GateResultsPanel gates={gate_results} allPassed={summary.all_gates_passed} />
-
       {/* Pillar Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {pillar_scores.map((pillar) => (
@@ -934,6 +931,9 @@ export default function EvaluationDetail() {
 
       {/* Paper Tracking */}
       <PaperTrackingPanel position={position} />
+
+      {/* Gate Results (Detailed) */}
+      <GateResultsPanel gates={gate_results} allPassed={summary.all_gates_passed} />
     </div>
   )
 }
