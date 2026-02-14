@@ -299,6 +299,7 @@ After any rollback, tell the user:
 5. **If CI is red, do not deploy** — fix the CI failure first
 6. **If unsure, ask** — it's better to pause and ask the user than to deploy broken code
 7. **Tag milestones** — when the pipeline is working well after a significant change, suggest tagging: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
+8. **No shortcuts for "simple" changes** — follow every step regardless of how minor the change appears. Frontend-only changes still require CloudWatch and Pipeline Monitor checks.
 
 ### Pipeline Run ID Flow (Critical Context)
 - **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
