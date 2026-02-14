@@ -393,12 +393,12 @@ function PillarCard({ pillar }: PillarCardProps) {
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-oss-muted">
                   {typeof c.raw_value === 'number'
-                    ? c.raw_value.toFixed(2)
+                    ? c.raw_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                     : typeof c.raw_value === 'object' && c.raw_value !== null
                       ? (() => {
                           const vals = Object.values(c.raw_value as Record<string, unknown>)
                           const num = vals.find((v): v is number => typeof v === 'number')
-                          return num !== undefined ? num.toFixed(2) : '—'
+                          return num !== undefined ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
                         })()
                       : String(c.raw_value ?? '—')}
                 </span>
@@ -551,7 +551,7 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
                 {Object.entries(trigger.metrics).map(([key, value]) => (
                   <div key={key} className="flex justify-between text-xs">
                     <span className="text-oss-muted">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toFixed(2) : String(value)}</span>
+                    <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value)}</span>
                   </div>
                 ))}
               </div>
