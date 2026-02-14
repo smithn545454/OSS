@@ -744,6 +744,7 @@ interface HeroSectionProps {
     underlying_price: number
     mid: number
   }
+  companyName?: string | null
   decision: {
     verdict: Verdict
     final_score: number
@@ -751,14 +752,14 @@ interface HeroSectionProps {
   } | null
 }
 
-function HeroSection({ evaluation, decision }: HeroSectionProps) {
+function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
   const isCall = evaluation.option_type === 'CALL'
 
   return (
     <div className="detail-hero">
       <div>
         {/* Ticker */}
-        <div className="flex items-center gap-4 mb-4">
+        <div className="flex items-center gap-4 mb-1">
           <span className="detail-ticker">{evaluation.underlying_ticker}</span>
           <span className={clsx(
             'rounded-lg px-4 py-2 text-lg font-semibold',
@@ -769,7 +770,10 @@ function HeroSection({ evaluation, decision }: HeroSectionProps) {
           {decision && <VerdictBadge verdict={decision.verdict} size="lg" />}
           {decision?.quality_tier && <QualityTierBadge tier={decision.quality_tier} />}
         </div>
-        
+        {companyName && (
+          <p className="text-sm text-oss-muted mb-4">{companyName}</p>
+        )}
+
         {/* Contract details */}
         <div className="text-lg text-oss-muted" style={{ fontFamily: 'var(--font-primary)' }}>
           ${evaluation.strike} Strike · Exp {formatExpirationDate(evaluation.expiration_date)}
@@ -905,13 +909,14 @@ export default function EvaluationDetail() {
       </Link>
       
       {/* Hero Section */}
-      <HeroSection 
-        evaluation={evaluation as HeroSectionProps['evaluation']} 
+      <HeroSection
+        evaluation={evaluation as HeroSectionProps['evaluation']}
+        companyName={data.company_name}
         decision={decision ? {
           verdict: decision.verdict as Verdict,
           final_score: decision.final_score,
           quality_tier: decision.quality_tier as QualityTier | null,
-        } : null} 
+        } : null}
       />
 
       {/* Contract Card */}

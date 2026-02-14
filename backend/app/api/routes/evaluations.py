@@ -21,11 +21,32 @@ from app.db.tables import (
     TradeThesisTable,
 )
 from app.services.catalyst import CatalystDataService
-from app.services.finnhub import FinnhubClient
 from app.services.earnings_cache import EarningsCacheService
+from app.services.finnhub import FinnhubClient
+from app.services.polygon import PolygonClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# In-memory cache for ticker company names (survives across warm Lambda invocations)
+_ticker_name_cache: dict[str, Optional[str]] = {}
+
+
+async def _get_company_name(ticker: str) -> Optional[str]:
+    """Fetch company name from Polygon, with in-memory caching."""
+    if ticker in _ticker_name_cache:
+        return _ticker_name_cache[ticker]
+
+    try:
+        async with PolygonClient() as client:
+            details = await client.get_ticker_details(ticker)
+            name = details.get("name") if details else None
+            _ticker_name_cache[ticker] = name
+            return name
+    except Exception as e:
+        logger.debug(f"Failed to fetch company name for {ticker}: {e}")
+        _ticker_name_cache[ticker] = None
+        return None
 
 
 def _create_catalyst_service() -> CatalystDataService:
@@ -307,8 +328,11 @@ async def get_evaluation_detail_by_id(
     all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
     failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
 
+    company_name = await _get_company_name(ticker)
+
     return {
         "evaluation": evaluation,
+        "company_name": company_name,
         "pillar_scores": pillar_scores_dict,
         "gate_results": gate_results_dict,
         "position": position_dict,
