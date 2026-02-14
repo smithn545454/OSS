@@ -905,9 +905,6 @@ export default function EvaluationDetail() {
         } : null} 
       />
 
-      {/* Gate Journey Timeline */}
-      <GateJourney gates={gate_results} />
-
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />
 
@@ -931,6 +928,9 @@ export default function EvaluationDetail() {
 
       {/* Paper Tracking */}
       <PaperTrackingPanel position={position} />
+
+      {/* Gate Journey Timeline */}
+      <GateJourney gates={gate_results} />
 
       {/* Gate Results (Detailed) */}
       <GateResultsPanel gates={gate_results} allPassed={summary.all_gates_passed} />
