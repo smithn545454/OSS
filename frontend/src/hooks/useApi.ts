@@ -37,10 +37,14 @@ export const queryKeys = {
     time?: TimeRangeOption
     scanner?: PipelineMonitorScannerType
     limit?: number
+    start?: string
+    end?: string
   }) => ['pipeline', 'monitor', 'runs', options] as const,
   pipelineAggregate: (options: {
     time?: TimeRangeOption
     scanner?: PipelineMonitorScannerType
+    start?: string
+    end?: string
   }) => ['pipeline', 'monitor', 'aggregate', options] as const,
   pipelineRunDetail: (runId: string) => ['pipeline', 'monitor', 'run', runId] as const,
   // Opportunities page keys
@@ -270,6 +274,8 @@ export function usePipelineMonitorRuns(options: {
   scanner?: PipelineMonitorScannerType
   limit?: number
   offset?: number
+  start?: string
+  end?: string
   enabled?: boolean
 } = {}) {
   return useQuery({
@@ -277,12 +283,16 @@ export function usePipelineMonitorRuns(options: {
       time: options.time,
       scanner: options.scanner,
       limit: options.limit,
+      start: options.start,
+      end: options.end,
     }),
     queryFn: () => api.getPipelineMonitorRuns({
       time: options.time,
       scanner: options.scanner,
       limit: options.limit,
       offset: options.offset,
+      start: options.start,
+      end: options.end,
     }),
     enabled: options.enabled !== false,
     refetchInterval: 10000, // Refresh every 10 seconds for live updates
@@ -306,6 +316,8 @@ export function usePipelineAggregate(options: {
     queryKey: queryKeys.pipelineAggregate({
       time: options.time,
       scanner: options.scanner,
+      start: options.start,
+      end: options.end,
     }),
     queryFn: () => api.getPipelineAggregateData({
       time: options.time,

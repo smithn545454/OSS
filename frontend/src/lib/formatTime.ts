@@ -49,3 +49,58 @@ export function formatExpirationDate(dateStr: string): string {
     year: 'numeric',
   })
 }
+
+/**
+ * Convert a calendar date (year/month/day) to midnight-to-end-of-day
+ * Pacific Time boundaries as UTC ISO strings.
+ * Handles PST (-08:00) vs PDT (-07:00) automatically.
+ */
+export function toPacificISORange(
+  year: number,
+  month: number,
+  day: number
+): { start: string; end: string } {
+  // Build a date at noon Pacific to determine the UTC offset for that day
+  const probe = new Date(Date.UTC(year, month - 1, day, 20, 0, 0)) // ~noon PT
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    timeZoneName: 'shortOffset',
+  }).formatToParts(probe)
+  const offsetPart = parts.find(p => p.type === 'timeZoneName')?.value || 'GMT-8'
+  const offsetMatch = offsetPart.match(/GMT([+-]?\d+)/)
+  const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : -8
+
+  // Midnight Pacific = midnight - offset in UTC
+  const startUtc = new Date(Date.UTC(year, month - 1, day, -offsetHours, 0, 0))
+  // End of day = start + 24 hours - 1 millisecond
+  const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000 - 1)
+
+  return {
+    start: startUtc.toISOString(),
+    end: endUtc.toISOString(),
+  }
+}
+
+/**
+ * Compact date display: "Feb 13" (current year) or "Feb 13, 2025" (other year).
+ */
+export function formatDateShort(iso: string): string {
+  const date = new Date(iso)
+  const now = new Date()
+  const pacificYear = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric' }).format(now)
+  )
+  const dateYear = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric' }).format(date)
+  )
+
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    timeZone: TZ,
+  }
+  if (dateYear !== pacificYear) {
+    opts.year = 'numeric'
+  }
+  return date.toLocaleDateString('en-US', opts)
+}

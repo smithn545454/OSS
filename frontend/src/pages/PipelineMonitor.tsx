@@ -1,6 +1,6 @@
 /**
  * Pipeline Monitor Page
- * 
+ *
  * Per oss-pipeline-monitor-requirements.md, this page provides:
  * 1. Operational Monitoring: Visual confirmation that data flows correctly
  * 2. Diagnostic Investigation: Deep inspection of where contracts are filtered
@@ -32,6 +32,7 @@ const STORAGE_KEY_SCANNER = 'oss-pipeline-scanner'
 const STORAGE_KEY_VERDICT = 'oss-pipeline-verdict'
 const STORAGE_KEY_DTE = 'oss-pipeline-dte'
 const STORAGE_KEY_SIDE = 'oss-pipeline-side'
+const STORAGE_KEY_CUSTOM_RANGE = 'oss-pipeline-custom-range'
 
 // Default filter values
 const DEFAULT_TIME_RANGE: TimeRangeOption = 'today'
@@ -73,56 +74,75 @@ function hasAnyAnomaly(data: PipelineMonitorData | undefined): boolean {
 
 export default function PipelineMonitor() {
   const [searchParams, setSearchParams] = useSearchParams()
-  
+
+  // Initialize custom date range from URL params, then localStorage
+  const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string } | null>(() => {
+    const urlStart = searchParams.get('start')
+    const urlEnd = searchParams.get('end')
+    if (urlStart && urlEnd) return { start: urlStart, end: urlEnd }
+    return loadFromStorage(STORAGE_KEY_CUSTOM_RANGE, null)
+  })
+
   // Initialize state from URL params, then localStorage, then defaults
   const [timeRange, setTimeRange] = useState<TimeRangeOption>(() => {
     const urlTime = searchParams.get('time') as TimeRangeOption | null
     if (urlTime) return urlTime
-    return loadFromStorage(STORAGE_KEY_TIME_RANGE, DEFAULT_TIME_RANGE)
+    const stored = loadFromStorage(STORAGE_KEY_TIME_RANGE, DEFAULT_TIME_RANGE)
+    // If stored is 'custom' but no custom range exists, fall back to 'today'
+    if (stored === 'custom' && !customDateRange) return DEFAULT_TIME_RANGE
+    return stored
   })
-  
+
   const [scannerFilter, setScannerFilter] = useState<PipelineMonitorScannerType>(() => {
     const urlScanner = searchParams.get('scanner') as PipelineMonitorScannerType | null
     if (urlScanner) return urlScanner
     return loadFromStorage(STORAGE_KEY_SCANNER, DEFAULT_SCANNER)
   })
-  
+
   const [selectedRunId, setSelectedRunId] = useState<string | null>(() => {
     return searchParams.get('run')
   })
-  
+
   const [verdictFilters, setVerdictFilters] = useState<Verdict[]>(() => {
     return loadFromStorage(STORAGE_KEY_VERDICT, [])
   })
-  
+
   const [dteBucketFilters, setDteBucketFilters] = useState<DTEBucket[]>(() => {
     return loadFromStorage(STORAGE_KEY_DTE, [])
   })
-  
+
   const [optionSideFilters, setOptionSideFilters] = useState<OptionType[]>(() => {
     return loadFromStorage(STORAGE_KEY_SIDE, [])
   })
-  
+
   const [expandedGates, setExpandedGates] = useState<Set<string>>(new Set())
   const [expandedOverlaps, setExpandedOverlaps] = useState<Set<string>>(new Set())
+
+  // Determine API params for custom range
+  const customStart = timeRange === 'custom' ? customDateRange?.start : undefined
+  const customEnd = timeRange === 'custom' ? customDateRange?.end : undefined
 
   // Fetch runs list
   const { data: runsData, isLoading: runsLoading } = usePipelineMonitorRuns({
     time: timeRange,
     scanner: scannerFilter,
     limit: 50,
+    start: customStart,
+    end: customEnd,
   })
-  
+
   // Fetch aggregate data (when no run selected)
   const { data: aggregateData, isLoading: aggregateLoading } = usePipelineAggregate({
     time: timeRange,
     scanner: scannerFilter,
+    start: customStart,
+    end: customEnd,
     verdict: verdictFilters,
     dte_bucket: dteBucketFilters,
     option_side: optionSideFilters,
     enabled: !selectedRunId,
   })
-  
+
   // Fetch run detail (when run selected)
   const { data: runDetailData, isLoading: runDetailLoading } = usePipelineRunDetail(
     selectedRunId,
@@ -135,8 +155,8 @@ export default function PipelineMonitor() {
 
   // Determine which data to display
   // aggregateData and runDetailData are already destructured from useQuery's { data } property
-  const pipelineData: PipelineMonitorData | undefined = selectedRunId 
-    ? runDetailData 
+  const pipelineData: PipelineMonitorData | undefined = selectedRunId
+    ? runDetailData
     : aggregateData
   const isLoading = runsLoading || (selectedRunId ? runDetailLoading : aggregateLoading)
 
@@ -146,9 +166,13 @@ export default function PipelineMonitor() {
     if (timeRange !== DEFAULT_TIME_RANGE) params.set('time', timeRange)
     if (scannerFilter !== DEFAULT_SCANNER) params.set('scanner', scannerFilter)
     if (selectedRunId) params.set('run', selectedRunId)
-    
+    if (timeRange === 'custom' && customDateRange) {
+      params.set('start', customDateRange.start)
+      params.set('end', customDateRange.end)
+    }
+
     setSearchParams(params, { replace: true })
-  }, [timeRange, scannerFilter, selectedRunId, setSearchParams])
+  }, [timeRange, scannerFilter, selectedRunId, customDateRange, setSearchParams])
 
   useEffect(() => {
     saveToStorage(STORAGE_KEY_TIME_RANGE, timeRange)
@@ -156,12 +180,21 @@ export default function PipelineMonitor() {
     saveToStorage(STORAGE_KEY_VERDICT, verdictFilters)
     saveToStorage(STORAGE_KEY_DTE, dteBucketFilters)
     saveToStorage(STORAGE_KEY_SIDE, optionSideFilters)
-  }, [timeRange, scannerFilter, verdictFilters, dteBucketFilters, optionSideFilters])
+    saveToStorage(STORAGE_KEY_CUSTOM_RANGE, customDateRange)
+  }, [timeRange, scannerFilter, verdictFilters, dteBucketFilters, optionSideFilters, customDateRange])
 
   // Handlers
   const handleTimeRangeChange = useCallback((value: TimeRangeOption) => {
     setTimeRange(value)
     setSelectedRunId(null) // Deselect run when changing time range
+  }, [])
+
+  const handleCustomDateChange = useCallback((range: { start: string; end: string } | null) => {
+    setCustomDateRange(range)
+    if (range) {
+      setTimeRange('custom')
+      setSelectedRunId(null)
+    }
   }, [])
 
   const handleScannerChange = useCallback((value: PipelineMonitorScannerType) => {
@@ -176,8 +209,8 @@ export default function PipelineMonitor() {
   }, [])
 
   const handleVerdictToggle = useCallback((verdict: Verdict) => {
-    setVerdictFilters(prev => 
-      prev.includes(verdict) 
+    setVerdictFilters(prev =>
+      prev.includes(verdict)
         ? prev.filter(v => v !== verdict)
         : [...prev, verdict]
     )
@@ -243,6 +276,8 @@ export default function PipelineMonitor() {
         scannerFilter={scannerFilter}
         onTimeRangeChange={handleTimeRangeChange}
         onScannerChange={handleScannerChange}
+        customDateRange={customDateRange}
+        onCustomDateChange={handleCustomDateChange}
       />
 
       {/* Evaluation Filters */}
