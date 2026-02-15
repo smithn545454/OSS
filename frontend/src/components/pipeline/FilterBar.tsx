@@ -113,7 +113,7 @@ export function FilterBar({
     : PRESET_OPTIONS.find(o => o.value === timeRange)?.label || 'Today'
 
   return (
-    <div className="flex flex-wrap gap-4 mb-6">
+    <div className="relative flex flex-wrap gap-4 mb-6" style={{ zIndex: 20 }}>
       {/* Time Range Selector — custom dropdown */}
       <div
         ref={dropdownRef}
