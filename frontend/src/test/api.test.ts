@@ -151,7 +151,7 @@ describe('api.ts URL construction', () => {
   it('getPipelineMonitorRuns includes non-all scanner', async () => {
     const { getPipelineMonitorRuns } = await import('../lib/api')
     await getPipelineMonitorRuns({ scanner: 'breakout' })
-    expect(lastFetchUrl).toContain('scanner=breakout')
+    expect(lastFetchUrl).toContain('scanner=BREAKOUT')
   })
 
   it('getPipelineAggregateData joins array filters with commas', async () => {

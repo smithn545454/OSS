@@ -50,6 +50,19 @@ import type {
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
+/** Map frontend scanner type values to backend ScannerType enum values. */
+const SCANNER_TYPE_MAP: Record<string, string> = {
+  unusual_volume: 'UNUSUAL_VOLUME',
+  breakout: 'BREAKOUT',
+  compression: 'COMPRESSION_EXPANSION',
+  cheap_options: 'CHEAP_OPTIONS',
+}
+
+function toBackendScanner(scanner: PipelineMonitorScannerType | undefined): string | undefined {
+  if (!scanner || scanner === 'all') return undefined
+  return SCANNER_TYPE_MAP[scanner] || scanner
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -196,8 +209,9 @@ export async function getPipelineMonitorRuns(
   if (options.time) params.set('time', options.time)
   if (options.start) params.set('start', options.start)
   if (options.end) params.set('end', options.end)
-  if (options.scanner && options.scanner !== 'all') params.set('scanner', options.scanner)
-  
+  const backendScanner = toBackendScanner(options.scanner)
+  if (backendScanner) params.set('scanner', backendScanner)
+
   return fetchApi<GetRunsResponse>(`/api/pipeline/runs?${params}`)
 }
 
@@ -219,7 +233,8 @@ export async function getPipelineAggregateData(
   if (options.time) params.set('time', options.time)
   if (options.start) params.set('start', options.start)
   if (options.end) params.set('end', options.end)
-  if (options.scanner && options.scanner !== 'all') params.set('scanner', options.scanner)
+  const backendScanner = toBackendScanner(options.scanner)
+  if (backendScanner) params.set('scanner', backendScanner)
   if (options.verdict?.length) params.set('verdict', options.verdict.join(','))
   if (options.dte_bucket?.length) params.set('dte_bucket', options.dte_bucket.join(','))
   if (options.option_side?.length) params.set('option_side', options.option_side.join(','))
