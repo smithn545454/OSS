@@ -155,6 +155,28 @@ class CompressionScanner(BaseScanner):
                 "break_down": break_down,
             }
 
+            # Diagnostic: log how close each ticker is to triggering
+            # comp_ratio < 1.0 = compressed; gap > 0 = broke out
+            if compression_threshold > 0:
+                comp_ratio = atr_today / compression_threshold
+            else:
+                comp_ratio = 999.0
+            if break_up_threshold > 0:
+                up_gap = (today_close - break_up_threshold) / break_up_threshold
+            else:
+                up_gap = -999.0
+            if break_down_threshold > 0:
+                dn_gap = (break_down_threshold - today_close) / break_down_threshold
+            else:
+                dn_gap = -999.0
+            logger.info(
+                f"[COMPRESSION_DIAG] {ticker}: "
+                f"comp_ratio={comp_ratio:.3f} (need ≤1.0), "
+                f"up_gap={up_gap:.4f}, dn_gap={dn_gap:.4f} "
+                f"(need ≥0.0), atr={atr_today:.4f}, "
+                f"floor={atr_floor:.4f}"
+            )
+
             # Trigger requires BOTH compression AND a break
             if not is_compressed:
                 return ScanResult(

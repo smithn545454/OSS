@@ -100,6 +100,11 @@ class PolygonClient:
                 response = await self._client.request(method, url, **kwargs)
                 response.raise_for_status()
                 return response
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"HTTP {e.response.status_code} for {url}: {e}"
+                )
+                return None
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error for {url}: {e}")
                 return None
@@ -401,7 +406,17 @@ class PolygonClient:
 
         if response:
             data = response.json()
-            return data.get("results", [])
+            results = data.get("results", [])
+            logger.info(
+                f"[MINIMAL] {underlying_ticker}: status={response.status_code}, "
+                f"results={len(results)} contracts, params={params}"
+            )
+            return results
+
+        logger.warning(
+            f"[MINIMAL] {underlying_ticker}: response=None (HTTP error swallowed), "
+            f"params={params}"
+        )
         return []
 
     async def get_options_chain_batch(
