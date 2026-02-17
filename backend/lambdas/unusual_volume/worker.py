@@ -161,6 +161,9 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
 
     candidates_found = 0
     contracts_passed_prefilter = 0
+    had_baseline = 0
+    no_baseline = 0
+    max_ratio = 0.0
 
     for contract in options_chain:
         # Apply pre-filters
@@ -173,11 +176,15 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
         expected_volume = _get_expected_volume(contract, ticker, as_of_date, underlying_price)
 
         if expected_volume is None or expected_volume < 1:
+            no_baseline += 1
             continue
+
+        had_baseline += 1
 
         # Calculate metrics
         today_volume = contract.get("day", {}).get("volume", 0)
         volume_ratio = today_volume / expected_volume
+        max_ratio = max(max_ratio, volume_ratio)
 
         # Get OI change
         today_oi = contract.get("open_interest", 0)
@@ -247,7 +254,8 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
 
     logger.info(
         f"{ticker}: {contracts_passed_prefilter} passed prefilter, "
-        f"{candidates_found} candidates found"
+        f"{had_baseline} had baseline, {no_baseline} no baseline, "
+        f"max_ratio={max_ratio:.2f}, {candidates_found} candidates found"
     )
 
     return {
