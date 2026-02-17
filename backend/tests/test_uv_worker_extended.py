@@ -500,8 +500,8 @@ class TestWriteCandidatePricingFixes:
         if iv_greeks is not None:
             greeks["implied_volatility"] = iv_greeks
         contract = {
-            "ticker": "O:AAPL260320C00185000",
             "details": {
+                "ticker": "O:AAPL260320C00185000",
                 "contract_type": "call",
                 "strike_price": 185,
                 "expiration_date": exp_date,

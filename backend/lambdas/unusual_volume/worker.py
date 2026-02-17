@@ -188,7 +188,7 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
 
         # Get OI change
         today_oi = contract.get("open_interest", 0)
-        prior_oi = _get_prior_oi(contract.get("ticker", ""))
+        prior_oi = _get_prior_oi(contract.get("details", {}).get("ticker", ""))
         oi_change_pct = _calculate_oi_change_pct(today_oi, prior_oi)
 
         # Check trigger conditions
@@ -381,7 +381,7 @@ def _get_expected_volume(
     Returns:
         Expected average volume, or None if not found
     """
-    option_ticker = contract.get("ticker", "").replace("O:", "")
+    option_ticker = contract.get("details", {}).get("ticker", "").replace("O:", "")
 
     # Try contract-specific stats first
     pk = f"CONTRACT#{option_ticker}"
@@ -402,13 +402,6 @@ def _get_expected_volume(
     if items:
         contract["_volume_source"] = "CONTRACT_SPECIFIC"
         return float(items[0].get("avg_volume_20d", 0))
-
-    # Log first few misses per ticker for diagnostics
-    if not hasattr(_get_expected_volume, "_miss_count"):
-        _get_expected_volume._miss_count = 0
-    _get_expected_volume._miss_count += 1
-    if _get_expected_volume._miss_count <= 3:
-        logger.info(f"No contract stats for {pk} (table={volume_stats_table.table_name})")
 
     # Fall back to bucket stats
     details = contract.get("details", {})
@@ -526,8 +519,8 @@ def _write_candidate(
         volume_source: "CONTRACT_SPECIFIC" or "BUCKET_FALLBACK"
         ttl: TTL timestamp
     """
-    option_ticker = contract.get("ticker", "").replace("O:", "")
     details = contract.get("details", {})
+    option_ticker = details.get("ticker", "").replace("O:", "")
     day_data = contract.get("day", {})
     last_quote = contract.get("last_quote", {})
     greeks = contract.get("greeks", {})
