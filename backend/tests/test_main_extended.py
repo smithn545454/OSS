@@ -181,7 +181,7 @@ class TestRunCoordinatorScan:
         from app.main import _run_coordinator_scan
         with patch("app.main.CHUNK_SIZE", 500), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
-             patch("app.core.watchlist.WatchlistManager.from_policy") as mock_wl, \
+             patch("app.core.watchlist.WatchlistManager.from_policy_async", new_callable=AsyncMock) as mock_wl, \
              patch("app.main._run_worker_scan", new_callable=AsyncMock) as mock_worker:
             mock_p = MagicMock()
             mock_p.config = MagicMock()
@@ -226,9 +226,10 @@ class TestRunCoordinatorScan:
 
         with patch("app.main.CHUNK_SIZE", 50), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
-             patch("app.core.watchlist.WatchlistManager.from_policy") as mock_wl, \
+             patch("app.core.watchlist.WatchlistManager.from_policy_async", new_callable=AsyncMock) as mock_wl, \
              patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
-             patch("boto3.client") as mock_boto:
+             patch("boto3.client") as mock_boto, \
+             patch("app.main.time") as mock_time:
             mock_p = MagicMock()
             mock_p.config = MagicMock()
             mock_p.config_version = "v2.0.0"
@@ -263,9 +264,10 @@ class TestRunCoordinatorScan:
 
         with patch("app.main.CHUNK_SIZE", 50), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
-             patch("app.core.watchlist.WatchlistManager.from_policy") as mock_wl, \
+             patch("app.core.watchlist.WatchlistManager.from_policy_async", new_callable=AsyncMock) as mock_wl, \
              patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
-             patch("boto3.client") as mock_boto:
+             patch("boto3.client") as mock_boto, \
+             patch("app.main.time") as mock_time:
             mock_p = MagicMock()
             mock_p.config = MagicMock()
             mock_p.config_version = "v2.0.0"

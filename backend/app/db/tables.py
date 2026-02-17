@@ -43,6 +43,7 @@ LLM_USAGE_TABLE = "llm-usage"
 PAPER_SNAPSHOTS_TABLE = "paper-snapshots"
 CALIBRATION_REPORTS_TABLE = "calibration-reports"
 SCAN_STATUS_TABLE = "scan-status"
+SP500_TICKERS_TABLE = "sp500-tickers"
 
 
 class PolicyTable:
@@ -1400,6 +1401,29 @@ class CalibrationReportTable:
                 return True
 
         return False
+
+
+class SP500TickerTable:
+    """Operations for the sp500-tickers table.
+
+    Reads the S&P 500 ticker list maintained by the UV scanner infrastructure.
+    PK=TICKER_LIST, SK={ticker}
+    """
+
+    TABLE = SP500_TICKERS_TABLE
+
+    @staticmethod
+    async def get_active_tickers() -> list[str]:
+        """Get all active S&P 500 tickers, sorted.
+
+        Returns:
+            Sorted list of active ticker symbols
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            SP500TickerTable.TABLE, "TICKER_LIST", limit=None, scan_forward=True
+        )
+        return sorted(item["ticker"] for item in items if item.get("is_active", True))
 
 
 class ScanStatusTable:

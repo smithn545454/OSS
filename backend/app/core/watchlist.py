@@ -42,23 +42,34 @@ DEFAULT_WATCHLIST: list[str] = [
 class WatchlistManager:
     """Manager for scanner watchlist operations."""
 
-    def __init__(self, config: Optional[WatchlistConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[WatchlistConfig] = None,
+        sp500_tickers: Optional[list[str]] = None,
+    ) -> None:
         """Initialize watchlist manager.
 
         Args:
             config: Optional watchlist configuration. If not provided,
                    uses defaults.
+            sp500_tickers: Optional S&P 500 tickers loaded from DynamoDB.
         """
         self._config = config or WatchlistConfig()
+        self._sp500_tickers = sp500_tickers
 
     @property
     def tickers(self) -> list[str]:
         """Get the list of tickers to scan.
 
-        Returns config tickers if provided, otherwise returns default list.
+        Resolution order:
+        1. Policy override (config.tickers) — "config over code"
+        2. S&P 500 from DynamoDB — loaded via from_policy_async()
+        3. DEFAULT_WATCHLIST — hardcoded 78-ticker fallback
         """
         if self._config.tickers:
             return self._config.tickers
+        if self._sp500_tickers:
+            return self._sp500_tickers
         return DEFAULT_WATCHLIST
 
     @property
@@ -119,6 +130,31 @@ class WatchlistManager:
             WatchlistManager instance
         """
         return cls(config=policy_config.watchlist)
+
+    @classmethod
+    async def from_policy_async(cls, policy_config: PolicyConfig) -> "WatchlistManager":
+        """Create manager from policy configuration, loading S&P 500 from DynamoDB.
+
+        Falls back to DEFAULT_WATCHLIST if DynamoDB read fails.
+
+        Args:
+            policy_config: The policy configuration
+
+        Returns:
+            WatchlistManager instance with S&P 500 tickers if available
+        """
+        from app.db.tables import SP500TickerTable
+
+        sp500: Optional[list[str]] = None
+        try:
+            sp500 = await SP500TickerTable.get_active_tickers()
+            if not sp500:
+                sp500 = None
+            else:
+                logger.info(f"Loaded {len(sp500)} S&P 500 tickers from DynamoDB")
+        except Exception as e:
+            logger.warning(f"Failed to load S&P 500 tickers, using fallback: {e}")
+        return cls(config=policy_config.watchlist, sp500_tickers=sp500)
 
 
 def get_default_watchlist() -> list[str]:

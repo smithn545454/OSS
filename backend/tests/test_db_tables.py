@@ -619,3 +619,49 @@ class TestScanStatusTable:
         from app.db.tables import ScanStatusTable
         await ScanStatusTable.put("run-1", {"started_at": "2026-01-17", "status": "running"})
         mock_db.put_item.assert_called_once()
+
+
+class TestSP500TickerTable:
+
+    @pytest.mark.asyncio
+    async def test_get_active_tickers(self, mock_db):
+        from app.db.tables import SP500TickerTable
+        mock_db.query = AsyncMock(return_value=[
+            {"PK": "TICKER_LIST", "SK": "AAPL", "ticker": "AAPL", "is_active": True},
+            {"PK": "TICKER_LIST", "SK": "MSFT", "ticker": "MSFT", "is_active": True},
+            {"PK": "TICKER_LIST", "SK": "GOOGL", "ticker": "GOOGL", "is_active": True},
+            {"PK": "TICKER_LIST", "SK": "NVDA", "ticker": "NVDA", "is_active": True},
+            {"PK": "TICKER_LIST", "SK": "TSLA", "ticker": "TSLA", "is_active": True},
+        ])
+        result = await SP500TickerTable.get_active_tickers()
+        assert result == ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA"]
+        mock_db.query.assert_called_once_with(
+            "sp500-tickers", "TICKER_LIST", limit=None, scan_forward=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_filters_inactive(self, mock_db):
+        from app.db.tables import SP500TickerTable
+        mock_db.query = AsyncMock(return_value=[
+            {"PK": "TICKER_LIST", "SK": "AAPL", "ticker": "AAPL", "is_active": True},
+            {"PK": "TICKER_LIST", "SK": "GE", "ticker": "GE", "is_active": False},
+            {"PK": "TICKER_LIST", "SK": "MSFT", "ticker": "MSFT", "is_active": True},
+        ])
+        result = await SP500TickerTable.get_active_tickers()
+        assert result == ["AAPL", "MSFT"]
+
+    @pytest.mark.asyncio
+    async def test_empty_table(self, mock_db):
+        from app.db.tables import SP500TickerTable
+        mock_db.query = AsyncMock(return_value=[])
+        result = await SP500TickerTable.get_active_tickers()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_active_when_flag_missing(self, mock_db):
+        from app.db.tables import SP500TickerTable
+        mock_db.query = AsyncMock(return_value=[
+            {"PK": "TICKER_LIST", "SK": "AAPL", "ticker": "AAPL"},
+        ])
+        result = await SP500TickerTable.get_active_tickers()
+        assert result == ["AAPL"]

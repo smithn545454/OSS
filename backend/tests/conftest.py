@@ -454,6 +454,9 @@ def moto_dynamodb():
             BillingMode="PAY_PER_REQUEST",
         )
 
+        # S&P 500 tickers: simple PK/SK
+        db.create_table(TableName=f"{table_prefix}-sp500-tickers", **pk_sk_schema)
+
         yield db
 
 

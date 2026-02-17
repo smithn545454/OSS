@@ -1,12 +1,12 @@
 """Tests for the watchlist module.
 
 Covers WatchlistManager operations, validation, batching,
-and the merge utility.
+the merge utility, and async S&P 500 loading.
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -127,3 +127,70 @@ class TestMergeWatchlists:
     def test_merge_preserves_order(self):
         result = merge_watchlists(["C", "B", "A"])
         assert result == ["C", "B", "A"]
+
+
+class TestWatchlistManagerSP500:
+    """Test S&P 500 ticker integration in WatchlistManager."""
+
+    def test_sp500_tickers_used_when_provided(self):
+        sp500 = ["AAPL", "GOOGL", "MSFT"]
+        manager = WatchlistManager(config=WatchlistConfig(), sp500_tickers=sp500)
+        assert manager.tickers == ["AAPL", "GOOGL", "MSFT"]
+
+    def test_policy_override_takes_precedence_over_sp500(self):
+        config = WatchlistConfig(tickers=["NVDA", "AMD"])
+        manager = WatchlistManager(config=config, sp500_tickers=["AAPL", "MSFT"])
+        assert manager.tickers == ["NVDA", "AMD"]
+
+    def test_falls_back_to_default_when_sp500_is_none(self):
+        manager = WatchlistManager(config=WatchlistConfig(), sp500_tickers=None)
+        assert manager.tickers == DEFAULT_WATCHLIST
+
+    def test_falls_back_to_default_when_sp500_is_empty(self):
+        manager = WatchlistManager(config=WatchlistConfig(), sp500_tickers=[])
+        # Empty list is falsy, so falls through to DEFAULT_WATCHLIST
+        assert manager.tickers == DEFAULT_WATCHLIST
+
+    async def test_from_policy_async_loads_sp500(self):
+        mock_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA"]
+        with patch(
+            "app.db.tables.SP500TickerTable.get_active_tickers",
+            new_callable=AsyncMock,
+            return_value=mock_tickers,
+        ):
+            policy_config = PolicyConfig()
+            manager = await WatchlistManager.from_policy_async(policy_config)
+            assert manager.tickers == mock_tickers
+
+    async def test_from_policy_async_falls_back_on_failure(self):
+        with patch(
+            "app.db.tables.SP500TickerTable.get_active_tickers",
+            new_callable=AsyncMock,
+            side_effect=Exception("DynamoDB unreachable"),
+        ):
+            policy_config = PolicyConfig()
+            manager = await WatchlistManager.from_policy_async(policy_config)
+            assert manager.tickers == DEFAULT_WATCHLIST
+
+    async def test_from_policy_async_falls_back_on_empty(self):
+        with patch(
+            "app.db.tables.SP500TickerTable.get_active_tickers",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            policy_config = PolicyConfig()
+            manager = await WatchlistManager.from_policy_async(policy_config)
+            assert manager.tickers == DEFAULT_WATCHLIST
+
+    async def test_from_policy_async_policy_override_still_wins(self):
+        mock_tickers = ["AAPL", "GOOGL", "MSFT"]
+        with patch(
+            "app.db.tables.SP500TickerTable.get_active_tickers",
+            new_callable=AsyncMock,
+            return_value=mock_tickers,
+        ):
+            policy_config = PolicyConfig(
+                watchlist=WatchlistConfig(tickers=["XOM", "CVX"])
+            )
+            manager = await WatchlistManager.from_policy_async(policy_config)
+            assert manager.tickers == ["XOM", "CVX"]

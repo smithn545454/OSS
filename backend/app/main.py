@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -124,7 +125,7 @@ async def _run_coordinator_scan() -> dict[str, Any]:
         if policy is None:
             raise ValueError("No active policy found")
 
-        watchlist = WatchlistManager.from_policy(policy.config)
+        watchlist = await WatchlistManager.from_policy_async(policy.config)
         tickers = watchlist.tickers
 
         logger.info(f"Coordinator: {len(tickers)} total tickers, chunk_size={CHUNK_SIZE}")
@@ -175,10 +176,12 @@ async def _run_coordinator_scan() -> dict[str, Any]:
             return result_payload
 
         with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as executor:
-            future_to_chunk = {
-                executor.submit(invoke_worker_sync, chunk, idx): idx
-                for idx, chunk in enumerate(chunks)
-            }
+            future_to_chunk: dict[Any, int] = {}
+            for idx, chunk in enumerate(chunks):
+                if idx > 0:
+                    time.sleep(3)  # Stagger workers to spread Phase 3 API load
+                future = executor.submit(invoke_worker_sync, chunk, idx)
+                future_to_chunk[future] = idx
 
             for future in as_completed(future_to_chunk):
                 chunk_idx = future_to_chunk[future]
