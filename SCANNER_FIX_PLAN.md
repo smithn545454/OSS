@@ -256,49 +256,69 @@ This contributes ~2.5 points of final score difference between Breakout and Chea
 - **Step 0.2:** Deployed diagnostic logging (commit `2893d14`, Lambda v6) ✅
 - **Step 0.3:** Diagnostic data not yet available (deployed Sunday evening, no weekday pipeline run yet). Proceeded to Phase 1 since the fix approach works regardless of root cause.
 
-### Phase 1: Fix Cheap Options Scanner ✅ DEPLOYED — awaiting weekday verification
+### Phase 1: Fix Cheap Options Scanner ✅ COMPLETE — verified working
 **Goal:** Get the Cheap Options scanner producing triggers and flowing through the full pipeline.
 
-**Deployed:** commit `0fd5804`, Lambda v7, 2026-02-17
+**Three bugs found and fixed during Monday verification (2026-02-17):**
 
-**What was changed (4 files):**
-- `orchestrator.py`: Phase 3 concurrency 20→5, DTE range 30-45→7-90, removed server-side strike filter
-- `polygon.py`: API result limit 250→1000
-- `cheap_options.py`: DTE range 30-45→7-90 throughout, removed redundant chain filtering and fallback strike filter
-- `utils.py`: `calculate_iv_proxy` defaults widened to 7-90 DTE
+1. **HTTP 400 from Polygon** (v7→v8): Removing server-side strike filter caused Polygon Basic tier to reject requests. Fix: restored ATM ±10% strike filter using underlying price from daily bars. Commit `2568ea7`, Lambda v8.
 
-**Design decision:** User chose "widen to 7-90 everywhere" over fallback or per-expiration grouping. The full 7-90 DTE range flows from API fetch → cache → scanner → IV proxy calculation with no intermediate narrowing.
+2. **IV field location** (v9→v10): `calculate_iv_proxy()` looked for `implied_volatility` inside `greeks` object, but Polygon puts it at the contract top level. The function always returned `None`. Fix: `contract.get("implied_volatility") or greeks.get("implied_volatility")`. Commit `728876a`, Lambda v10.
 
-**CLAUDE.md Step 4 verification (performed 2026-02-17 ~03:50 UTC):**
-- CI: ✅ green
-- Health endpoint: ✅ healthy (`{"status": "healthy", "version": "0.1.0"}`)
-- CloudWatch errors: ✅ no new errors (only pre-existing FinnhubClient "not initialized" — known, non-blocking)
-- Lambda deployed: ✅ version 7, commit `0fd5804` confirmed in Lambda description
-- Pipeline Monitor: ⏳ **no pipeline runs since deploy** — EventBridge schedule is `MON-FRI 13:00-21:00 UTC` only; deployed on Sunday evening
-- **Pipeline run with market data: ⏳ pending (Monday 13:00 UTC / 5:00 AM PST)**
+3. **Diagnostic logging** (v8→v9): Added `[CHEAP_DIAG]` logging to see IV/RV ratios per ticker. Commit `6e89b37`, Lambda v9.
 
-**What to verify on Monday (first weekday run):**
-- CloudWatch `[MINIMAL]` logs show `results=N` (not 0) for each ticker
-- Stage 1 scanner stats show `cheap_options` triggers > 0
-- Pipeline Monitor shows all 8 stages with data flowing
-- No new errors from wider chain data
-- Breakout scanner output unchanged
+**Final deployed state (Lambda v10, commit `728876a`):**
+- `orchestrator.py`: Phase 3 concurrency 20→5, DTE range 7-90, ATM ±10% strike filter
+- `polygon.py`: API result limit 250 (restored from 1000)
+- `cheap_options.py`: DTE range 7-90 throughout
+- `utils.py`: IV proxy reads `implied_volatility` from contract top level (not greeks)
 
-**Rollback:** `./scripts/deploy.sh rollback` → version 6 (diagnostic-only)
+**Verified results (14:30 UTC pipeline run):**
+- ✅ API returning HTTP 200 with 150-250 contracts per ticker
+- ✅ **31 Cheap Options triggers** (up from 0)
+- ✅ Breakout unchanged (8 triggers)
+- ✅ Full pipeline: 111 tickers → 1,673 contracts → 153 gate passes → 90 decisions
+- ✅ No new errors in CloudWatch
 
-### Phase 2: Fix Compression Scanner Thresholds — NOT STARTED (blocked on diagnostic data)
+**Sample IV/RV data (tickers where options are cheap):**
+| Ticker | IV/RV Ratio | IV Proxy | RV20 |
+|--------|------------|----------|------|
+| UNH | 0.413 | 0.353 | 0.856 |
+| MSFT | 0.656 | 0.324 | 0.494 |
+| INTC | 0.662 | 0.673 | 1.017 |
+| META | 0.757 | 0.380 | 0.502 |
+| AAPL | 1.011 | 0.333 | 0.329 |
+
+**Rollback:** `./scripts/deploy.sh rollback 7` → pre-fix state
+
+### Phase 2: Fix Compression Scanner Thresholds ✅ DEPLOYED — awaiting verification
 **Goal:** Increase Compression trigger rate from ~0% to meaningful level.
-**Risk:** VERY LOW — policy config changes only, no code changes required.
-**Status:** Blocked — `[COMPRESSION_DIAG]` logs require a weekday pipeline run. Zero diagnostic data exists as of 2026-02-17.
+**Risk:** VERY LOW — policy config changes only, no code deployment.
 
-**Step 2.1: Choose threshold values** (informed by Phase 0 diagnostics)
-- Analyze the compression ratio distribution from `[COMPRESSION_DIAG]` logs (available after Monday's first pipeline run)
-- Pick `compression_multiplier` that captures the tightest 5-10% of tickers (likely 1.15-1.25)
-- Pick `break_pct` that captures meaningful breakouts (likely 1.0-1.5)
+**Step 2.1: Diagnostic data analyzed** ✅
+`[COMPRESSION_DIAG]` logs from Monday runs show 78 tickers scanned. Distribution:
 
-**Step 2.2: Update policy config**
-- Update via Policy API or direct DynamoDB write
+| comp_ratio threshold | Tickers passing | % |
+|---------------------|-----------------|---|
+| ≤ 1.00 | 2 (AMC, JNJ) | 2.6% |
+| ≤ 1.05 | 5 | 6.4% |
+| ≤ 1.10 | 12 | 15.4% |
+| ≤ 1.20 | 20 | 25.6% |
+
+Key finding: the gap requirement (price must break out of range) is the bigger blocker — only 2 of 78 tickers have positive gaps. With break_pct=2.0, compressed stocks almost never make a 2% move, which is inherently contradictory.
+
+**Step 2.2: Policy config updated** ✅
+- Policy v2.0.0 → v2.0.2 (activated 2026-02-17 14:38 UTC)
+- `compression_multiplier`: 1.10 → **1.20** (captures tickers with ATR within 20% of floor)
+- `break_pct`: 2.0 → **0.5** (only requires 0.5% beyond range — critical for compressed stocks)
 - No code deployment needed
+
+**Step 2.3: Verify** ⏳ pending next pipeline run
+- Confirm Compression triggers appear in Stage 1 (expect 0-5 depending on market conditions)
+- Confirm triggers flow through Stages 2-8
+- Note: even with relaxed thresholds, zero triggers is possible if no tickers are both compressed AND near range boundaries today
+
+**Rollback:** Revert policy to v2.0.0 via `POST /api/policies/v2.0.0/activate`
 
 **Step 2.3: Verify**
 - Monitor next pipeline runs
