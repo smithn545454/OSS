@@ -384,19 +384,31 @@ def _get_expected_volume(
     option_ticker = contract.get("ticker", "").replace("O:", "")
 
     # Try contract-specific stats first
-    response = volume_stats_table.query(
-        KeyConditionExpression=(
-            Key("PK").eq(f"CONTRACT#{option_ticker}") &
-            Key("SK").begins_with("STATS#")
-        ),
-        ScanIndexForward=False,  # Get most recent first
-        Limit=1,
-    )
+    pk = f"CONTRACT#{option_ticker}"
+    try:
+        response = volume_stats_table.query(
+            KeyConditionExpression=(
+                Key("PK").eq(pk) &
+                Key("SK").begins_with("STATS#")
+            ),
+            ScanIndexForward=False,  # Get most recent first
+            Limit=1,
+        )
+    except Exception as e:
+        logger.error(f"DynamoDB query failed for {pk}: {e}")
+        return None
 
     items = response.get("Items", [])
     if items:
         contract["_volume_source"] = "CONTRACT_SPECIFIC"
         return float(items[0].get("avg_volume_20d", 0))
+
+    # Log first few misses per ticker for diagnostics
+    if not hasattr(_get_expected_volume, "_miss_count"):
+        _get_expected_volume._miss_count = 0
+    _get_expected_volume._miss_count += 1
+    if _get_expected_volume._miss_count <= 3:
+        logger.info(f"No contract stats for {pk} (table={volume_stats_table.table_name})")
 
     # Fall back to bucket stats
     details = contract.get("details", {})
