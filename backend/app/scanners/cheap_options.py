@@ -170,6 +170,12 @@ class CheapOptionsScanner(BaseScanner):
                 iv_percentile is not None and iv_percentile <= iv_percentile_max
             )
 
+            logger.info(
+                f"[CHEAP_DIAG] {ticker}: iv_proxy={iv_result.iv_proxy:.4f}, "
+                f"rv20={rv20:.4f}, ratio={iv_rv_ratio:.3f} (need ≤{iv_rv_ratio_max}), "
+                f"iv_pctl={iv_percentile}, chain_size={len(chain)}"
+            )
+
             if not (iv_rv_triggered or iv_percentile_triggered):
                 return ScanResult(
                     ticker=ticker,
