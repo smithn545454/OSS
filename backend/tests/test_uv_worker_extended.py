@@ -198,6 +198,7 @@ class TestWorkerScanMode:
         mock_candidates = MagicMock()
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
              patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
@@ -230,6 +231,7 @@ class TestWorkerScanMode:
         ]
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=None):
             result = _process_ticker("scan-001", "AAPL")
 
@@ -257,11 +259,91 @@ class TestWorkerScanMode:
         ]
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=200.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=5000):
             result = _process_ticker("scan-001", "AAPL")
 
         assert result["candidates_found"] == 0
+
+    def test_process_ticker_day_close_fallback(self):
+        """Bid/ask fallback uses day.close with 5% spread when last_quote missing."""
+        from lambdas.unusual_volume.worker import _process_ticker
+
+        exp_date = (date.today() + timedelta(days=30)).isoformat()
+        mock_chain = [
+            {
+                "ticker": "O:AAPL260320C00185000",
+                "details": {
+                    "contract_type": "call",
+                    "ticker": "O:AAPL260320C00185000",
+                    "strike_price": 185,
+                    "expiration_date": exp_date,
+                },
+                "day": {"volume": 500, "close": 6.0},
+                "open_interest": 5000,
+                "underlying_asset": {"ticker": "AAPL"},
+                "implied_volatility": 0.35,
+                "greeks": {"delta": 0.55, "gamma": 0.03, "theta": -0.08, "vega": 0.25},
+                "last_quote": {},  # No bid/ask data
+            }
+        ]
+
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
+             patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
+             patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
+             patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            result = _process_ticker("scan-001", "AAPL")
+
+        assert result["candidates_found"] == 1
+        mock_candidates.put_item.assert_called_once()
+
+        # Verify the persisted bid/ask use the day.close fallback
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        expected_bid = Decimal(str(6.0 - 6.0 * 0.025))  # 5.85
+        expected_ask = Decimal(str(6.0 + 6.0 * 0.025))  # 6.15
+        assert item["bid"] == expected_bid
+        assert item["ask"] == expected_ask
+        assert item["underlying_price"] == Decimal("189.0")
+
+    def test_process_ticker_uses_previous_close_for_price(self):
+        """Underlying price comes from previous close API, not underlying_asset."""
+        from lambdas.unusual_volume.worker import _process_ticker
+
+        exp_date = (date.today() + timedelta(days=30)).isoformat()
+        mock_chain = [
+            {
+                "ticker": "O:AAPL260320C00185000",
+                "details": {
+                    "contract_type": "call",
+                    "ticker": "O:AAPL260320C00185000",
+                    "strike_price": 185,
+                    "expiration_date": exp_date,
+                },
+                "day": {"volume": 500, "close": 6.0},
+                "open_interest": 5000,
+                "underlying_asset": {"ticker": "AAPL", "price": 0},  # Zero — Basic tier
+                "greeks": {"delta": 0.55, "implied_volatility": 0.32},
+                "last_quote": {"bid": 5.0, "ask": 5.4},
+            }
+        ]
+
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=255.0), \
+             patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
+             patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
+             patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            result = _process_ticker("scan-001", "AAPL")
+
+        assert result["candidates_found"] == 1
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        # underlying_price should be 255.0 from previous close, not 0 from underlying_asset
+        assert item["underlying_price"] == Decimal("255.0")
 
 
 # ============================================================================
@@ -324,6 +406,226 @@ class TestWorkerHandler:
 
         body = json.loads(result["body"])
         assert body["records_processed"] == 1
+
+
+# ============================================================================
+# Worker Lambda: _get_previous_close
+# ============================================================================
+
+
+class TestGetPreviousClose:
+    """Test the _get_previous_close function."""
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self):
+        os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
+        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:test"
+        yield
+
+    def test_returns_close_price(self):
+        """Returns close price from Polygon previous close endpoint."""
+        from lambdas.unusual_volume.worker import _get_previous_close
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.data = json.dumps({
+            "results": [{"c": 189.50, "h": 191.0, "l": 188.0, "o": 190.0, "v": 50000000}]
+        }).encode()
+
+        with patch("lambdas.unusual_volume.worker._get_polygon_api_key", return_value="test-key"), \
+             patch("lambdas.unusual_volume.worker.http") as mock_http:
+            mock_http.request.return_value = mock_response
+            price = _get_previous_close("AAPL")
+
+        assert price == 189.50
+
+    def test_returns_zero_on_api_error(self):
+        """Returns 0 when API returns non-200."""
+        from lambdas.unusual_volume.worker import _get_previous_close
+
+        mock_response = MagicMock()
+        mock_response.status = 403
+
+        with patch("lambdas.unusual_volume.worker._get_polygon_api_key", return_value="test-key"), \
+             patch("lambdas.unusual_volume.worker.http") as mock_http:
+            mock_http.request.return_value = mock_response
+            price = _get_previous_close("AAPL")
+
+        assert price == 0
+
+    def test_returns_zero_on_empty_results(self):
+        """Returns 0 when API returns empty results."""
+        from lambdas.unusual_volume.worker import _get_previous_close
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.data = json.dumps({"results": []}).encode()
+
+        with patch("lambdas.unusual_volume.worker._get_polygon_api_key", return_value="test-key"), \
+             patch("lambdas.unusual_volume.worker.http") as mock_http:
+            mock_http.request.return_value = mock_response
+            price = _get_previous_close("AAPL")
+
+        assert price == 0
+
+    def test_returns_zero_on_exception(self):
+        """Returns 0 when an exception occurs."""
+        from lambdas.unusual_volume.worker import _get_previous_close
+
+        with patch("lambdas.unusual_volume.worker._get_polygon_api_key", return_value="test-key"), \
+             patch("lambdas.unusual_volume.worker.http") as mock_http:
+            mock_http.request.side_effect = Exception("connection timeout")
+            price = _get_previous_close("AAPL")
+
+        assert price == 0
+
+
+# ============================================================================
+# Worker Lambda: _write_candidate bid/ask fallback and IV fix
+# ============================================================================
+
+
+class TestWriteCandidatePricingFixes:
+    """Test bid/ask fallback and IV field location in _write_candidate."""
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self):
+        os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
+        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:test"
+        yield
+
+    def _make_contract(self, bid=0, ask=0, day_close=0, iv_top_level=None, iv_greeks=None):
+        exp_date = (date.today() + timedelta(days=30)).isoformat()
+        greeks = {"delta": 0.5, "gamma": 0.03, "theta": -0.08, "vega": 0.25}
+        if iv_greeks is not None:
+            greeks["implied_volatility"] = iv_greeks
+        contract = {
+            "ticker": "O:AAPL260320C00185000",
+            "details": {
+                "contract_type": "call",
+                "strike_price": 185,
+                "expiration_date": exp_date,
+            },
+            "day": {"volume": 500, "close": day_close},
+            "open_interest": 5000,
+            "greeks": greeks,
+            "last_quote": {"bid": bid, "ask": ask},
+        }
+        if iv_top_level is not None:
+            contract["implied_volatility"] = iv_top_level
+        return contract
+
+    def test_day_close_fallback_when_no_bid_ask(self):
+        """Falls back to day.close with 5% spread when bid/ask are zero."""
+        from lambdas.unusual_volume.worker import _write_candidate
+
+        contract = self._make_contract(bid=0, ask=0, day_close=6.0)
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            _write_candidate(
+                scan_id="scan-001",
+                contract=contract,
+                ticker="AAPL",
+                underlying_price=189.0,
+                volume_ratio=5.0,
+                expected_volume=100.0,
+                today_oi=5000,
+                prior_oi=4500,
+                oi_change_pct=11.11,
+                trigger_reasons=["VOL_SPIKE"],
+                priority_score=85.0,
+                volume_source="CONTRACT_SPECIFIC",
+                ttl=9999999,
+            )
+
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        assert item["bid"] == Decimal(str(6.0 - 6.0 * 0.025))
+        assert item["ask"] == Decimal(str(6.0 + 6.0 * 0.025))
+        assert item["underlying_price"] == Decimal("189.0")
+
+    def test_iv_read_from_contract_top_level(self):
+        """IV is read from contract top level, not just greeks."""
+        from lambdas.unusual_volume.worker import _write_candidate
+
+        # IV at top level, not in greeks
+        contract = self._make_contract(bid=5.0, ask=5.4, iv_top_level=0.42, iv_greeks=None)
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            _write_candidate(
+                scan_id="scan-001",
+                contract=contract,
+                ticker="AAPL",
+                underlying_price=189.0,
+                volume_ratio=5.0,
+                expected_volume=100.0,
+                today_oi=5000,
+                prior_oi=4500,
+                oi_change_pct=11.11,
+                trigger_reasons=["VOL_SPIKE"],
+                priority_score=85.0,
+                volume_source="CONTRACT_SPECIFIC",
+                ttl=9999999,
+            )
+
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        assert item["iv"] == Decimal("0.42")
+
+    def test_iv_falls_back_to_greeks(self):
+        """IV falls back to greeks when not at contract top level."""
+        from lambdas.unusual_volume.worker import _write_candidate
+
+        contract = self._make_contract(bid=5.0, ask=5.4, iv_top_level=None, iv_greeks=0.35)
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            _write_candidate(
+                scan_id="scan-001",
+                contract=contract,
+                ticker="AAPL",
+                underlying_price=189.0,
+                volume_ratio=5.0,
+                expected_volume=100.0,
+                today_oi=5000,
+                prior_oi=4500,
+                oi_change_pct=11.11,
+                trigger_reasons=["VOL_SPIKE"],
+                priority_score=85.0,
+                volume_source="CONTRACT_SPECIFIC",
+                ttl=9999999,
+            )
+
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        assert item["iv"] == Decimal("0.35")
+
+    def test_no_fallback_when_bid_ask_present(self):
+        """Does NOT apply fallback when bid/ask are already present."""
+        from lambdas.unusual_volume.worker import _write_candidate
+
+        contract = self._make_contract(bid=5.0, ask=5.4, day_close=6.0)
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            _write_candidate(
+                scan_id="scan-001",
+                contract=contract,
+                ticker="AAPL",
+                underlying_price=189.0,
+                volume_ratio=5.0,
+                expected_volume=100.0,
+                today_oi=5000,
+                prior_oi=4500,
+                oi_change_pct=11.11,
+                trigger_reasons=["VOL_SPIKE"],
+                priority_score=85.0,
+                volume_source="CONTRACT_SPECIFIC",
+                ttl=9999999,
+            )
+
+        item = mock_candidates.put_item.call_args[1]["Item"]
+        assert item["bid"] == Decimal("5.0")
+        assert item["ask"] == Decimal("5.4")
 
 
 # ============================================================================

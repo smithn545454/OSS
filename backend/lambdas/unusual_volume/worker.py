@@ -39,9 +39,7 @@ from typing import Any, Optional
 import boto3
 import urllib3
 from boto3.dynamodb.conditions import Key
-
 from utils.buckets import build_bucket_key, get_dte_bucket, get_moneyness_bucket, is_scannable_dte
-from utils.occ_parser import parse_occ_symbol
 from utils.scoring import calculate_priority_score, get_trigger_reasons
 
 # Configure logging
@@ -153,6 +151,10 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
 
     logger.info(f"Fetched {len(options_chain)} contracts for {ticker}")
 
+    # Fetch underlying price via previous close (Basic tier has no underlying_asset.price)
+    underlying_price = _get_previous_close(ticker)
+    logger.info(f"{ticker}: underlying_price from previous close = {underlying_price}")
+
     # Get today's date for stats lookup
     as_of_date = date.today().isoformat()
     ttl = int((datetime.now(timezone.utc) + timedelta(hours=TTL_HOURS)).timestamp())
@@ -168,7 +170,7 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
         contracts_passed_prefilter += 1
 
         # Get expected volume
-        expected_volume = _get_expected_volume(contract, ticker, as_of_date)
+        expected_volume = _get_expected_volume(contract, ticker, as_of_date, underlying_price)
 
         if expected_volume is None or expected_volume < 1:
             continue
@@ -195,11 +197,20 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
             continue
 
         # Calculate priority score
-        details = contract.get("details", {})
         last_quote = contract.get("last_quote", {})
 
         bid = last_quote.get("bid", 0)
         ask = last_quote.get("ask", 0)
+
+        # Fallback: use day close as mid proxy when no bid/ask available
+        # Polygon basic tier may not include last_quote in snapshot data
+        if bid <= 0 or ask <= 0:
+            day_close = contract.get("day", {}).get("close", 0) or 0
+            if day_close > 0:
+                half_spread = day_close * 0.025
+                bid = day_close - half_spread
+                ask = day_close + half_spread
+
         mid = (bid + ask) / 2 if (bid + ask) > 0 else 0
         spread_pct = ((ask - bid) / mid * 100) if mid > 0 else 100
 
@@ -220,6 +231,7 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
             scan_id=scan_id,
             contract=contract,
             ticker=ticker,
+            underlying_price=underlying_price,
             volume_ratio=volume_ratio,
             expected_volume=expected_volume,
             today_oi=today_oi,
@@ -345,7 +357,9 @@ def _passes_prefilter(contract: dict) -> bool:
     return True
 
 
-def _get_expected_volume(contract: dict, underlying: str, as_of_date: str) -> Optional[float]:
+def _get_expected_volume(
+    contract: dict, underlying: str, as_of_date: str, underlying_price: float = 0
+) -> Optional[float]:
     """Look up expected volume from volume-stats table.
 
     Uses contract-specific stats when available, falls back to bucket stats.
@@ -354,6 +368,7 @@ def _get_expected_volume(contract: dict, underlying: str, as_of_date: str) -> Op
         contract: Polygon option snapshot
         underlying: Underlying ticker
         as_of_date: Date for stats lookup
+        underlying_price: Underlying stock price (from previous close API)
 
     Returns:
         Expected average volume, or None if not found
@@ -379,8 +394,7 @@ def _get_expected_volume(contract: dict, underlying: str, as_of_date: str) -> Op
     details = contract.get("details", {})
     option_type = "CALL" if details.get("contract_type") == "call" else "PUT"
 
-    # Calculate moneyness bucket
-    underlying_price = contract.get("underlying_asset", {}).get("price", 0)
+    # Calculate moneyness bucket (use passed underlying_price from previous close API)
     strike = details.get("strike_price", 0)
 
     if underlying_price > 0 and strike > 0:
@@ -464,6 +478,7 @@ def _write_candidate(
     scan_id: str,
     contract: dict,
     ticker: str,
+    underlying_price: float,
     volume_ratio: float,
     expected_volume: float,
     today_oi: int,
@@ -480,6 +495,7 @@ def _write_candidate(
         scan_id: Scan identifier
         contract: Polygon option snapshot
         ticker: Underlying ticker
+        underlying_price: Underlying stock price (from previous close API)
         volume_ratio: Today's volume / expected volume
         expected_volume: Average volume from stats
         today_oi: Today's open interest
@@ -495,12 +511,23 @@ def _write_candidate(
     day_data = contract.get("day", {})
     last_quote = contract.get("last_quote", {})
     greeks = contract.get("greeks", {})
-    underlying_asset = contract.get("underlying_asset", {})
 
     bid = last_quote.get("bid", 0)
     ask = last_quote.get("ask", 0)
+
+    # Fallback: use day close as mid proxy when no bid/ask available
+    if bid <= 0 or ask <= 0:
+        day_close = day_data.get("close", 0) or 0
+        if day_close > 0:
+            half_spread = day_close * 0.025
+            bid = day_close - half_spread
+            ask = day_close + half_spread
+
     mid = (bid + ask) / 2 if (bid + ask) > 0 else 0
     spread_pct = ((ask - bid) / mid * 100) if mid > 0 else 0
+
+    # IV: check contract top level first, then greeks (Polygon puts IV at top level)
+    iv = contract.get("implied_volatility") or greeks.get("implied_volatility", 0) or 0
 
     # Calculate DTE
     expiration_str = details.get("expiration_date", "")
@@ -528,12 +555,12 @@ def _write_candidate(
             "prior_oi": Decimal(str(round(prior_oi, 2))),
             "oi_change_pct": Decimal(str(round(oi_change_pct, 2))),
             "trigger_reasons": trigger_reasons,
-            "underlying_price": Decimal(str(underlying_asset.get("price", 0))),
+            "underlying_price": Decimal(str(underlying_price)),
             "bid": Decimal(str(bid)),
             "ask": Decimal(str(ask)),
             "mid": Decimal(str(round(mid, 4))),
             "spread_pct": Decimal(str(round(spread_pct, 2))),
-            "iv": Decimal(str(greeks.get("implied_volatility", 0) or 0)),
+            "iv": Decimal(str(iv)),
             "delta": Decimal(str(greeks.get("delta", 0) or 0)),
             "gamma": Decimal(str(greeks.get("gamma", 0) or 0)),
             "theta": Decimal(str(greeks.get("theta", 0) or 0)),
@@ -545,6 +572,34 @@ def _write_candidate(
             "ttl": ttl,
         }
     )
+
+
+def _get_previous_close(ticker: str) -> float:
+    """Fetch underlying price via Polygon previous close endpoint.
+
+    Args:
+        ticker: Underlying ticker symbol (e.g., "AAPL")
+
+    Returns:
+        Previous close price, or 0 if unavailable
+    """
+    api_key = _get_polygon_api_key()
+    url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/{ticker}/prev?apiKey={api_key}"
+
+    try:
+        response = http.request("GET", url, timeout=10.0)
+        if response.status != 200:
+            logger.warning(f"Previous close API error for {ticker}: {response.status}")
+            return 0
+
+        data = json.loads(response.data.decode("utf-8"))
+        results = data.get("results", [])
+        if results:
+            return float(results[0].get("c", 0))
+    except Exception as e:
+        logger.error(f"Error fetching previous close for {ticker}: {e}")
+
+    return 0
 
 
 def _get_polygon_api_key() -> str:
