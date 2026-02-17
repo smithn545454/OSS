@@ -372,7 +372,7 @@ class PolygonClient:
         """Fetch options chain WITHOUT pagination (first page only).
 
         Used for scanning where we only need aggregates or ATM contracts.
-        Returns up to 250 contracts in a single API call - no pagination.
+        Returns up to 1000 contracts in a single API call - no pagination.
 
         This is dramatically faster than get_options_chain() which paginates
         through all contracts (potentially 20+ API calls per ticker).
@@ -385,10 +385,10 @@ class PolygonClient:
             strike_price_lte: Maximum strike price (for ATM filtering)
 
         Returns:
-            List of option contract snapshots (up to 250)
+            List of option contract snapshots (up to 1000)
         """
         logger.info(f"[MINIMAL] Single-page fetch for {underlying_ticker}")
-        params: dict[str, Any] = {"limit": 250}
+        params: dict[str, Any] = {"limit": 1000}
         if expiration_date_gte:
             params["expiration_date.gte"] = expiration_date_gte
         if expiration_date_lte:

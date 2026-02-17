@@ -283,7 +283,7 @@ class ScannerOrchestrator:
                     tickers=remaining_tickers,
                     context=context,
                     polygon=polygon,
-                    max_concurrent=effective_concurrency,
+                    max_concurrent=5,  # Low concurrency to avoid Polygon rate limits
                 )
                 
                 all_results.extend(phase3_results)
@@ -998,10 +998,10 @@ class ScannerOrchestrator:
         """Run options scanners with MINIMAL data fetching.
 
         KEY OPTIMIZATION: Uses get_options_chain_minimal() which:
-        1. Fetches ONLY first page (250 contracts max, NO pagination)
-        2. Filters by strike price (ATM ±10%) to reduce contract count
-        3. Filters by DTE (30-45 days) to match scanner needs
-        
+        1. Fetches ONLY first page (up to 1000 contracts, NO pagination)
+        2. Filters by DTE (7-90 days) for broad coverage
+        3. No server-side strike filter — scanners filter ATM programmatically
+
         This reduces API calls from ~24 per ticker to exactly 1 per ticker.
 
         Args:
@@ -1023,9 +1023,10 @@ class ScannerOrchestrator:
             for s in scanners
         }
         
-        # DTE range for minimal fetch (30-45 covers Cheap Options needs)
-        min_exp_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        max_exp_date = (datetime.now() + timedelta(days=45)).strftime("%Y-%m-%d")
+        # DTE range: broad fetch (7-90) to capture weekly + monthly expirations.
+        # Scanners filter to their specific DTE range programmatically.
+        min_exp_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        max_exp_date = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
         
         # Semaphore for concurrent ticker processing
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -1037,7 +1038,7 @@ class ScannerOrchestrator:
                 ticker_results: list[ScanResult] = []
                 
                 try:
-                    # Get underlying price from cached daily bars for strike filtering
+                    # Verify daily bars exist (scanners need them for RV calculation)
                     daily_bars = context.cached_data.get("daily_bars", {}).get(ticker, [])
                     if not daily_bars:
                         for scanner in scanners:
@@ -1047,22 +1048,14 @@ class ScannerOrchestrator:
                                 error="No daily bars data",
                             ))
                         return ticker_results
-                    
-                    underlying_price = daily_bars[-1].close
-                    
-                    # Calculate ATM strike range (±10% of underlying price)
-                    strike_gte = underlying_price * 0.90
-                    strike_lte = underlying_price * 1.10
-                    
-                    # MINIMAL FETCH: Single API call, no pagination
-                    # - DTE filter: 30-45 days (matches Cheap Options scanner)
-                    # - Strike filter: ATM ±10% (reduces to ~10-50 contracts)
+
+                    # BROAD FETCH: Single API call, no pagination
+                    # No strike filter — scanner filters ATM programmatically.
+                    # Wider DTE range (7-90) maximizes data for IV proxy.
                     chain = await polygon.get_options_chain_minimal(
                         ticker,
                         expiration_date_gte=min_exp_date,
                         expiration_date_lte=max_exp_date,
-                        strike_price_gte=strike_gte,
-                        strike_price_lte=strike_lte,
                     )
                     
                     if not chain:
@@ -1071,17 +1064,16 @@ class ScannerOrchestrator:
                             ticker_results.append(ScanResult(
                                 ticker=ticker,
                                 triggered=False,
-                                error="No options chain data in ATM range",
+                                error="No options chain data in 7-90 DTE range",
                             ))
                         return ticker_results
-                    
-                    # Cache minimal chain for scanners (NOT for Contract Selection)
+
+                    # Cache broad chain for scanners (NOT for Contract Selection)
                     # Contract Selection will fetch its own full chain for triggered tickers
                     context.cached_data["options_chains"][ticker] = chain
                     
-                    # Compute aggregated volume from minimal chain
-                    # Note: This is an approximation since we only have ATM contracts
-                    # But it's sufficient for trigger detection
+                    # Compute aggregated volume from cached chain
+                    # Broader than ATM but sufficient for trigger detection
                     vol_data = self._compute_volume_from_chain(chain, ticker)
                     context.cached_data["options_volume"][ticker] = vol_data
                     

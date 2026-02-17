@@ -19,7 +19,7 @@ Calculations:
   4. RV20 = std_dev × SQRT(252)
 
 - IV Proxy:
-  1. Filter chain to contracts with DTE between 30 and 45
+  1. Filter chain to contracts with DTE between 7 and 90
   2. For each side (CALL, PUT), find contract closest to ATM
   3. iv_proxy = AVERAGE(atm_call_iv, atm_put_iv)
 """
@@ -97,46 +97,35 @@ class CheapOptionsScanner(BaseScanner):
             # Step 2: Get options chain for IV proxy
             underlying_price = closes[-1]
 
-            # Calculate expiration date range (30-45 DTE) for filtering cached chain
-            min_dte = 30
-            max_dte = 45
+            # Use wide DTE range (7-90) for maximum signal
+            min_dte = 7
+            max_dte = 90
             min_exp = (datetime.now() + timedelta(days=min_dte)).strftime("%Y-%m-%d")
             max_exp = (datetime.now() + timedelta(days=max_dte)).strftime("%Y-%m-%d")
 
-            # Use cached options chain from Phase 3
-            # The orchestrator now fetches MINIMAL chains (30-45 DTE, ATM ±10%)
-            # via get_options_chain_minimal() - single API call, no pagination
+            # Use cached options chain from Phase 3 (already fetched at 7-90 DTE)
             cached_chain = context.cached_data.get("options_chains", {}).get(ticker)
-            
+
             if cached_chain:
-                # Cached chain is already ATM-filtered by orchestrator
-                # Just filter to exact 30-45 DTE range for IV proxy
-                chain = [
-                    c for c in cached_chain
-                    if min_exp <= c.get("details", {}).get("expiration_date", "") <= max_exp
-                ]
+                # Cached chain covers 7-90 DTE; use as-is
+                chain = cached_chain
             else:
                 # Fallback: use minimal fetch for standalone scanner runs
-                # This uses a SINGLE API call with strike + DTE filters
-                strike_gte = underlying_price * 0.90
-                strike_lte = underlying_price * 1.10
                 chain = await context.polygon.get_options_chain_minimal(
                     ticker,
                     expiration_date_gte=min_exp,
                     expiration_date_lte=max_exp,
-                    strike_price_gte=strike_gte,
-                    strike_price_lte=strike_lte,
                 )
 
             if not chain:
                 return ScanResult(
                     ticker=ticker,
                     triggered=False,
-                    error="No options chain data in 30-45 DTE range",
+                    error="No options chain data in 7-90 DTE range",
                 )
 
-            # Calculate IV proxy from ATM options
-            iv_result = calculate_iv_proxy(chain, underlying_price, min_dte=30, max_dte=45)
+            # Calculate IV proxy from ATM options across full 7-90 DTE range
+            iv_result = calculate_iv_proxy(chain, underlying_price, min_dte=7, max_dte=90)
 
             if iv_result is None:
                 return ScanResult(

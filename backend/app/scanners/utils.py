@@ -332,21 +332,21 @@ class IVProxyResult:
 def calculate_iv_proxy(
     options_chain: list[dict],
     underlying_price: float,
-    min_dte: int = 30,
-    max_dte: int = 45,
+    min_dte: int = 7,
+    max_dte: int = 90,
 ) -> Optional[IVProxyResult]:
     """Calculate IV proxy from ATM options in a DTE range.
 
     Per Section 10.5:
-    1. Filter chain to contracts with DTE between 30 and 45
+    1. Filter chain to contracts with DTE between min_dte and max_dte
     2. For each side (CALL, PUT), find contract closest to ATM
     3. iv_proxy = AVERAGE(atm_call_iv, atm_put_iv)
 
     Args:
         options_chain: List of option contract dicts from Polygon
         underlying_price: Current underlying price
-        min_dte: Minimum DTE for contracts (default 30)
-        max_dte: Maximum DTE for contracts (default 45)
+        min_dte: Minimum DTE for contracts (default 7)
+        max_dte: Maximum DTE for contracts (default 90)
 
     Returns:
         IVProxyResult with iv_proxy, IVs, strikes, and DTE, or None if not found
