@@ -366,7 +366,7 @@ def calculate_iv_proxy(
         contract_type = details.get("contract_type", "").upper()
         strike = details.get("strike_price", 0)
         exp_date_str = details.get("expiration_date", "")
-        iv = greeks.get("implied_volatility")
+        iv = contract.get("implied_volatility") or greeks.get("implied_volatility")
 
         if not all([contract_type, strike, exp_date_str, iv]):
             continue
