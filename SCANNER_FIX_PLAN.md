@@ -269,27 +269,30 @@ This contributes ~2.5 points of final score difference between Breakout and Chea
 
 **Design decision:** User chose "widen to 7-90 everywhere" over fallback or per-expiration grouping. The full 7-90 DTE range flows from API fetch → cache → scanner → IV proxy calculation with no intermediate narrowing.
 
-**Verification status:**
+**CLAUDE.md Step 4 verification (performed 2026-02-17 ~03:50 UTC):**
 - CI: ✅ green
-- Health endpoint: ✅ healthy
-- CloudWatch errors: ✅ none
-- Lambda deployed: ✅ version 7, commit confirmed
-- **Pipeline run with market data: ⏳ pending (next weekday)**
+- Health endpoint: ✅ healthy (`{"status": "healthy", "version": "0.1.0"}`)
+- CloudWatch errors: ✅ no new errors (only pre-existing FinnhubClient "not initialized" — known, non-blocking)
+- Lambda deployed: ✅ version 7, commit `0fd5804` confirmed in Lambda description
+- Pipeline Monitor: ⏳ **no pipeline runs since deploy** — EventBridge schedule is `MON-FRI 13:00-21:00 UTC` only; deployed on Sunday evening
+- **Pipeline run with market data: ⏳ pending (Monday 13:00 UTC / 5:00 AM PST)**
 
-**What to verify on Monday:**
+**What to verify on Monday (first weekday run):**
 - CloudWatch `[MINIMAL]` logs show `results=N` (not 0) for each ticker
 - Stage 1 scanner stats show `cheap_options` triggers > 0
+- Pipeline Monitor shows all 8 stages with data flowing
 - No new errors from wider chain data
 - Breakout scanner output unchanged
 
 **Rollback:** `./scripts/deploy.sh rollback` → version 6 (diagnostic-only)
 
-### Phase 2: Fix Compression Scanner Thresholds
+### Phase 2: Fix Compression Scanner Thresholds — NOT STARTED (blocked on diagnostic data)
 **Goal:** Increase Compression trigger rate from ~0% to meaningful level.
 **Risk:** VERY LOW — policy config changes only, no code changes required.
+**Status:** Blocked — `[COMPRESSION_DIAG]` logs require a weekday pipeline run. Zero diagnostic data exists as of 2026-02-17.
 
 **Step 2.1: Choose threshold values** (informed by Phase 0 diagnostics)
-- Analyze the compression ratio distribution from diagnostic logs
+- Analyze the compression ratio distribution from `[COMPRESSION_DIAG]` logs (available after Monday's first pipeline run)
 - Pick `compression_multiplier` that captures the tightest 5-10% of tickers (likely 1.15-1.25)
 - Pick `break_pct` that captures meaningful breakouts (likely 1.0-1.5)
 
