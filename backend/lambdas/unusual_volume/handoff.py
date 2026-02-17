@@ -318,12 +318,12 @@ def _create_evaluation(candidate: dict) -> str:
 
     # Scanner metrics
     scanner_metrics = {
-        "volume_ratio": float(candidate.get("volume_ratio", 0)),
-        "avg_volume_20d": float(candidate.get("avg_volume_20d", 0)),
-        "oi_change_pct": float(candidate.get("oi_change_pct", 0)),
-        "prior_oi": float(candidate.get("prior_oi", 0)),
+        "volume_ratio": Decimal(str(round(float(candidate.get("volume_ratio", 0)), 4))),
+        "avg_volume_20d": Decimal(str(round(float(candidate.get("avg_volume_20d", 0)), 2))),
+        "oi_change_pct": Decimal(str(round(float(candidate.get("oi_change_pct", 0)), 2))),
+        "prior_oi": Decimal(str(int(float(candidate.get("prior_oi", 0))))),
         "volume_source": candidate.get("volume_source", ""),
-        "priority_score": float(candidate.get("priority_score", 0)),
+        "priority_score": Decimal(str(round(float(candidate.get("priority_score", 0)), 2))),
         "scan_id": candidate.get("scan_id", ""),
     }
 
