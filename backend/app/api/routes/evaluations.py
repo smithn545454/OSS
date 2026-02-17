@@ -72,6 +72,7 @@ URGENCY_BY_SCANNER = {
     "BREAKOUT": "act_now",
     "BREAKDOWN": "act_now",
     "UNUSUAL_VOLUME": "hours",
+    "UNUSUAL_VOLUME_SCANNER": "hours",
     "COMPRESSION_EXPANSION": "patient",
     "CHEAP_OPTIONS": "patient",
 }
@@ -688,20 +689,28 @@ async def list_approve_evaluations(
         filtered_items = []
         for item in items:
             opportunity_id = item.get("opportunity_id")
+            matched_scanner_types: list[str] = []
             if opportunity_id:
                 # Get scanner triggers from opportunity
                 ticker = item.get("underlying_ticker", "")
-                opportunities = await OpportunityTable.list_by_ticker(ticker, limit=10)
+                opportunities = await OpportunityTable.list_by_ticker(ticker, limit=50)
                 for opp in opportunities:
                     if opp.opportunity_id == opportunity_id:
-                        scanner_types = [
-                            str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') 
+                        matched_scanner_types = [
+                            str(st.scanner_type.value) if hasattr(st.scanner_type, 'value')
                             else str(st.scanner_type)
                             for st in opp.scanner_triggers
                         ]
-                        if scanner_upper in [s.upper() for s in scanner_types]:
-                            filtered_items.append(item)
                         break
+
+            # Fallback: check evaluation's own scanner_source field
+            if not matched_scanner_types:
+                eval_scanner_source = item.get("scanner_source")
+                if eval_scanner_source:
+                    matched_scanner_types = [eval_scanner_source]
+
+            if scanner_upper in [s.upper() for s in matched_scanner_types]:
+                filtered_items.append(item)
         items = filtered_items
     
     # Track tickers to check for scanner convergence
@@ -737,19 +746,26 @@ async def list_approve_evaluations(
             for gr in gate_results
         ]
         
-        # Get scanner triggers
+        # Get scanner triggers from opportunity, falling back to evaluation's own scanner_source
         opportunity_id = item.get("opportunity_id")
         scanner_types: list[str] = []
         if opportunity_id:
-            opportunities = await OpportunityTable.list_by_ticker(ticker, limit=10)
+            opportunities = await OpportunityTable.list_by_ticker(ticker, limit=50)
             for opp in opportunities:
                 if opp.opportunity_id == opportunity_id:
                     scanner_types = [
-                        str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') 
+                        str(st.scanner_type.value) if hasattr(st.scanner_type, 'value')
                         else str(st.scanner_type)
                         for st in opp.scanner_triggers
                     ]
                     break
+
+        # Fallback: use evaluation's own scanner_source field (set by UV bridge
+        # and other direct-to-Stage-4 pipelines that bypass opportunity creation)
+        if not scanner_types:
+            eval_scanner_source = item.get("scanner_source")
+            if eval_scanner_source:
+                scanner_types = [eval_scanner_source]
         
         # Check earnings exclusion
         if exclude_earnings:
