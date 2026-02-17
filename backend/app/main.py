@@ -13,6 +13,8 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI
@@ -252,6 +254,14 @@ async def _run_worker_scan(
             f"{result.opportunities_created} opportunities"
         )
 
+        # Run UV bridge to process PENDING UV evaluations through Stages 4-7
+        uv_result: dict[str, Any] = {}
+        try:
+            uv_result = await _run_uv_bridge(run_id=result.run_id)
+        except Exception as e:
+            logger.error(f"UV Bridge error (non-fatal): {e}")
+            uv_result = {"status": "error", "error": str(e)}
+
         return {
             "status": "success",
             "mode": "worker",
@@ -260,6 +270,7 @@ async def _run_worker_scan(
             "opportunities_created": result.opportunities_created,
             "evaluations_created": result.evaluations_created,
             "duration_ms": result.duration_ms,
+            "uv_bridge": uv_result,
         }
     except Exception as e:
         logger.error(f"Worker scan failed: {e}")
@@ -268,6 +279,254 @@ async def _run_worker_scan(
             "mode": "worker",
             "error": str(e),
         }
+
+
+def _synthesize_uv_opportunity(evaluation: Any) -> Any:
+    """Create a minimal Opportunity for a UV evaluation so Stages 4-7 can run.
+
+    Args:
+        evaluation: Evaluation Pydantic model from a UV handoff
+
+    Returns:
+        Opportunity model with scanner trigger metadata
+    """
+    from app.core.schemas import (
+        DirectionHint,
+        Opportunity,
+        ScannerTrigger,
+        ScannerType,
+    )
+
+    trigger = ScannerTrigger(
+        scanner_type=ScannerType.UNUSUAL_VOLUME,
+        reason_codes=evaluation.trigger_reasons or [],
+        metrics=evaluation.scanner_metrics or {},
+        triggered_at=evaluation.evaluated_at,
+    )
+    return Opportunity(
+        opportunity_id=evaluation.opportunity_id,
+        underlying_ticker=evaluation.underlying_ticker,
+        timestamp_utc=evaluation.evaluated_at,
+        scanner_triggers=[trigger],
+        direction_hint=DirectionHint.NONE,
+        priority_score=max(0, min(int(evaluation.rank_score), 100)),
+        created_at=evaluation.evaluated_at,
+    )
+
+
+def _convert_decimals(obj: Any) -> Any:
+    """Recursively convert Decimal values to float for Pydantic model construction."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_decimals(item) for item in obj]
+    return obj
+
+
+async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
+    """Process PENDING UV evaluations through Stages 4-7.
+
+    Picks up evaluations written by the UV handoff (GSI1PK=VERDICT#PENDING)
+    and runs them through Feature Computation, Pillar Scoring, Hard Gates,
+    Decision Logic, and Paper Trading using the same stage functions as the
+    main pipeline.
+
+    Args:
+        run_id: Pipeline run ID for telemetry (reuses the main scan's run)
+
+    Returns:
+        Summary dict with counts of processed/skipped/errored evaluations
+    """
+    from app.core.pipeline import PipelineOrchestrator
+    from app.core.schemas import Evaluation, Verdict
+    from app.db.tables import EvaluationTable, PolicyTable
+    from app.decision.stage import run_decision_logic
+    from app.features.stage import run_feature_computation
+    from app.gates.stage import run_hard_gates
+    from app.paper_trading.stage import run_paper_trading
+    from app.pillars.stage import run_pillar_scoring
+    from app.services.polygon import PolygonClient
+
+    logger.info("UV Bridge: Checking for PENDING evaluations")
+
+    try:
+        # 1. Query PENDING evaluations
+        raw_items = await EvaluationTable.list_by_verdict("PENDING", limit=200)
+        if not raw_items:
+            logger.info("UV Bridge: No PENDING evaluations found")
+            return {"status": "skipped", "reason": "no_pending_evaluations"}
+
+        # 2. Filter to recent evaluations only (last 4 hours)
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=4)
+        cutoff_iso = cutoff_dt.isoformat()
+
+        fresh_items = []
+        stale_count = 0
+        for item in raw_items:
+            evaluated_at = item.get("evaluated_at", "")
+            if evaluated_at >= cutoff_iso:
+                fresh_items.append(item)
+            else:
+                stale_count += 1
+
+        if stale_count > 0:
+            logger.info(
+                f"UV Bridge: Skipped {stale_count} stale PENDING evals (>4h old)"
+            )
+
+        if not fresh_items:
+            logger.info("UV Bridge: All PENDING evaluations are stale, nothing to process")
+            return {
+                "status": "skipped",
+                "reason": "all_stale",
+                "total_pending": len(raw_items),
+                "stale_skipped": stale_count,
+            }
+
+        # 3. Reconstruct Evaluation models (handle Decimal → float from DynamoDB)
+        evaluations: list[Evaluation] = []
+        parse_errors = 0
+        for item in fresh_items:
+            try:
+                converted = _convert_decimals(item)
+                evaluations.append(Evaluation(**converted))
+            except Exception as e:
+                parse_errors += 1
+                ticker = item.get("underlying_ticker", "?")
+                logger.warning(f"UV Bridge: Failed to parse evaluation for {ticker}: {e}")
+
+        if not evaluations:
+            logger.warning(f"UV Bridge: All {len(fresh_items)} evaluations failed to parse")
+            return {"status": "error", "reason": "all_parse_failures", "parse_errors": parse_errors}
+
+        logger.info(f"UV Bridge: Processing {len(evaluations)} PENDING UV evaluations")
+
+        # 4. Synthesize Opportunity objects (one per unique ticker)
+        seen_tickers: set[str] = set()
+        opportunities = []
+        for evaluation in evaluations:
+            if evaluation.underlying_ticker not in seen_tickers:
+                seen_tickers.add(evaluation.underlying_ticker)
+                opportunities.append(_synthesize_uv_opportunity(evaluation))
+
+        # 5. Load policy config
+        policy = await PolicyTable.get_active()
+        if policy is None:
+            logger.error("UV Bridge: No active policy found")
+            return {"status": "error", "reason": "no_active_policy"}
+        policy_config = policy.config
+
+        pipeline = PipelineOrchestrator()
+
+        # 6. Run Stages 4-7 within a PolygonClient context
+        async with PolygonClient() as polygon:
+            # Stage 4: Feature Computation
+            feature_sets = await run_feature_computation(
+                run_id=run_id,
+                evaluations=evaluations,
+                opportunities=opportunities,
+                polygon_client=polygon,
+                orchestrator=pipeline,
+                config=policy_config.features,
+                persist_features=True,
+            )
+            logger.info(f"UV Bridge Stage 4: {len(feature_sets)} feature sets computed")
+
+            if not feature_sets:
+                logger.warning("UV Bridge: No feature sets produced, cannot continue")
+                return {
+                    "status": "partial",
+                    "evaluations_attempted": len(evaluations),
+                    "feature_sets": 0,
+                }
+
+            # Stage 5: Pillar Scoring
+            pillar_results = await run_pillar_scoring(
+                run_id=run_id,
+                evaluations=evaluations,
+                feature_sets=feature_sets,
+                opportunities=opportunities,
+                orchestrator=pipeline,
+                config=policy_config.pillars,
+                persist_scores=True,
+            )
+            logger.info(f"UV Bridge Stage 5: {len(pillar_results)} evaluations scored")
+
+            # Stage 6: Hard Gates
+            gate_evaluations = await run_hard_gates(
+                run_id=run_id,
+                evaluations=evaluations,
+                feature_sets=feature_sets,
+                opportunities=opportunities,
+                orchestrator=pipeline,
+                config=policy_config.gates,
+                persist_results=True,
+            )
+            passed_gates = sum(1 for ge in gate_evaluations.values() if ge.all_passed)
+            logger.info(f"UV Bridge Stage 6: {passed_gates}/{len(gate_evaluations)} passed gates")
+
+            # Stage 7: Decision Logic
+            decisions, theses = await run_decision_logic(
+                run_id=run_id,
+                evaluations=evaluations,
+                pillar_results=pillar_results,
+                gate_evaluations=gate_evaluations,
+                orchestrator=pipeline,
+                decision_config=policy_config.decision,
+                pillar_weights=policy_config.pillars.weights,
+                thesis_config=policy_config.thesis,
+                persist_decisions=True,
+                check_concentration=True,
+                generate_theses=True,
+            )
+
+            approve_count = sum(1 for d in decisions.values() if d.verdict == Verdict.APPROVE)
+            watch_count = sum(1 for d in decisions.values() if d.verdict == Verdict.WATCH)
+            reject_count = sum(1 for d in decisions.values() if d.verdict == Verdict.REJECT)
+            logger.info(
+                f"UV Bridge Stage 7: {approve_count} APPROVE, "
+                f"{watch_count} WATCH, {reject_count} REJECT"
+            )
+
+            # Stage 8: Paper Trading
+            paper_results = {}
+            if decisions:
+                paper_results = await run_paper_trading(
+                    run_id=run_id,
+                    evaluations=evaluations,
+                    decisions=decisions,
+                    gate_evaluations=gate_evaluations,
+                    orchestrator=pipeline,
+                    config=policy_config.tracking,
+                    create_positions=True,
+                    track_shadows=True,
+                )
+                logger.info(
+                    f"UV Bridge Stage 8: {paper_results.get('positions_created', 0)} positions"
+                )
+
+        summary = {
+            "status": "success",
+            "evaluations_processed": len(evaluations),
+            "stale_skipped": stale_count,
+            "parse_errors": parse_errors,
+            "feature_sets": len(feature_sets),
+            "pillar_scored": len(pillar_results),
+            "gates_passed": passed_gates,
+            "approve": approve_count,
+            "watch": watch_count,
+            "reject": reject_count,
+            "positions_created": paper_results.get("positions_created", 0),
+            "theses_generated": len([t for t in theses if t.status.value == "COMPLETED"]),
+        }
+        logger.info(f"UV Bridge complete: {summary}")
+        return summary
+
+    except Exception as e:
+        logger.error(f"UV Bridge failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 
 async def _run_scheduled_scan() -> dict[str, Any]:
