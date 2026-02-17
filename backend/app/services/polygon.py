@@ -388,7 +388,7 @@ class PolygonClient:
             List of option contract snapshots (up to 1000)
         """
         logger.info(f"[MINIMAL] Single-page fetch for {underlying_ticker}")
-        params: dict[str, Any] = {"limit": 1000}
+        params: dict[str, Any] = {"limit": 250}
         if expiration_date_gte:
             params["expiration_date.gte"] = expiration_date_gte
         if expiration_date_lte:

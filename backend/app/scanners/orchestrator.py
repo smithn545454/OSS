@@ -1050,12 +1050,17 @@ class ScannerOrchestrator:
                         return ticker_results
 
                     # BROAD FETCH: Single API call, no pagination
-                    # No strike filter — scanner filters ATM programmatically.
+                    # ATM ±10% strike filter required by Polygon Basic tier.
                     # Wider DTE range (7-90) maximizes data for IV proxy.
+                    underlying_price = daily_bars[-1].close if daily_bars else None
+                    strike_gte = underlying_price * 0.9 if underlying_price else None
+                    strike_lte = underlying_price * 1.1 if underlying_price else None
                     chain = await polygon.get_options_chain_minimal(
                         ticker,
                         expiration_date_gte=min_exp_date,
                         expiration_date_lte=max_exp_date,
+                        strike_price_gte=strike_gte,
+                        strike_price_lte=strike_lte,
                     )
                     
                     if not chain:
