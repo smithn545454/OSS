@@ -137,7 +137,7 @@ async def _run_coordinator_scan() -> dict[str, Any]:
 
         # Multiple chunks: create a shared PipelineRun for all workers
         pipeline = PipelineOrchestrator()
-        pipeline_run = await pipeline.start_run(policy.config_version)
+        pipeline_run = await pipeline.start_run(policy.version)
         coordinator_run_id = pipeline_run.run_id
         logger.info(f"Coordinator created run {coordinator_run_id}")
 
