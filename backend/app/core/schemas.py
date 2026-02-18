@@ -735,7 +735,7 @@ class ThesisConfig(OSSBaseModel):
     enabled: bool = True
     max_daily_calls: int = 50
     output_token_limit: int = 1000
-    preferred_provider: LLMProvider = LLMProvider.ANTHROPIC
+    preferred_provider: LLMProvider = LLMProvider.OPENAI
     fallback_enabled: bool = True  # Try alternate provider if preferred fails
 
 

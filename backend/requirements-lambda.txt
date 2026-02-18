@@ -31,6 +31,9 @@ python-dotenv==1.0.1
 python-dateutil==2.9.0
 six==1.16.0
 
+# LLM provider
+openai>=1.0.0
+
 # Type hints
 typing_extensions==4.12.2
 annotated-types==0.7.0
