@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from collections import defaultdict
@@ -644,29 +645,28 @@ async def list_approve_evaluations(
     limit: int = 100,
 ) -> dict[str, Any]:
     """Get APPROVE evaluations with enhanced data for Opportunities page.
-    
+
     Per Section 19.1 of OSS_Opportunities_Page_Specification:
     - Fetch APPROVE evaluations from latest pipeline run
     - Include scanner convergence data
     - Include gate margin calculations
     - Include theta-adjusted EV
     - Optionally exclude contracts with earnings within N days
-    
-    Args:
-        exclude_earnings: Whether to exclude contracts near earnings
-        earnings_days: Days window for earnings exclusion
-        scanner: Filter by scanner type
-        limit: Maximum evaluations to return
-        
-    Returns:
-        Enhanced evaluation list with conviction scoring inputs
+
+    All per-evaluation enrichment queries run in parallel to stay well under
+    the API Gateway 30-second integration timeout.
     """
-    # Fetch APPROVE evaluations
+    sem = asyncio.Semaphore(50)
+
+    async def _limited(coro):  # type: ignore[no-untyped-def]
+        async with sem:
+            return await coro
+
+    # ------------------------------------------------------------------
+    # 1. Fetch APPROVE evaluations and deduplicate by contract
+    # ------------------------------------------------------------------
     items = await EvaluationTable.list_by_verdict("APPROVE", limit=500)
 
-    # Deduplicate by contract — keep only the most recent evaluation per option_ticker.
-    # Results are already sorted by evaluated_at descending (scan_forward=False),
-    # so the first occurrence of each contract is the latest.
     contract_counts: dict[str, int] = {}
     for item in items:
         key = item.get("option_ticker", "")
@@ -683,57 +683,107 @@ async def list_approve_evaluations(
             unique_items.append(item)
     items = unique_items
 
-    # Filter by scanner if specified
+    # ------------------------------------------------------------------
+    # 2. Pre-fetch opportunities for all unique tickers (parallel)
+    # ------------------------------------------------------------------
+    unique_tickers = list({
+        item.get("underlying_ticker", "")
+        for item in items
+    } - {""})
+
+    opp_results = await asyncio.gather(*[
+        _limited(OpportunityTable.list_by_ticker(t, limit=50))
+        for t in unique_tickers
+    ])
+    opp_by_ticker: dict[str, list[Any]] = dict(zip(unique_tickers, opp_results))
+
+    def _scanner_types_for(item: dict[str, Any]) -> list[str]:
+        """Resolve scanner types from pre-fetched opportunities or eval field."""
+        opportunity_id = item.get("opportunity_id")
+        ticker = item.get("underlying_ticker", "")
+        if opportunity_id and ticker in opp_by_ticker:
+            for opp in opp_by_ticker[ticker]:
+                if opp.opportunity_id == opportunity_id:
+                    return [
+                        str(st.scanner_type.value)
+                        if hasattr(st.scanner_type, "value")
+                        else str(st.scanner_type)
+                        for st in opp.scanner_triggers
+                    ]
+        eval_scanner_source = item.get("scanner_source")
+        if eval_scanner_source:
+            return [eval_scanner_source]
+        return []
+
+    # ------------------------------------------------------------------
+    # 3. Filter by scanner using pre-fetched opportunities
+    # ------------------------------------------------------------------
     if scanner:
         scanner_upper = scanner.upper()
-        filtered_items = []
-        for item in items:
-            opportunity_id = item.get("opportunity_id")
-            matched_scanner_types: list[str] = []
-            if opportunity_id:
-                # Get scanner triggers from opportunity
-                ticker = item.get("underlying_ticker", "")
-                opportunities = await OpportunityTable.list_by_ticker(ticker, limit=50)
-                for opp in opportunities:
-                    if opp.opportunity_id == opportunity_id:
-                        matched_scanner_types = [
-                            str(st.scanner_type.value) if hasattr(st.scanner_type, 'value')
-                            else str(st.scanner_type)
-                            for st in opp.scanner_triggers
-                        ]
-                        break
+        items = [
+            item for item in items
+            if scanner_upper in [s.upper() for s in _scanner_types_for(item)]
+        ]
 
-            # Fallback: check evaluation's own scanner_source field
-            if not matched_scanner_types:
-                eval_scanner_source = item.get("scanner_source")
-                if eval_scanner_source:
-                    matched_scanner_types = [eval_scanner_source]
-
-            if scanner_upper in [s.upper() for s in matched_scanner_types]:
-                filtered_items.append(item)
-        items = filtered_items
-    
-    # Track tickers to check for scanner convergence
-    ticker_to_evals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    # ------------------------------------------------------------------
+    # 4. Pre-fetch earnings for unique tickers (parallel)
+    # ------------------------------------------------------------------
     excluded_for_earnings: list[dict[str, Any]] = []
-    
-    # Enhance each evaluation
-    enhanced_items = []
-    catalyst_service = _create_catalyst_service()
-    
-    for item in items:
-        ticker = item.get("underlying_ticker", "")
+
+    if exclude_earnings:
+        catalyst_service = _create_catalyst_service()
+        remaining_tickers = list({
+            item.get("underlying_ticker", "")
+            for item in items
+        } - {""})
+
+        earnings_results = await asyncio.gather(*[
+            _limited(catalyst_service.get_days_to_earnings(t))
+            for t in remaining_tickers
+        ], return_exceptions=True)
+
+        earnings_by_ticker_raw: dict[str, int | None] = {}
+        for t, result in zip(remaining_tickers, earnings_results):
+            if isinstance(result, BaseException):
+                earnings_by_ticker_raw[t] = None
+            else:
+                earnings_by_ticker_raw[t] = result
+
+        # Filter out items near earnings
+        kept_items: list[dict[str, Any]] = []
+        for item in items:
+            ticker = item.get("underlying_ticker", "")
+            days_to = earnings_by_ticker_raw.get(ticker)
+            if days_to is not None and days_to <= earnings_days:
+                excluded_for_earnings.append({
+                    "ticker": ticker,
+                    "earningsDate": (
+                        datetime.now(timezone.utc) + timedelta(days=days_to)
+                    ).strftime("%Y-%m-%d"),
+                    "contractCount": 1,
+                })
+            else:
+                kept_items.append(item)
+        items = kept_items
+
+    # ------------------------------------------------------------------
+    # 5. Enrich all remaining evaluations in parallel
+    # ------------------------------------------------------------------
+    async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
         evaluation_id = item.get("evaluation_id", "")
-        
-        # Get pillar scores for composite calculation
-        pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+
+        pillar_scores, gate_results, thesis = await asyncio.gather(
+            _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
+            _limited(GateResultTable.list_by_evaluation(evaluation_id)),
+            _limited(TradeThesisTable.get_by_evaluation_id(evaluation_id)),
+        )
+
         pillar_dict = {
-            str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id): ps.score
+            str(ps.pillar_id.value) if hasattr(ps.pillar_id, "value")
+            else str(ps.pillar_id): ps.score
             for ps in pillar_scores
         }
-        
-        # Get gate results for margin calculation
-        gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+
         gate_list = [
             {
                 "gate_id": gr.gate_id,
@@ -741,105 +791,68 @@ async def list_approve_evaluations(
                 "passed": gr.passed,
                 "measured_value": gr.measured_value,
                 "threshold_value": gr.threshold_value,
-                "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+                "operator": (
+                    str(gr.operator.value) if hasattr(gr.operator, "value")
+                    else str(gr.operator)
+                ),
             }
             for gr in gate_results
         ]
-        
-        # Get scanner triggers from opportunity, falling back to evaluation's own scanner_source
-        opportunity_id = item.get("opportunity_id")
-        scanner_types: list[str] = []
-        if opportunity_id:
-            opportunities = await OpportunityTable.list_by_ticker(ticker, limit=50)
-            for opp in opportunities:
-                if opp.opportunity_id == opportunity_id:
-                    scanner_types = [
-                        str(st.scanner_type.value) if hasattr(st.scanner_type, 'value')
-                        else str(st.scanner_type)
-                        for st in opp.scanner_triggers
-                    ]
-                    break
 
-        # Fallback: use evaluation's own scanner_source field (set by UV bridge
-        # and other direct-to-Stage-4 pipelines that bypass opportunity creation)
-        if not scanner_types:
-            eval_scanner_source = item.get("scanner_source")
-            if eval_scanner_source:
-                scanner_types = [eval_scanner_source]
-        
-        # Check earnings exclusion
-        if exclude_earnings:
-            try:
-                days_to_earnings = await catalyst_service.get_days_to_earnings(ticker)
-                if days_to_earnings is not None and days_to_earnings <= earnings_days:
-                    excluded_for_earnings.append({
-                        "ticker": ticker,
-                        "earningsDate": (datetime.now(timezone.utc) + timedelta(days=days_to_earnings)).strftime("%Y-%m-%d"),
-                        "contractCount": 1,
-                    })
-                    continue
-            except Exception:
-                pass  # If we can't fetch earnings, include the contract
-        
-        # Calculate theta-adjusted EV
-        theta_adj_ev = calculate_theta_adjusted_ev(
-            delta=item.get("delta", 0),
-            theta=item.get("theta", 0),
-            mid=item.get("mid", 0),
-            iv=item.get("iv", 0),
-            underlying_price=item.get("underlying_price", 0),
-            dte=item.get("dte", 30),
-        )
-        
-        # Calculate gate margin
-        gate_margin = calculate_gate_margin(gate_list)
-        
-        # Determine urgency
-        urgency = determine_urgency(scanner_types)
-        
-        # Get thesis headline if exists
-        thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+        scanner_types = _scanner_types_for(item)
+
         headline = None
         if thesis and thesis.setup_summary:
-            headline = thesis.setup_summary[:120]  # Truncate to 120 chars
-        
-        # Build enhanced evaluation
-        enhanced = {
+            headline = thesis.setup_summary[:120]
+
+        return {
             **item,
             "pillarScores": pillar_dict,
             "gateResults": gate_list,
-            "gateMargin": gate_margin,
+            "gateMargin": calculate_gate_margin(gate_list),
             "scannerSource": scanner_types,
-            "thetaAdjustedEV": theta_adj_ev,
-            "urgency": urgency,
+            "thetaAdjustedEV": calculate_theta_adjusted_ev(
+                delta=item.get("delta", 0),
+                theta=item.get("theta", 0),
+                mid=item.get("mid", 0),
+                iv=item.get("iv", 0),
+                underlying_price=item.get("underlying_price", 0),
+                dte=item.get("dte", 30),
+            ),
+            "urgency": determine_urgency(scanner_types),
             "headline": headline,
         }
-        
-        enhanced_items.append(enhanced)
-        ticker_to_evals[ticker].append(enhanced)
-    
-    # Mark scanner convergence (multiple scanners on same underlying)
+
+    enhanced_items = list(await asyncio.gather(*[_enrich(item) for item in items]))
+
+    # ------------------------------------------------------------------
+    # 6. Scanner convergence + sort + limit
+    # ------------------------------------------------------------------
+    ticker_to_evals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in enhanced_items:
+        ticker_to_evals[e.get("underlying_ticker", "")].append(e)
+
     for ticker, evals in ticker_to_evals.items():
         if len(evals) > 1:
-            # Get unique scanner types across all evals for this ticker
             all_scanners = set()
             for e in evals:
                 all_scanners.update(e.get("scannerSource", []))
-            
             convergence_count = len(all_scanners)
             for e in evals:
                 e["scannerConvergence"] = convergence_count
         else:
             for e in evals:
                 e["scannerConvergence"] = len(e.get("scannerSource", []))
-    
-    # Sort by decision score descending, limit
+
     enhanced_items.sort(
-        key=lambda x: x.get("decision", {}).get("final_score", 0) if isinstance(x.get("decision"), dict) else 0,
+        key=lambda x: (
+            x.get("decision", {}).get("final_score", 0)
+            if isinstance(x.get("decision"), dict) else 0
+        ),
         reverse=True,
     )
     enhanced_items = enhanced_items[:limit]
-    
+
     # Consolidate earnings exclusions by ticker
     earnings_by_ticker: dict[str, dict[str, Any]] = {}
     for exc in excluded_for_earnings:
@@ -848,7 +861,7 @@ async def list_approve_evaluations(
             earnings_by_ticker[ticker]["contractCount"] += 1
         else:
             earnings_by_ticker[ticker] = exc
-    
+
     return {
         "evaluations": enhanced_items,
         "excludedForEarnings": list(earnings_by_ticker.values()),
