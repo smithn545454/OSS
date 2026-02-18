@@ -196,8 +196,4 @@ class SelectionTelemetry:
         """
         return {
             "summary": self.get_summary(),
-            "ticker_stats": {
-                ticker: stats.to_dict()
-                for ticker, stats in self._ticker_stats.items()
-            },
         }

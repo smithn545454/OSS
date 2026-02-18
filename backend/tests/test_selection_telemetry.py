@@ -107,5 +107,4 @@ class TestSelectionTelemetry:
         tel.start_ticker("AAPL", 150.0, 200)
         meta = tel.to_stage_metadata()
         assert "summary" in meta
-        assert "ticker_stats" in meta
-        assert "AAPL" in meta["ticker_stats"]
+        assert "ticker_stats" not in meta

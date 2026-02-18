@@ -464,6 +464,7 @@ class StageEventTable:
             StageEventTable.TABLE,
             f"RUN#{run_id}",
             scan_forward=True,  # Chronological order
+            limit=None,  # Paginate through all results
         )
         events = []
         for item in items:
