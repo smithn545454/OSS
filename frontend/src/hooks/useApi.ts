@@ -463,7 +463,7 @@ export function useGenerateThesis() {
   return useMutation({
     mutationFn: (evaluationId: string) => api.generateThesis(evaluationId),
     onSuccess: () => {
-      // Invalidate evaluations to refresh thesis data
+      // Invalidate evaluations and detail queries to refresh thesis data
       queryClient.invalidateQueries({ queryKey: ['evaluations'] })
     },
   })

@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(paper_trading_routes.router, prefix="/api/paper-trading", tags=["Paper Trading"])
     app.include_router(calibration_routes.router, prefix="/api/calibration", tags=["Calibration"])
     app.include_router(llm_routes.router, prefix="/api/llm", tags=["LLM"])
+    app.include_router(llm_routes.thesis_router, prefix="/api/thesis", tags=["Thesis"])
     app.include_router(observability_routes.router, prefix="/api/observability", tags=["Observability"])
     app.include_router(market_routes.router, prefix="/api/market", tags=["Market"])
 

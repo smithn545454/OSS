@@ -11,7 +11,7 @@ import {
   Shield,
   BarChart3,
 } from 'lucide-react'
-import { useEvaluationDetail } from '@/hooks/useApi'
+import { useEvaluationDetail, useGenerateThesis } from '@/hooks/useApi'
 import type { 
   PillarScoreDetail, 
   GateResultDetail, 
@@ -850,6 +850,8 @@ export default function EvaluationDetail() {
     evaluationId || ''
   )
 
+  const generateThesis = useGenerateThesis()
+
   if (isLoading) {
     return (
       <div className="space-y-8">
@@ -938,7 +940,14 @@ export default function EvaluationDetail() {
       </div>
 
       {/* AI Trade Thesis */}
-      {decision?.verdict === 'APPROVE' && <AITradeThesis thesis={thesis as TradeThesis | null} />}
+      {decision?.verdict === 'APPROVE' && (
+        <AITradeThesis
+          thesis={thesis as TradeThesis | null}
+          onGenerate={() => evaluationId && generateThesis.mutate(evaluationId)}
+          isGenerating={generateThesis.isPending}
+          generateError={generateThesis.error as Error | null}
+        />
+      )}
 
       {/* Paper Tracking */}
       <PaperTrackingPanel position={position} />

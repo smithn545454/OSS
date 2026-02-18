@@ -5,16 +5,33 @@ Per Section 21 of OSS_Complete_Requirements.md.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-from app.core.schemas import ThesisConfig, ThesisStatus
-from app.db.tables import LLMUsageTable, TradeThesisTable
+from app.core.schemas import (
+    Decision,
+    Evaluation,
+    ThesisConfig,
+)
+from app.db.tables import (
+    EvaluationTable,
+    FeatureValueTable,
+    LLMUsageTable,
+    OpportunityTable,
+    PillarScoreTable,
+    TradeThesisTable,
+)
 from app.llm.rate_limiter import RateLimiter
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+thesis_router = APIRouter()
 
 
 @router.get("/usage")
@@ -138,3 +155,142 @@ async def get_thesis(evaluation_id: str) -> dict[str, Any]:
         "generated_at": thesis.generated_at,
         "error_message": thesis.error_message,
     }
+
+
+# ============================================================================
+# On-Demand Thesis Generation (thesis_router, mounted at /api/thesis)
+# ============================================================================
+
+
+class GenerateThesisRequest(BaseModel):
+    """Request body for on-demand thesis generation."""
+
+    evaluationId: str
+
+
+def _thesis_to_dict(thesis: Any) -> dict[str, Any]:
+    """Convert a TradeThesis to a serializable dict."""
+    return {
+        "thesis_id": thesis.thesis_id,
+        "evaluation_id": thesis.evaluation_id,
+        "status": str(thesis.status.value) if hasattr(thesis.status, "value") else str(thesis.status),
+        "setup_summary": thesis.setup_summary,
+        "thesis": thesis.thesis,
+        "supporting_evidence": thesis.supporting_evidence,
+        "risks": thesis.risks,
+        "invalidation_conditions": thesis.invalidation_conditions,
+        "exit_plan": {
+            "profit_target": thesis.exit_plan.profit_target,
+            "stop_loss": thesis.exit_plan.stop_loss,
+            "time_exit": thesis.exit_plan.time_exit,
+        },
+        "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, "value") else str(thesis.llm_provider),
+        "model_used": thesis.model_used,
+        "tokens_used": thesis.tokens_used,
+        "generated_at": thesis.generated_at,
+        "error_message": thesis.error_message,
+    }
+
+
+@thesis_router.post("/generate")
+async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
+    """Generate an AI trade thesis on-demand for an approved evaluation.
+
+    Fetches all prerequisite data (evaluation, pillar scores, gate results,
+    features, scanner triggers) and calls the ThesisGenerator.
+    """
+    from app.llm.generator import ThesisGenerator
+
+    evaluation_id = body.evaluationId
+
+    # Check if thesis already exists
+    existing = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    if existing and str(getattr(existing.status, "value", existing.status)) == "COMPLETED":
+        return _thesis_to_dict(existing)
+
+    # Find the evaluation — we need the ticker to look it up
+    # Try all recent evaluations by verdict (APPROVE) since we don't have the ticker
+    eval_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
+    eval_dict = None
+    for item in eval_items:
+        if item.get("evaluation_id") == evaluation_id:
+            eval_dict = item
+            break
+
+    if not eval_dict:
+        # Also check WATCH verdicts
+        watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=200)
+        for item in watch_items:
+            if item.get("evaluation_id") == evaluation_id:
+                eval_dict = item
+                break
+
+    if not eval_dict:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Evaluation not found: {evaluation_id}",
+        )
+
+    # Extract decision data
+    decision_data = eval_dict.pop("decision", None)
+    if not decision_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Evaluation has no decision data",
+        )
+
+    # Check verdict is APPROVE
+    verdict = decision_data.get("verdict", "")
+    if isinstance(verdict, str) and verdict != "APPROVE":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Thesis generation requires APPROVE verdict, got {verdict}",
+        )
+
+    # Construct models
+    try:
+        evaluation = Evaluation(**eval_dict)
+    except Exception as e:
+        logger.error(f"Failed to construct Evaluation model: {e}")
+        raise HTTPException(status_code=500, detail=f"Invalid evaluation data: {e}")
+
+    try:
+        decision = Decision(**decision_data)
+    except Exception as e:
+        logger.error(f"Failed to construct Decision model: {e}")
+        raise HTTPException(status_code=500, detail=f"Invalid decision data: {e}")
+
+    # Fetch prerequisites in parallel
+    ticker = evaluation.underlying_ticker
+    pillar_scores, features, opportunities = await asyncio.gather(
+        PillarScoreTable.list_by_evaluation(evaluation_id),
+        FeatureValueTable.list_by_evaluation(evaluation_id),
+        OpportunityTable.list_by_ticker(ticker, limit=20),
+    )
+
+    # Extract scanner triggers from the matching opportunity
+    scanner_triggers = []
+    opportunity_id = evaluation.opportunity_id
+    for opp in opportunities:
+        if opp.opportunity_id == opportunity_id:
+            scanner_triggers = list(opp.scanner_triggers)
+            break
+
+    # Build features dict
+    features_dict = {f.feature_name: f.value for f in features}
+
+    # Generate thesis
+    generator = ThesisGenerator()
+    thesis = await generator.generate(
+        evaluation=evaluation,
+        decision=decision,
+        pillar_scores=pillar_scores,
+        scanner_triggers=scanner_triggers,
+        features=features_dict,
+    )
+
+    # Persist the thesis
+    await TradeThesisTable.put(thesis)
+    logger.info(f"Generated thesis for {evaluation_id}: status={thesis.status}")
+
+    return _thesis_to_dict(thesis)

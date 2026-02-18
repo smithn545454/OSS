@@ -1,5 +1,5 @@
-import { 
-  Sparkles, 
+import {
+  Sparkles,
   AlertTriangle,
   CheckCircle,
   XCircle,
@@ -8,7 +8,8 @@ import {
   Shield,
   Target,
   AlertCircle,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react'
 import type { TradeThesis, ThesisStatus } from '@/lib/types'
 import clsx from 'clsx'
@@ -213,16 +214,47 @@ function ThesisError({ status, errorMessage }: ThesisErrorProps) {
 // Placeholder Component (no thesis yet)
 // ============================================================================
 
-function ThesisPlaceholder() {
+interface ThesisPlaceholderProps {
+  onGenerate?: () => void
+  isGenerating?: boolean
+  generateError?: Error | null
+}
+
+function ThesisPlaceholder({ onGenerate, isGenerating, generateError }: ThesisPlaceholderProps) {
   return (
     <div className="rounded-xl border border-oss-border border-dashed bg-oss-surface/50 p-6">
       <div className="flex items-center gap-3 mb-4">
         <Sparkles className="h-5 w-5 text-oss-muted" />
         <h3 className="text-lg font-medium text-oss-muted">AI Trade Thesis</h3>
       </div>
-      <p className="text-sm text-oss-muted text-center py-4">
-        No thesis generated yet. Theses are created automatically for APPROVE verdicts during pipeline runs.
-      </p>
+      <div className="flex flex-col items-center gap-3 py-4">
+        {isGenerating ? (
+          <>
+            <Loader2 className="h-6 w-6 text-oss-accent animate-spin" />
+            <p className="text-sm text-oss-muted">Generating thesis...</p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-oss-muted">
+              No thesis generated yet.
+            </p>
+            {onGenerate && (
+              <button
+                onClick={onGenerate}
+                className="inline-flex items-center gap-2 rounded-lg bg-oss-accent/10 px-4 py-2 text-sm font-medium text-oss-accent hover:bg-oss-accent/20 transition-colors"
+              >
+                <Sparkles className="h-4 w-4" />
+                Generate AI Thesis
+              </button>
+            )}
+            {generateError && (
+              <p className="text-xs text-oss-reject mt-1">
+                {generateError.message}
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -233,12 +265,15 @@ function ThesisPlaceholder() {
 
 interface AITradeThesisProps {
   thesis: TradeThesis | null
+  onGenerate?: () => void
+  isGenerating?: boolean
+  generateError?: Error | null
 }
 
-export default function AITradeThesis({ thesis }: AITradeThesisProps) {
+export default function AITradeThesis({ thesis, onGenerate, isGenerating, generateError }: AITradeThesisProps) {
   // No thesis available
   if (!thesis) {
-    return <ThesisPlaceholder />
+    return <ThesisPlaceholder onGenerate={onGenerate} isGenerating={isGenerating} generateError={generateError} />
   }
 
   // Thesis failed or rate limited
