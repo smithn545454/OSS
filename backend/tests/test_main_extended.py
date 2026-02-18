@@ -209,25 +209,15 @@ class TestRunCoordinatorScan:
 
     @pytest.mark.asyncio
     async def test_coordinator_large_ticker_list(self):
-        """When tickers > CHUNK_SIZE, use ThreadPoolExecutor for parallel invocation."""
-        import json
+        """When tickers > CHUNK_SIZE, dispatch workers asynchronously via Event."""
         from app.main import _run_coordinator_scan
         tickers = [f"TICK{i}" for i in range(150)]
-
-        payload_data = json.dumps({
-            "status": "success", "tickers_scanned": 50,
-            "opportunities_created": 5, "duration_ms": 500,
-        }).encode()
-
-        def make_invoke_response(**kwargs):
-            stream = MagicMock()
-            stream.read.return_value = payload_data
-            return {"Payload": stream}
 
         with patch("app.main.CHUNK_SIZE", 50), \
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
              patch("app.core.watchlist.WatchlistManager.from_policy_async", new_callable=AsyncMock) as mock_wl, \
              patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
+             patch("app.db.tables.PipelineRunTable.update", new_callable=AsyncMock) as mock_update, \
              patch("boto3.client") as mock_boto, \
              patch("app.main.time") as mock_time:
             mock_p = MagicMock()
@@ -241,24 +231,27 @@ class TestRunCoordinatorScan:
             mock_pipeline = MagicMock()
             mock_pipeline_run = MagicMock()
             mock_pipeline_run.run_id = "run-coord-123"
+            mock_pipeline_run.started_at = "2026-02-18T00:00:00+00:00"
             mock_pipeline.start_run = AsyncMock(return_value=mock_pipeline_run)
-            mock_pipeline.complete_run = AsyncMock()
             mock_pipeline_cls.return_value = mock_pipeline
 
             mock_lambda = MagicMock()
-            mock_lambda.invoke.side_effect = make_invoke_response
             mock_boto.return_value = mock_lambda
 
             result = await _run_coordinator_scan()
 
         assert result["mode"] == "coordinator"
         assert result["status"] == "success"
-        assert result["tickers_scanned"] == 150  # 3 chunks × 50
-        assert result["chunks_processed"] == 3
+        assert result["chunks_dispatched"] == 3
+        assert result["total_tickers"] == 150
+        # Verify Event invocation type (fire-and-forget)
+        assert mock_lambda.invoke.call_count == 3
+        for call in mock_lambda.invoke.call_args_list:
+            assert call.kwargs.get("InvocationType") == "Event"
 
     @pytest.mark.asyncio
-    async def test_coordinator_worker_failure(self):
-        """When a worker fails, result should be partial_success."""
+    async def test_coordinator_worker_dispatch_failure(self):
+        """When worker dispatch fails, result should be partial_success."""
         from app.main import _run_coordinator_scan
         tickers = [f"TICK{i}" for i in range(100)]
 
@@ -266,6 +259,7 @@ class TestRunCoordinatorScan:
              patch("app.db.tables.PolicyTable.get_active", new_callable=AsyncMock) as mock_policy, \
              patch("app.core.watchlist.WatchlistManager.from_policy_async", new_callable=AsyncMock) as mock_wl, \
              patch("app.core.pipeline.PipelineOrchestrator") as mock_pipeline_cls, \
+             patch("app.db.tables.PipelineRunTable.update", new_callable=AsyncMock) as mock_update, \
              patch("boto3.client") as mock_boto, \
              patch("app.main.time") as mock_time:
             mock_p = MagicMock()
@@ -279,16 +273,16 @@ class TestRunCoordinatorScan:
             mock_pipeline = MagicMock()
             mock_pipeline_run = MagicMock()
             mock_pipeline_run.run_id = "run-coord-456"
+            mock_pipeline_run.started_at = "2026-02-18T00:00:00+00:00"
             mock_pipeline.start_run = AsyncMock(return_value=mock_pipeline_run)
-            mock_pipeline.complete_run = AsyncMock()
             mock_pipeline_cls.return_value = mock_pipeline
 
             mock_lambda = MagicMock()
-            mock_lambda.invoke.side_effect = Exception("Lambda timeout")
+            mock_lambda.invoke.side_effect = Exception("Lambda dispatch error")
             mock_boto.return_value = mock_lambda
 
             result = await _run_coordinator_scan()
 
         assert result["mode"] == "coordinator"
-        # When all workers fail, status should still reflect partial_success
-        assert result["chunks_failed"] == 2
+        assert result["status"] == "partial_success"
+        assert result["chunks_failed_to_dispatch"] == 2
