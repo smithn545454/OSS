@@ -156,7 +156,7 @@ The backend runs as a single Lambda with three invocation modes:
 - `.gate-journey::before` connector line uses `top: 16px` (half of 32px circle diameter)
 
 ### API Base URL
-- Production API: `https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/` (no `/prod` suffix)
+- Production API: `https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com` (no trailing slash, no `/prod` suffix)
 - Frontend CloudFront: `https://d3upsbalspxt4n.cloudfront.net`
 
 ## Deployment Protocol (MANDATORY)
@@ -234,15 +234,13 @@ If there are ERROR logs related to the change, the deploy has a problem. Investi
 
 #### 4b. Check Pipeline Monitor API (for pipeline changes)
 ```bash
-# Get the latest pipeline run
-curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/observability/pipeline/latest" | python3 -c "
+# Get the latest pipeline runs
+curl -s "https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com/api/pipeline/runs?limit=3" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-run = data.get('data', data)
-print(f\"Run ID: {run.get('run_id', 'N/A')}\")
-print(f\"Status: {run.get('status', 'N/A')}\")
-for s in run.get('stages', []):
-    print(f\"  Stage {s['id']}: {s['name']:25s}  In: {s['input']:>4}  Out: {s['output']:>4}  {s['status']}\")
+runs = data.get('runs', [])
+for r in runs:
+    print(f\"Run {r.get('run_id', '?')[:12]}... status={r.get('status')} started={r.get('started_at', '?')[:19]}\")
 "
 ```
 

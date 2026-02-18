@@ -80,21 +80,34 @@ async function fetchApi<T>(
 ): Promise<T> {
   // In production, API_BASE is the full backend URL; in dev it's empty (Vite proxy handles /api)
   const url = `${API_BASE}${endpoint}`
-  
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  })
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => null)
-    throw new ApiError(response.status, response.statusText, body)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    })
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null)
+      throw new ApiError(response.status, response.statusText, body)
+    }
+
+    return response.json()
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(408, 'Request Timeout', { message: 'Request timed out after 15s' })
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  return response.json()
 }
 
 // Health

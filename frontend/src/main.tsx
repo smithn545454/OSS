@@ -9,7 +9,16 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30 * 1000, // 30 seconds
-      retry: 1,
+      retry: (failureCount, error) => {
+        // No retry for 4xx client errors
+        if (error instanceof Error && 'status' in error) {
+          const status = (error as { status: number }).status
+          if (status >= 400 && status < 500) return false
+        }
+        // Up to 3 retries for 5xx / network errors with exponential backoff
+        return failureCount < 3
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
     },
   },
 })
