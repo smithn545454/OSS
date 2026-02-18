@@ -129,7 +129,7 @@ class TestPipelineAggregator:
         from app.observability.stage_mapper import pipeline_aggregator
         from datetime import datetime, timezone
 
-        with patch("app.db.tables.PipelineRunTable.list") as mock_list:
+        with patch("app.db.tables.PipelineRunTable.list_by_date_range") as mock_list:
             mock_list.return_value = []
             start = datetime(2026, 1, 10, tzinfo=timezone.utc)
             end = datetime(2026, 1, 17, tzinfo=timezone.utc)
@@ -147,7 +147,7 @@ class TestPipelineAggregator:
         from app.observability.stage_mapper import pipeline_aggregator
         from datetime import datetime, timezone
 
-        with patch("app.db.tables.PipelineRunTable.list") as mock_run_list, \
+        with patch("app.db.tables.PipelineRunTable.list_by_date_range") as mock_run_list, \
              patch("app.db.tables.StageEventTable.list_by_run") as mock_event_list, \
              patch("app.db.tables.GateResultTable.list_by_run") as mock_gate_list:
             mock_run_list.return_value = []
