@@ -579,19 +579,18 @@ class PipelineAggregator:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[PipelineRun], int, bool]:
-        """Get pipeline runs within a time range."""
-        all_runs = await PipelineRunTable.list(limit=1000)
+        """Get pipeline runs within a time range using date-range query."""
+        start_iso = start.isoformat()
+        end_iso = end.isoformat()
 
-        filtered_runs = []
-        for run in all_runs:
-            run_time = datetime.fromisoformat(run.started_at.replace("Z", "+00:00"))
-            if start <= run_time <= end:
-                filtered_runs.append(run)
+        all_runs = await PipelineRunTable.list_by_date_range(
+            start_iso, end_iso, limit=limit + offset + 1
+        )
 
-        total = len(filtered_runs)
+        total = len(all_runs)
         has_more = offset + limit < total
 
-        return filtered_runs[offset:offset + limit], total, has_more
+        return all_runs[offset:offset + limit], total, has_more
 
     async def build_aggregate_data(
         self,
@@ -627,16 +626,29 @@ class PipelineAggregator:
         total_watches = 0
         total_rejects = 0
 
-        for run in runs:
+        # Fetch stage events and gate results for all runs in parallel
+        import asyncio
+
+        async def _fetch_run_data(run: PipelineRun):
             events = await StageEventTable.list_by_run(run.run_id)
-            all_events.extend(events)
-
             try:
-                results = await GateResultTable.list_by_run(run.run_id)
-                all_gate_results.extend(results)
+                gates = await GateResultTable.list_by_run(run.run_id)
             except Exception:
-                pass
+                gates = []
+            return events, gates
 
+        results = await asyncio.gather(
+            *[_fetch_run_data(run) for run in runs],
+            return_exceptions=True,
+        )
+
+        for i, run in enumerate(runs):
+            result = results[i]
+            if isinstance(result, Exception):
+                continue
+            events, gates = result
+            all_events.extend(events)
+            all_gate_results.extend(gates)
             total_approves += run.total_approves
             total_watches += run.total_watches
             total_rejects += run.total_rejects

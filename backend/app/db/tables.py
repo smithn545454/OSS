@@ -373,6 +373,40 @@ class PipelineRunTable:
         return None
 
     @staticmethod
+    async def list_recent(limit: int = 20) -> list[PipelineRun]:
+        """List most recent pipeline runs. Alias for list()."""
+        return await PipelineRunTable.list(limit=limit)
+
+    @staticmethod
+    async def list_by_date_range(
+        start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[PipelineRun]:
+        """List pipeline runs within a date range.
+
+        SK format is {started_at}#{run_id}, so date range queries work
+        via DynamoDB BETWEEN on the SK.
+        """
+        db = get_dynamodb()
+        table = db.get_table(PipelineRunTable.TABLE)
+        response = table.query(
+            KeyConditionExpression="PK = :pk AND SK BETWEEN :start AND :end",
+            ExpressionAttributeValues={
+                ":pk": "RUN",
+                ":start": start_iso,
+                ":end": end_iso + "~",  # ~ sorts after all ISO chars
+            },
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        runs = []
+        for item in response.get("Items", []):
+            item = db.convert_from_dynamodb(item)
+            item.pop("PK", None)
+            item.pop("SK", None)
+            runs.append(PipelineRun(**item))
+        return runs
+
+    @staticmethod
     async def increment_chunks_completed(run_id: str, started_at: str) -> int:
         """Atomically increment chunks_completed and return the new value.
 
