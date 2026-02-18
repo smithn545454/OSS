@@ -105,18 +105,20 @@ def _chunk_list(items: list, chunk_size: int) -> list[list]:
 
 
 async def _run_coordinator_scan() -> dict[str, Any]:
-    """Coordinator: Split tickers into chunks and invoke worker Lambdas in parallel.
+    """Coordinator: Split tickers into chunks and invoke worker Lambdas asynchronously.
 
-    This enables scanning 1000+ tickers within Lambda timeout limits by
-    distributing work across multiple Lambda invocations.
+    Uses fire-and-forget (Event) invocations so the coordinator completes in
+    seconds instead of holding Lambda concurrency slots for 10+ minutes.
+    Workers self-report completion via atomic counter; the last worker to
+    finish marks the pipeline run as completed.
 
     Returns:
-        Aggregated scan result summary
+        Summary of dispatched work (does not wait for workers)
     """
     import boto3
     from app.core.watchlist import WatchlistManager
     from app.core.pipeline import PipelineOrchestrator
-    from app.db.tables import PolicyTable
+    from app.db.tables import PolicyTable, PipelineRunTable
 
     logger.info("Starting COORDINATOR scan - will distribute to workers")
 
@@ -140,81 +142,66 @@ async def _run_coordinator_scan() -> dict[str, Any]:
         pipeline = PipelineOrchestrator()
         pipeline_run = await pipeline.start_run(policy.version)
         coordinator_run_id = pipeline_run.run_id
-        logger.info(f"Coordinator created run {coordinator_run_id}")
 
         # Split into chunks
         chunks = _chunk_list(tickers, CHUNK_SIZE)
-        logger.info(f"Split into {len(chunks)} chunks for parallel processing")
+        total_chunks = len(chunks)
+        logger.info(f"Coordinator created run {coordinator_run_id}, {total_chunks} chunks")
+
+        # Store total_chunks on the pipeline run so workers know the target
+        await PipelineRunTable.update(
+            coordinator_run_id,
+            pipeline_run.started_at,
+            {"total_chunks": total_chunks},
+        )
 
         # Get this Lambda's function name to invoke workers
         function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
-
-        # Invoke worker Lambdas in parallel
         lambda_client = boto3.client("lambda")
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        results: list[dict[str, Any]] = []
+        # Fire-and-forget: invoke workers asynchronously
+        dispatched = 0
         errors: list[str] = []
 
-        def invoke_worker_sync(chunk_tickers: list[str], chunk_idx: int) -> dict[str, Any]:
-            """Synchronously invoke worker Lambda."""
+        for idx, chunk in enumerate(chunks):
+            if idx > 0:
+                time.sleep(3)  # Stagger workers to spread Phase 3 API load
+
             payload = {
                 "source": "oss.scheduler",
                 "action": "worker_scan",
-                "tickers": chunk_tickers,
-                "chunk_index": chunk_idx,
+                "tickers": chunk,
+                "chunk_index": idx,
                 "run_id": coordinator_run_id,
+                "total_chunks": total_chunks,
+                "started_at": pipeline_run.started_at,
             }
 
-            response = lambda_client.invoke(
-                FunctionName=function_name,
-                InvocationType="RequestResponse",
-                Payload=json.dumps(payload),
-            )
+            try:
+                lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+                dispatched += 1
+                logger.info(f"Dispatched worker chunk {idx} ({len(chunk)} tickers)")
+            except Exception as e:
+                error_msg = f"Failed to dispatch chunk {idx}: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
 
-            result_payload = json.loads(response["Payload"].read())
-            return result_payload
-
-        with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as executor:
-            future_to_chunk: dict[Any, int] = {}
-            for idx, chunk in enumerate(chunks):
-                if idx > 0:
-                    time.sleep(3)  # Stagger workers to spread Phase 3 API load
-                future = executor.submit(invoke_worker_sync, chunk, idx)
-                future_to_chunk[future] = idx
-
-            for future in as_completed(future_to_chunk):
-                chunk_idx = future_to_chunk[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    logger.info(f"Chunk {chunk_idx} returned: {result.get('status')}")
-                except Exception as e:
-                    error_msg = f"Chunk {chunk_idx} failed: {e}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-
-        # Complete the coordinator run with aggregated counts
-        await pipeline.complete_run(
-            coordinator_run_id,
-            status="completed" if not errors else "failed",
+        logger.info(
+            f"Coordinator done: dispatched {dispatched}/{total_chunks} workers "
+            f"for run {coordinator_run_id}"
         )
-
-        # Aggregate results
-        total_tickers = sum(r.get("tickers_scanned", 0) for r in results)
-        total_opportunities = sum(r.get("opportunities_created", 0) for r in results)
-        total_duration = max((r.get("duration_ms", 0) for r in results), default=0)
 
         return {
             "status": "success" if not errors else "partial_success",
             "mode": "coordinator",
             "run_id": coordinator_run_id,
-            "chunks_processed": len(results),
-            "chunks_failed": len(errors),
-            "tickers_scanned": total_tickers,
-            "opportunities_created": total_opportunities,
-            "duration_ms": total_duration,
+            "chunks_dispatched": dispatched,
+            "chunks_failed_to_dispatch": len(errors),
+            "total_tickers": len(tickers),
             "errors": errors if errors else None,
         }
 
@@ -230,6 +217,8 @@ async def _run_coordinator_scan() -> dict[str, Any]:
 async def _run_worker_scan(
     tickers: list[str] | None = None,
     run_id: str | None = None,
+    total_chunks: int = 0,
+    started_at: str | None = None,
 ) -> dict[str, Any]:
     """Worker: Process a specific chunk of tickers.
 
@@ -237,11 +226,15 @@ async def _run_worker_scan(
         tickers: List of tickers to scan (uses watchlist if None)
         run_id: Optional coordinator-provided run_id. If None, orchestrator
                 creates its own PipelineRun (used for single-worker mode).
+        total_chunks: Total number of chunks dispatched by coordinator.
+        started_at: Pipeline run started_at timestamp (for DB lookups).
 
     Returns:
         Scan result summary for this chunk
     """
     from app.scanners.orchestrator import ScannerOrchestrator
+    from app.core.pipeline import PipelineOrchestrator
+    from app.db.tables import PipelineRunTable
 
     ticker_count = len(tickers) if tickers else "all"
     logger.info(f"Starting WORKER scan for {ticker_count} tickers, run_id={run_id or 'auto'}")
@@ -265,6 +258,24 @@ async def _run_worker_scan(
         except Exception as e:
             logger.error(f"UV Bridge error (non-fatal): {e}")
             uv_result = {"status": "error", "error": str(e)}
+
+        # Self-report completion if this is a coordinator-dispatched worker
+        if run_id and total_chunks > 0 and started_at:
+            try:
+                completed = await PipelineRunTable.increment_chunks_completed(
+                    run_id, started_at
+                )
+                logger.info(
+                    f"Worker chunk done: {completed}/{total_chunks} chunks completed "
+                    f"for run {run_id}"
+                )
+                if completed >= total_chunks:
+                    # Last worker — finalize the pipeline run
+                    logger.info(f"Last worker finished, completing run {run_id}")
+                    pipeline = PipelineOrchestrator()
+                    await pipeline.complete_run(run_id, status="completed")
+            except Exception as e:
+                logger.error(f"Worker self-report failed (non-fatal): {e}")
 
         return {
             "status": "success",
@@ -590,10 +601,18 @@ def handler(event: dict[str, Any], context: Any) -> Any:
         elif action == "worker_scan":
             # Worker: process specific chunk of tickers
             tickers = event.get("tickers")
-            run_id = event.get("run_id")  # Coordinator-provided run_id (if chunked)
+            run_id = event.get("run_id")
+            total_chunks = event.get("total_chunks", 0)
+            started_at = event.get("started_at")
             chunk_idx = event.get("chunk_index", 0)
-            logger.info(f"Received worker_scan event for chunk {chunk_idx} ({len(tickers) if tickers else 0} tickers)")
-            return asyncio.run(_run_worker_scan(tickers, run_id=run_id))
+            logger.info(
+                f"Received worker_scan event for chunk {chunk_idx} "
+                f"({len(tickers) if tickers else 0} tickers)"
+            )
+            return asyncio.run(_run_worker_scan(
+                tickers, run_id=run_id,
+                total_chunks=total_chunks, started_at=started_at,
+            ))
 
         elif action == "paper_update":
             # Paper trading daily update: fetch prices, update positions

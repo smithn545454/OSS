@@ -372,6 +372,41 @@ class PipelineRunTable:
             return PipelineRun(**item)
         return None
 
+    @staticmethod
+    async def increment_chunks_completed(run_id: str, started_at: str) -> int:
+        """Atomically increment chunks_completed and return the new value.
+
+        Uses DynamoDB ADD expression for safe concurrent updates from workers.
+        """
+        db = get_dynamodb()
+        table = db.get_table(PipelineRunTable.TABLE)
+        response = table.update_item(
+            Key={"PK": "RUN", "SK": f"{started_at}#{run_id}"},
+            UpdateExpression="ADD chunks_completed :inc",
+            ExpressionAttributeValues={":inc": 1},
+            ReturnValues="ALL_NEW",
+        )
+        attrs = db.convert_from_dynamodb(response.get("Attributes", {}))
+        return int(attrs.get("chunks_completed", 0))
+
+    @staticmethod
+    async def get_by_id(run_id: str) -> Optional[PipelineRun]:
+        """Find a pipeline run by run_id (searches recent runs)."""
+        db = get_dynamodb()
+        items = await db.query(
+            PipelineRunTable.TABLE,
+            "RUN",
+            limit=50,
+            scan_forward=False,
+        )
+        for item in items:
+            sk = item.get("SK", "")
+            if sk.endswith(run_id):
+                item.pop("PK", None)
+                item.pop("SK", None)
+                return PipelineRun(**item)
+        return None
+
 
 class StageEventTable:
     """Operations for the stage-events table."""

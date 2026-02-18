@@ -424,6 +424,8 @@ class PipelineRun(OSSBaseModel):
     total_rejects: int = 0
     scanner_type: Optional[str] = None
     error_message: Optional[str] = None
+    total_chunks: int = 0
+    chunks_completed: int = 0
 
 
 class PipelineRunCreate(BaseModel):
