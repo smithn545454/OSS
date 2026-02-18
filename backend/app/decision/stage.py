@@ -17,7 +17,6 @@ from app.core.schemas import (
     DecisionConfig,
     Evaluation,
     PillarConfig,
-    PillarScore,
     PillarWeights,
     PipelineStage,
     ScannerTrigger,
@@ -229,15 +228,7 @@ class DecisionStage:
                 
                 # Get pillar results - convert to PillarScore list
                 pillar_result_list = pillar_results.get(eval_id, [])
-                pillar_scores = []
-                for pr in pillar_result_list:
-                    pillar_scores.append(PillarScore(
-                        evaluation_id=eval_id,
-                        pillar_id=pr.pillar_id,
-                        score=int(pr.score),
-                        contributors=pr.contributors,
-                        tags=pr.tags,
-                    ))
+                pillar_scores = [pr.to_pillar_score() for pr in pillar_result_list]
                 
                 # Get scanner triggers
                 triggers = list(scanner_triggers.get(eval_id, []))
