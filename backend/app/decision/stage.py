@@ -155,9 +155,9 @@ class DecisionStage:
         
         # Compute statistics
         stats = self._compute_stats(evaluations, decisions)
-        stats["theses_generated"] = len([t for t in theses if t.status.value == "COMPLETED"])
-        stats["theses_failed"] = len([t for t in theses if t.status.value == "FAILED"])
-        stats["theses_rate_limited"] = len([t for t in theses if t.status.value == "RATE_LIMITED"])
+        stats["theses_generated"] = len([t for t in theses if str(t.status) == "COMPLETED"])
+        stats["theses_failed"] = len([t for t in theses if str(t.status) == "FAILED"])
+        stats["theses_rate_limited"] = len([t for t in theses if str(t.status) == "RATE_LIMITED"])
         
         # Record stage event
         await self._orchestrator.record_stage_event(
@@ -255,7 +255,7 @@ class DecisionStage:
                 logger.error(f"Error generating thesis for {evaluation.evaluation_id}: {e}")
                 continue
         
-        completed = len([t for t in theses if t.status.value == "COMPLETED"])
+        completed = len([t for t in theses if str(t.status) == "COMPLETED"])
         logger.info(f"Generated {completed}/{len(approved)} theses successfully")
         
         return theses
