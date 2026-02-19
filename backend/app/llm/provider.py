@@ -151,7 +151,7 @@ class AnthropicProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI GPT-4 provider implementation."""
 
-    MODEL = "gpt-4-turbo-preview"
+    MODEL = "gpt-4o-mini"
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         """Initialize OpenAI provider.
