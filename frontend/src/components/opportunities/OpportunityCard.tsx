@@ -106,52 +106,91 @@ function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
 }
 
 function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
+  const premium = evaluation.mid ?? 0
+  const contractCost = premium * 100
+  const thetaAdjEV = evaluation.thetaAdjustedEV
+
+  // Return % calculation (guard against zero contract cost)
+  const returnPct = contractCost > 0 ? (thetaAdjEV / contractCost) * 100 : null
+
+  // Contract cost color by tier: LOW ≤$300 cyan, MED ≤$1000 amber, HIGH >$1000 red
+  const costColor =
+    contractCost <= 300
+      ? 'rgba(0,229,204,0.6)'
+      : contractCost <= 1000
+        ? 'rgba(245,158,11,0.6)'
+        : 'rgba(239,68,68,0.6)'
+
+  // Return % color by tier: Strong ≥8% cyan, Moderate ≥3% amber, Weak <3% red
+  const returnColor =
+    returnPct !== null
+      ? returnPct >= 8
+        ? '#00E5CC'
+        : returnPct >= 3
+          ? '#F59E0B'
+          : '#EF4444'
+      : 'var(--text-muted)'
+
   return (
-    <div style={{ 
-      display: 'flex', 
-      alignItems: 'center', 
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
       gap: '24px',
       justifyContent: 'flex-end',
     }}>
       {/* Key metrics */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Delta</span>
-          <span style={{ 
-            fontSize: '13px', 
-            fontWeight: 600,
-            fontFamily: 'var(--font-primary)',
-            color: 'var(--text-secondary)',
-          }}>
-            {(evaluation.delta ?? 0).toFixed(2)}
-          </span>
-        </div>
+        {/* Row 1: Premium with contract cost */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Premium</span>
-          <span style={{ 
-            fontSize: '13px', 
-            fontWeight: 600,
-            fontFamily: 'var(--font-primary)',
-            color: 'var(--text-secondary)',
-          }}>
-            ${(evaluation.mid ?? 0).toFixed(2)}
+          <span>
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 600,
+              fontFamily: 'var(--font-primary)',
+              color: '#fff',
+            }}>
+              ${premium.toFixed(2)}
+            </span>
+            {' '}
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 600,
+              fontFamily: 'var(--font-primary)',
+              color: costColor,
+            }}>
+              (${contractCost.toLocaleString('en-US', { maximumFractionDigits: 0 })})
+            </span>
           </span>
         </div>
+        {/* Row 2: θ-Adj EV */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>θ-Adj EV</span>
-          <span style={{ 
-            fontSize: '13px', 
+          <span style={{
+            fontSize: '13px',
             fontWeight: 600,
             fontFamily: 'var(--font-primary)',
-            color: evaluation.thetaAdjustedEV >= 0 
-              ? 'var(--color-success-text)' 
+            color: thetaAdjEV >= 0
+              ? 'var(--color-success-text)'
               : 'var(--color-error-text)',
           }}>
-            ${evaluation.thetaAdjustedEV.toFixed(0)}
+            ${thetaAdjEV.toFixed(0)}
+          </span>
+        </div>
+        {/* Row 3: Return % */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Return</span>
+          <span style={{
+            fontSize: '15px',
+            fontWeight: 800,
+            fontFamily: 'var(--font-primary)',
+            color: returnColor,
+          }}>
+            {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
           </span>
         </div>
       </div>
-      
+
       {/* Conviction gauge */}
       <ConvictionGauge score={evaluation.convictionScore ?? 0} />
     </div>
