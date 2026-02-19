@@ -296,7 +296,7 @@ class EvaluationTable:
         items = await db.query(
             EvaluationTable.TABLE,
             f"EVAL#{ticker}",
-            limit=50,
+            limit=None,
             scan_forward=False,
         )
         for item in items:
