@@ -484,7 +484,8 @@ class PaperPositionTable:
         """Store a paper position."""
         db = get_dynamodb()
         item = position.to_dynamodb_item()
-        item["PK"] = f"POS#{position.status}"
+        status = getattr(position.status, "value", position.status)
+        item["PK"] = f"POS#{status}"
         item["SK"] = f"{position.entry_date}#{position.position_id}"
         # GSI for evaluation_id lookups (duplicate prevention)
         item["GSI1PK"] = f"EVAL#{position.evaluation_id}"
@@ -577,7 +578,8 @@ class PaperPositionTable:
         db = get_dynamodb()
         
         # Build PK/SK from position
-        pk = f"POS#{position.status}"
+        status = getattr(position.status, "value", position.status)
+        pk = f"POS#{status}"
         sk = f"{position.entry_date}#{position.position_id}"
         
         # Add last_updated timestamp
