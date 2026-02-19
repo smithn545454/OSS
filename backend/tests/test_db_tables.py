@@ -381,8 +381,30 @@ class TestGateResultTable:
     @pytest.mark.asyncio
     async def test_list_by_run_empty(self, mock_db):
         from app.db.tables import GateResultTable
+        mock_db.query = AsyncMock(return_value=[])
         result = await GateResultTable.list_by_run("run-1")
         assert result == []
+        # Verify it queries GSI1, not the table directly
+        mock_db.query.assert_called_once()
+        call_kwargs = mock_db.query.call_args
+        assert call_kwargs[1].get("index_name") == "GSI1" or call_kwargs[0][0] == "gate-results"
+
+    @pytest.mark.asyncio
+    async def test_list_by_run_with_results(self, mock_db):
+        from app.db.tables import GateResultTable
+        mock_db.query = AsyncMock(return_value=[{
+            "PK": "EVAL#e1", "SK": "GATE#MIN_OI",
+            "GSI1PK": "RUN#run-1", "GSI1SK": "e1#MIN_OI",
+            "evaluation_id": "e1", "gate_id": "MIN_OI",
+            "enabled": True, "passed": True,
+            "measured_value": 500, "threshold_value": 300,
+            "operator": "gte", "units": "contracts",
+            "reason_code": "MIN_OI_PASS", "run_id": "run-1",
+        }])
+        result = await GateResultTable.list_by_run("run-1")
+        assert len(result) == 1
+        assert result[0].gate_id == "MIN_OI"
+        assert result[0].run_id == "run-1"
 
 
 # ---------------------------------------------------------------------------

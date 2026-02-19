@@ -874,23 +874,35 @@ class GateResultTable:
 
     @staticmethod
     async def list_by_run(run_id: str, limit: int = 10000) -> list[GateResult]:
-        """List all gate results for a pipeline run.
-        
-        This requires scanning through evaluations from the run and collecting
-        their gate results. Used by the Pipeline Monitor for aggregate views.
-        
+        """List all gate results for a pipeline run via GSI1.
+
+        Requires gate results to have been written with run_id populated
+        (GSI1PK=RUN#{run_id}). Gate results written before this GSI was
+        populated will not appear.
+
         Args:
             run_id: The pipeline run ID
             limit: Maximum results to return
-            
+
         Returns:
             List of GateResult objects from evaluations in this run
         """
-        # Note: This is a simplified implementation. In production, you'd
-        # want a GSI on run_id or store run_id in gate results.
-        # For now, return empty list if called (gate results are per-evaluation)
-        logger.warning(f"list_by_run called for run {run_id} - not fully implemented")
-        return []
+        db = get_dynamodb()
+        items = await db.query(
+            GateResultTable.TABLE,
+            f"RUN#{run_id}",
+            index_name="GSI1",
+            limit=limit,
+            scan_forward=True,
+        )
+        results = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("GSI1PK", None)
+            item.pop("GSI1SK", None)
+            results.append(GateResult(**item))
+        return results
 
 
 class IVHistoryTable:
