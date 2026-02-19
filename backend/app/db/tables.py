@@ -1270,40 +1270,67 @@ class LLMUsageTable:
         return None
 
     @staticmethod
-    async def increment(date: str, tokens: int = 0) -> LLMUsage:
-        """Increment usage count for a date.
+    async def increment(
+        date: str, tokens: int = 0, max_calls: Optional[int] = None,
+    ) -> Optional[LLMUsage]:
+        """Atomically increment usage count for a date.
 
-        Creates new record if doesn't exist.
+        Uses DynamoDB ADD expression for safe concurrent updates.
+        Creates new record if doesn't exist (ADD on missing attribute
+        treats it as 0).
+
+        When max_calls is provided, the increment is conditional — it only
+        succeeds if the current count is below the limit. This prevents
+        concurrent Lambda invocations from exceeding the daily cap.
 
         Args:
             date: Date string in YYYY-MM-DD format
             tokens: Number of tokens used in this call
+            max_calls: If provided, only increment if calls_made < max_calls
 
         Returns:
-            Updated LLMUsage record
+            Updated LLMUsage record, or None if max_calls limit was hit
         """
+        from botocore.exceptions import ClientError
+
         db = get_dynamodb()
+        table = db.get_table(LLMUsageTable.TABLE)
+        update_kwargs = {
+            "Key": {"PK": "USAGE", "SK": f"DATE#{date}"},
+            "UpdateExpression": (
+                "ADD calls_made :inc, tokens_used :tokens "
+                "SET #d = if_not_exists(#d, :date)"
+            ),
+            "ExpressionAttributeNames": {"#d": "date"},
+            "ExpressionAttributeValues": {
+                ":inc": 1,
+                ":tokens": tokens,
+                ":date": date,
+            },
+            "ReturnValues": "ALL_NEW",
+        }
 
-        # Get existing usage
-        existing = await LLMUsageTable.get(date)
+        if max_calls is not None:
+            update_kwargs["ConditionExpression"] = (
+                "attribute_not_exists(calls_made) OR calls_made < :limit"
+            )
+            update_kwargs["ExpressionAttributeValues"][":limit"] = max_calls
 
-        if existing:
-            # Update existing record
-            new_calls = existing.calls_made + 1
-            new_tokens = existing.tokens_used + tokens
-        else:
-            new_calls = 1
-            new_tokens = tokens
+        try:
+            response = table.update_item(**update_kwargs)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return None  # Daily limit exceeded
+            raise
 
-        # Create new usage record (LLMUsage is frozen)
-        usage = LLMUsage(
-            date=date,
-            calls_made=new_calls,
-            tokens_used=new_tokens,
+        attrs = db.convert_from_dynamodb(response.get("Attributes", {}))
+        attrs.pop("PK", None)
+        attrs.pop("SK", None)
+        return LLMUsage(
+            date=attrs.get("date", date),
+            calls_made=int(attrs.get("calls_made", 1)),
+            tokens_used=int(attrs.get("tokens_used", tokens)),
         )
-
-        await LLMUsageTable.put(usage)
-        return usage
 
     @staticmethod
     async def list_recent(days: int = 7) -> list[LLMUsage]:

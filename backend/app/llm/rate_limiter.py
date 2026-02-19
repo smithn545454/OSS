@@ -65,22 +65,6 @@ class RateLimiter:
         # Create new usage record
         return LLMUsage(date=date, calls_made=0, tokens_used=0)
 
-    async def _save_usage(self, usage: LLMUsage) -> None:
-        """Save usage record.
-
-        Args:
-            usage: LLMUsage record to save
-        """
-        # Update in-memory
-        self._in_memory_usage[usage.date] = usage
-
-        # Try DynamoDB if available
-        if self._usage_table:
-            try:
-                await self._usage_table.put(usage)
-            except Exception as e:
-                logger.warning(f"Failed to save usage to DynamoDB: {e}")
-
     async def can_make_call(self) -> bool:
         """Check if we can make another LLM call today.
 
@@ -102,7 +86,12 @@ class RateLimiter:
         return max(0, self._max_daily_calls - usage.calls_made)
 
     async def record_call(self, tokens_used: int = 0) -> bool:
-        """Record an LLM call.
+        """Record an LLM call atomically.
+
+        Uses DynamoDB conditional increment to both enforce the daily
+        limit and record the call in a single atomic operation. This
+        prevents race conditions where concurrent Lambda invocations
+        could exceed the daily cap.
 
         Args:
             tokens_used: Number of tokens used in the call
@@ -111,22 +100,44 @@ class RateLimiter:
             True if call was recorded, False if limit exceeded
         """
         today = self._get_today()
-        usage = await self._get_usage(today)
 
+        # Atomic path: conditional increment via DynamoDB
+        if self._usage_table:
+            try:
+                updated = await self._usage_table.increment(
+                    today, tokens=tokens_used, max_calls=self._max_daily_calls,
+                )
+                if updated is None:
+                    # ConditionalCheckFailedException — limit exceeded
+                    logger.warning(
+                        f"Daily LLM limit reached: {self._max_daily_calls} calls/day"
+                    )
+                    return False
+                self._in_memory_usage[today] = updated
+                logger.info(
+                    f"LLM call recorded: {updated.calls_made}/{self._max_daily_calls} "
+                    f"(+{tokens_used} tokens)"
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to record LLM call in DynamoDB: {e}")
+
+        # Fall back to in-memory tracking (non-atomic, best-effort)
+        usage = await self._get_usage(today)
         if usage.calls_made >= self._max_daily_calls:
-            logger.warning(f"Daily LLM limit reached: {usage.calls_made}/{self._max_daily_calls}")
+            logger.warning(
+                f"Daily LLM limit reached: {usage.calls_made}/{self._max_daily_calls}"
+            )
             return False
 
-        # Create updated usage (LLMUsage is frozen)
         updated = LLMUsage(
             date=today,
             calls_made=usage.calls_made + 1,
             tokens_used=usage.tokens_used + tokens_used,
         )
-
-        await self._save_usage(updated)
+        self._in_memory_usage[today] = updated
         logger.info(
-            f"LLM call recorded: {updated.calls_made}/{self._max_daily_calls} "
+            f"LLM call recorded (in-memory): {updated.calls_made}/{self._max_daily_calls} "
             f"(+{tokens_used} tokens)"
         )
         return True

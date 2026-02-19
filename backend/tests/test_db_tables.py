@@ -562,23 +562,64 @@ class TestLLMUsageTable:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_increment_new(self, mock_db):
+    async def test_increment_atomic(self, mock_db):
         from app.db.tables import LLMUsageTable
-        mock_db.get_item = AsyncMock(return_value=None)  # no existing
+        # Mock the direct table.update_item call
+        mock_table = MagicMock()
+        mock_table.update_item.return_value = {
+            "Attributes": {
+                "PK": "USAGE", "SK": "DATE#2026-01-17",
+                "date": "2026-01-17", "calls_made": 1, "tokens_used": 100,
+            }
+        }
+        mock_db.get_table.return_value = mock_table
+        mock_db.convert_from_dynamodb.return_value = {
+            "date": "2026-01-17", "calls_made": 1, "tokens_used": 100,
+        }
+
         result = await LLMUsageTable.increment("2026-01-17", tokens=100)
+        assert result is not None
         assert result.calls_made == 1
         assert result.tokens_used == 100
+        mock_table.update_item.assert_called_once()
+        # Verify ADD expression used
+        call_kwargs = mock_table.update_item.call_args[1]
+        assert "ADD" in call_kwargs["UpdateExpression"]
 
     @pytest.mark.asyncio
-    async def test_increment_existing(self, mock_db):
+    async def test_increment_with_max_calls(self, mock_db):
         from app.db.tables import LLMUsageTable
-        mock_db.get_item = AsyncMock(return_value={
-            "PK": "USAGE", "SK": "DATE#2026-01-17",
+        mock_table = MagicMock()
+        mock_table.update_item.return_value = {
+            "Attributes": {
+                "PK": "USAGE", "SK": "DATE#2026-01-17",
+                "date": "2026-01-17", "calls_made": 5, "tokens_used": 500,
+            }
+        }
+        mock_db.get_table.return_value = mock_table
+        mock_db.convert_from_dynamodb.return_value = {
             "date": "2026-01-17", "calls_made": 5, "tokens_used": 500,
-        })
-        result = await LLMUsageTable.increment("2026-01-17", tokens=100)
-        assert result.calls_made == 6
-        assert result.tokens_used == 600
+        }
+
+        result = await LLMUsageTable.increment("2026-01-17", tokens=100, max_calls=50)
+        assert result is not None
+        # Verify ConditionExpression is included when max_calls is provided
+        call_kwargs = mock_table.update_item.call_args[1]
+        assert "ConditionExpression" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_increment_limit_exceeded_returns_none(self, mock_db):
+        from botocore.exceptions import ClientError
+        from app.db.tables import LLMUsageTable
+        mock_table = MagicMock()
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "limit"}},
+            "UpdateItem",
+        )
+        mock_db.get_table.return_value = mock_table
+
+        result = await LLMUsageTable.increment("2026-01-17", tokens=100, max_calls=50)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
