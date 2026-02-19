@@ -81,6 +81,40 @@ class TestFeatureComputationStage:
             assert result == {}
 
     @pytest.mark.asyncio
+    async def test_fetch_iv_history_parallel(self):
+        polygon = MagicMock()
+        orch = MagicMock()
+        stage = FeatureComputationStage(polygon_client=polygon, orchestrator=orch)
+
+        mock_history = MagicMock()
+        with patch("app.features.stage.IVHistoryTable") as mock_iv:
+            mock_iv.list_by_ticker = AsyncMock(return_value=[mock_history])
+            result = await stage._fetch_iv_history(["AAPL", "MSFT", "GOOGL"])
+            assert len(result) == 3
+            assert mock_iv.list_by_ticker.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_fetch_oi_history_parallel(self):
+        polygon = MagicMock()
+        orch = MagicMock()
+        stage = FeatureComputationStage(polygon_client=polygon, orchestrator=orch)
+
+        mock_history = MagicMock()
+        with patch("app.features.stage.OIHistoryTable") as mock_oi:
+            mock_oi.list_by_contract = AsyncMock(return_value=[mock_history])
+            result = await stage._fetch_oi_history(["O:AAPL", "O:MSFT"])
+            assert len(result) == 2
+            assert mock_oi.list_by_contract.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_iv_history_empty_input(self):
+        polygon = MagicMock()
+        orch = MagicMock()
+        stage = FeatureComputationStage(polygon_client=polygon, orchestrator=orch)
+        result = await stage._fetch_iv_history([])
+        assert result == {}
+
+    @pytest.mark.asyncio
     async def test_persist_features_error(self):
         polygon = MagicMock()
         orch = MagicMock()

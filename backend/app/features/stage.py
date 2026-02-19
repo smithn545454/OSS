@@ -5,22 +5,23 @@ Integrates feature computation into the pipeline orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional, Sequence
 
+from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
     Evaluation,
-    Opportunity,
+    FeatureConfig,
     IVHistory,
     OIHistory,
-    FeatureConfig,
+    Opportunity,
     PipelineStage,
 )
-from app.core.pipeline import PipelineOrchestrator
-from app.db.tables import IVHistoryTable, OIHistoryTable, FeatureValueTable
-from app.services.polygon import PolygonClient
+from app.db.tables import FeatureValueTable, IVHistoryTable, OIHistoryTable
 from app.features.calculator import FeatureComputer
 from app.features.models import FeatureSet
+from app.services.polygon import PolygonClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class FeatureComputationStage:
     Takes Evaluations from Stage 3 and computes all features needed
     for pillar scoring in Stage 5.
     """
-    
+
     def __init__(
         self,
         polygon_client: PolygonClient,
@@ -49,7 +50,7 @@ class FeatureComputationStage:
         self._orchestrator = orchestrator
         self._config = config or FeatureConfig()
         self._computer = FeatureComputer(polygon_client, config=config)
-    
+
     async def execute(
         self,
         run_id: str,
@@ -69,10 +70,10 @@ class FeatureComputationStage:
             List of computed FeatureSets
         """
         logger.info(f"Stage 4: Computing features for {len(evaluations)} evaluations")
-        
+
         # Update current stage
         await self._orchestrator.update_current_stage(run_id, PipelineStage.FEATURE_COMPUTATION)
-        
+
         if not evaluations:
             # Record empty stage event
             await self._orchestrator.record_stage_event(
@@ -82,15 +83,15 @@ class FeatureComputationStage:
                 items_out=0,
             )
             return []
-        
+
         # Fetch IV history for all unique tickers
         tickers = list(set(e.underlying_ticker for e in evaluations))
         iv_history_map = await self._fetch_iv_history(tickers)
-        
+
         # Fetch OI history for all option contracts
         option_tickers = [e.option_ticker for e in evaluations]
         oi_history_map = await self._fetch_oi_history(option_tickers)
-        
+
         # Compute features
         feature_sets = await self._computer.compute_features_batch(
             evaluations=evaluations,
@@ -98,11 +99,11 @@ class FeatureComputationStage:
             iv_history_map=iv_history_map,
             oi_history_map=oi_history_map,
         )
-        
+
         # Persist feature values if requested
         if persist_features and feature_sets:
             await self._persist_features(feature_sets)
-        
+
         # Record stage event
         await self._orchestrator.record_stage_event(
             run_id=run_id,
@@ -115,66 +116,76 @@ class FeatureComputationStage:
                 "oi_history_available": len(oi_history_map),
             },
         )
-        
+
         logger.info(f"Stage 4 complete: {len(feature_sets)} feature sets computed")
         return feature_sets
-    
+
     async def _fetch_iv_history(
         self,
         tickers: list[str],
     ) -> dict[str, list[IVHistory]]:
-        """Fetch IV history for all tickers.
-        
+        """Fetch IV history for all tickers in parallel.
+
         Args:
             tickers: List of ticker symbols
-            
+
         Returns:
             Dict mapping ticker to IV history records
         """
-        iv_history_map: dict[str, list[IVHistory]] = {}
-        
-        for ticker in tickers:
+        if not tickers:
+            return {}
+
+        async def fetch_one(ticker: str) -> tuple[str, list[IVHistory]]:
             try:
                 history = await IVHistoryTable.list_by_ticker(
                     ticker=ticker,
                     limit=self._config.iv_percentile_lookback_days,
                 )
-                if history:
-                    iv_history_map[ticker] = history
+                return ticker, history or []
             except Exception as e:
                 logger.warning(f"Error fetching IV history for {ticker}: {e}")
-        
+                return ticker, []
+
+        results = await asyncio.gather(*[fetch_one(t) for t in tickers])
+        iv_history_map = {ticker: history for ticker, history in results if history}
+
         logger.debug(f"Fetched IV history for {len(iv_history_map)}/{len(tickers)} tickers")
         return iv_history_map
-    
+
     async def _fetch_oi_history(
         self,
         option_tickers: list[str],
     ) -> dict[str, list[OIHistory]]:
-        """Fetch OI history for all option contracts.
-        
+        """Fetch OI history for all option contracts in parallel.
+
         Args:
             option_tickers: List of option ticker symbols
-            
+
         Returns:
             Dict mapping option ticker to OI history records
         """
-        oi_history_map: dict[str, list[OIHistory]] = {}
-        
-        for option_ticker in option_tickers:
+        if not option_tickers:
+            return {}
+
+        async def fetch_one(option_ticker: str) -> tuple[str, list[OIHistory]]:
             try:
                 history = await OIHistoryTable.list_by_contract(
                     option_ticker=option_ticker,
                     limit=10,  # Need 5 days for 5-day change
                 )
-                if history:
-                    oi_history_map[option_ticker] = history
+                return option_ticker, history or []
             except Exception as e:
                 logger.warning(f"Error fetching OI history for {option_ticker}: {e}")
-        
-        logger.debug(f"Fetched OI history for {len(oi_history_map)}/{len(option_tickers)} contracts")
+                return option_ticker, []
+
+        results = await asyncio.gather(*[fetch_one(ot) for ot in option_tickers])
+        oi_history_map = {ticker: history for ticker, history in results if history}
+
+        logger.debug(
+            f"Fetched OI history for {len(oi_history_map)}/{len(option_tickers)} contracts"
+        )
         return oi_history_map
-    
+
     async def _persist_features(self, feature_sets: list[FeatureSet]) -> None:
         """Persist feature values to DynamoDB.
         
