@@ -266,6 +266,11 @@ class TestPaperPositionTable:
         assert result.status == PositionStatus.CLOSED
         assert result.exit_price == 7.0
         assert result.current_pnl_pct == pytest.approx(40.0)
+        # Verify put happens BEFORE delete (safe ordering)
+        call_names = [name for name, _, _ in mock_db.method_calls]
+        put_idx = call_names.index("put_item")
+        delete_idx = call_names.index("delete_item")
+        assert put_idx < delete_idx, "put_item must be called before delete_item"
 
 
 # ---------------------------------------------------------------------------

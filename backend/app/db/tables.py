@@ -605,30 +605,27 @@ class PaperPositionTable:
         exit_reason: str,
     ) -> PaperPosition:
         """Close a position (moves from OPEN to CLOSED partition).
-        
-        This operation deletes from POS#OPEN and creates in POS#CLOSED
-        because the status is part of the partition key.
-        
+
+        Writes the closed position FIRST, then deletes the open position.
+        This ordering ensures the position is never lost — in the worst
+        case, it exists in both partitions temporarily, which is safe
+        because list_open/list_closed filter by partition key.
+
         Args:
             position: The open position to close
             exit_price: The exit price
             exit_reason: The reason for exit (PROFIT_TARGET, STOP_LOSS, etc.)
-            
+
         Returns:
             The closed PaperPosition
         """
         from app.core.schemas import ExitReason, PositionStatus
-        
+
         db = get_dynamodb()
-        
-        # Delete from OPEN partition
-        old_pk = f"POS#{PositionStatus.OPEN.value}"
-        old_sk = f"{position.entry_date}#{position.position_id}"
-        await db.delete_item(PaperPositionTable.TABLE, old_pk, old_sk)
-        
+
         # Calculate final P&L
         final_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
-        
+
         # Create closed position
         now = datetime.now(timezone.utc).isoformat()
         closed_position = PaperPosition(
@@ -651,10 +648,15 @@ class PaperPositionTable:
             status=PositionStatus.CLOSED,
             last_updated=now,
         )
-        
-        # Store in CLOSED partition
+
+        # STEP 1: Write closed position FIRST (safe — creates duplicate at worst)
         await PaperPositionTable.put(closed_position)
-        
+
+        # STEP 2: Delete from OPEN partition
+        old_pk = f"POS#{PositionStatus.OPEN.value}"
+        old_sk = f"{position.entry_date}#{position.position_id}"
+        await db.delete_item(PaperPositionTable.TABLE, old_pk, old_sk)
+
         return closed_position
 
     @staticmethod
