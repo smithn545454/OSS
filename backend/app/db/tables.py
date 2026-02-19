@@ -697,9 +697,20 @@ class FeatureValueTable:
     @staticmethod
     async def put_batch(features: list[FeatureValue]) -> None:
         """Store multiple feature values for an evaluation."""
+        if not features:
+            return
         db = get_dynamodb()
+        items = []
         for feature in features:
-            await FeatureValueTable.put(feature)
+            item = feature.to_dynamodb_item()
+            item["PK"] = f"EVAL#{feature.evaluation_id}"
+            item["SK"] = f"FEATURE#{feature.feature_name}"
+            items.append(item)
+
+        # DynamoDB BatchWriteItem limit is 25
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(FeatureValueTable.TABLE, batch)
 
     @staticmethod
     async def list_by_evaluation(evaluation_id: str) -> list[FeatureValue]:
@@ -738,8 +749,19 @@ class PillarScoreTable:
     @staticmethod
     async def put_batch(scores: list[PillarScore]) -> None:
         """Store all three pillar scores for an evaluation."""
+        if not scores:
+            return
+        db = get_dynamodb()
+        items = []
         for score in scores:
-            await PillarScoreTable.put(score)
+            item = score.to_dynamodb_item()
+            item["PK"] = f"EVAL#{score.evaluation_id}"
+            item["SK"] = f"PILLAR#{score.pillar_id}"
+            items.append(item)
+
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(PillarScoreTable.TABLE, batch)
 
     @staticmethod
     async def get(evaluation_id: str, pillar_id: str) -> Optional[PillarScore]:
@@ -788,13 +810,30 @@ class GateResultTable:
         item = result.to_dynamodb_item()
         item["PK"] = f"EVAL#{result.evaluation_id}"
         item["SK"] = f"GATE#{result.gate_id}"
+        if result.run_id:
+            item["GSI1PK"] = f"RUN#{result.run_id}"
+            item["GSI1SK"] = f"{result.evaluation_id}#{result.gate_id}"
         await db.put_item(GateResultTable.TABLE, item)
 
     @staticmethod
     async def put_batch(results: list[GateResult]) -> None:
         """Store all gate results for an evaluation."""
+        if not results:
+            return
+        db = get_dynamodb()
+        items = []
         for result in results:
-            await GateResultTable.put(result)
+            item = result.to_dynamodb_item()
+            item["PK"] = f"EVAL#{result.evaluation_id}"
+            item["SK"] = f"GATE#{result.gate_id}"
+            if result.run_id:
+                item["GSI1PK"] = f"RUN#{result.run_id}"
+                item["GSI1SK"] = f"{result.evaluation_id}#{result.gate_id}"
+            items.append(item)
+
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(GateResultTable.TABLE, batch)
 
     @staticmethod
     async def get(evaluation_id: str, gate_id: str) -> Optional[GateResult]:

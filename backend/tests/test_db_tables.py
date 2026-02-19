@@ -281,6 +281,22 @@ class TestFeatureValueTable:
         result = await FeatureValueTable.list_by_evaluation("eval-1")
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_put_batch_uses_batch_write(self, mock_db):
+        from app.db.tables import FeatureValueTable
+        f1 = FeatureValue(evaluation_id="e1", feature_name="spread_pct", value=2.5, units="%")
+        f2 = FeatureValue(evaluation_id="e1", feature_name="iv_percentile", value=45.0, units="pct")
+        await FeatureValueTable.put_batch([f1, f2])
+        mock_db.batch_write.assert_called_once()
+        args = mock_db.batch_write.call_args
+        assert len(args[0][1]) == 2  # 2 items in batch
+
+    @pytest.mark.asyncio
+    async def test_put_batch_empty(self, mock_db):
+        from app.db.tables import FeatureValueTable
+        await FeatureValueTable.put_batch([])
+        mock_db.batch_write.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # PillarScoreTable
@@ -300,6 +316,20 @@ class TestPillarScoreTable:
         from app.db.tables import PillarScoreTable
         result = await PillarScoreTable.list_by_evaluation("eval-1")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_put_batch_uses_batch_write(self, mock_db):
+        from app.db.tables import PillarScoreTable
+        s1 = PillarScore(evaluation_id="e1", pillar_id="DIRECTIONAL", score=75.0, contributors=[])
+        s2 = PillarScore(evaluation_id="e1", pillar_id="VOLATILITY", score=60.0, contributors=[])
+        await PillarScoreTable.put_batch([s1, s2])
+        mock_db.batch_write.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_put_batch_empty(self, mock_db):
+        from app.db.tables import PillarScoreTable
+        await PillarScoreTable.put_batch([])
+        mock_db.batch_write.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +356,27 @@ class TestGateResultTable:
         from app.db.tables import GateResultTable
         result = await GateResultTable.list_failed_by_evaluation("eval-1")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_put_batch_uses_batch_write(self, mock_db):
+        from app.db.tables import GateResultTable
+        g1 = GateResult(
+            evaluation_id="e1", gate_id="GATE_MIN_OI", enabled=True,
+            passed=True, measured_value=500.0, threshold_value=300.0,
+            operator=GateOperator.GTE, units="contracts",
+            reason_code="MIN_OI_PASS", run_id="run-1",
+        )
+        await GateResultTable.put_batch([g1])
+        mock_db.batch_write.assert_called_once()
+        # Verify GSI1 keys populated
+        items = mock_db.batch_write.call_args[0][1]
+        assert items[0]["GSI1PK"] == "RUN#run-1"
+
+    @pytest.mark.asyncio
+    async def test_put_batch_empty(self, mock_db):
+        from app.db.tables import GateResultTable
+        await GateResultTable.put_batch([])
+        mock_db.batch_write.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_by_run_empty(self, mock_db):
