@@ -82,7 +82,11 @@ class PolygonClient:
         url: str,
         **kwargs: Any,
     ) -> Optional[httpx.Response]:
-        """Make a rate-limited request.
+        """Make a rate-limited request with retry for transient errors.
+
+        Retries up to 2 times on 429 (rate limit) and 5xx (server error)
+        with backoff (1s, 2s). Non-transient errors (4xx) return None
+        immediately.
 
         Args:
             method: HTTP method
@@ -95,19 +99,39 @@ class PolygonClient:
         if not self._client:
             raise RuntimeError("Client not initialized. Use async context manager.")
 
-        async with self._semaphore:
-            try:
-                response = await self._client.request(method, url, **kwargs)
-                response.raise_for_status()
-                return response
-            except httpx.HTTPStatusError as e:
-                logger.error(
-                    f"HTTP {e.response.status_code} for {url}: {e}"
-                )
-                return None
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error for {url}: {e}")
-                return None
+        max_retries = 2
+        retryable_statuses = {429, 500, 502, 503, 504}
+
+        for attempt in range(max_retries + 1):
+            async with self._semaphore:
+                try:
+                    response = await self._client.request(method, url, **kwargs)
+                    response.raise_for_status()
+                    return response
+                except httpx.HTTPStatusError as e:
+                    status = e.response.status_code
+                    if status in retryable_statuses and attempt < max_retries:
+                        backoff = 2**attempt  # 1s, 2s
+                        logger.warning(
+                            f"HTTP {status} for {url} (attempt {attempt + 1}/{max_retries + 1}), "
+                            f"retrying in {backoff}s"
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    logger.error(f"HTTP {status} for {url}: {e}")
+                    return None
+                except httpx.HTTPError as e:
+                    if attempt < max_retries:
+                        backoff = 2**attempt
+                        logger.warning(
+                            f"HTTP error for {url} (attempt {attempt + 1}/{max_retries + 1}), "
+                            f"retrying in {backoff}s: {e}"
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    logger.error(f"HTTP error for {url}: {e}")
+                    return None
+        return None
 
     async def get_ticker_details(self, ticker: str) -> Optional[dict[str, Any]]:
         """Get ticker details.
