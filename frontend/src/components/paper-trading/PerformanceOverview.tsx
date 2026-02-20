@@ -280,8 +280,8 @@ export default function PerformanceOverview({ positions, period }: PerformanceOv
                   borderRadius: 8,
                   fontSize: 12,
                 }}
-                formatter={(value: number, name: string) => [
-                  name === 'x' ? value.toFixed(0) : `${value.toFixed(1)}%`,
+                formatter={(value: number | undefined, name: string | undefined) => [
+                  name === 'x' ? (value ?? 0).toFixed(0) : `${(value ?? 0).toFixed(1)}%`,
                   name === 'x' ? 'Score' : 'P&L',
                 ]}
               />

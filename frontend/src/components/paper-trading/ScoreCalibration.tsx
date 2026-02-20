@@ -264,8 +264,8 @@ export default function ScoreCalibration({ positions }: ScoreCalibrationProps) {
                   borderRadius: 8,
                   fontSize: 12,
                 }}
-                formatter={(value: number, name: string) => [
-                  value,
+                formatter={(value: number | undefined, name: string | undefined) => [
+                  value ?? 0,
                   name === 'winners' ? 'Winners' : 'Losers',
                 ]}
               />
