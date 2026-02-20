@@ -222,10 +222,11 @@ export function PipelineVisualization({
 
   // Use data if available, otherwise use default empty stages
   const stages = data?.stages ?? DEFAULT_STAGES
-  const totalInput = data?.total_input ?? 0
-  const finalStage = stages[stages.length - 1]
-  const finalOutput = finalStage?.output ?? 0
-  const passRate = calculatePassRate(totalInput, finalOutput)
+  const contractStage = stages.find(s => s.id === 4)   // Feature Computation — contract entry point
+  const decisionStage = stages.find(s => s.id === 7)    // Decision Logic — final verdict
+  const totalInput = contractStage?.input ?? 0
+  const totalOutput = decisionStage?.output ?? 0
+  const passRate = calculatePassRate(totalInput, totalOutput)
 
   return (
     <div 
@@ -262,13 +263,13 @@ export function PipelineVisualization({
             className="text-[11px] uppercase tracking-wide mb-1"
             style={{ color: 'var(--text-disabled)' }}
           >
-            Final Output
+            Total Output
           </p>
           <p 
             className="text-[24px] font-semibold"
             style={{ color: 'var(--accent-primary)' }}
           >
-            {formatNumber(finalOutput)}
+            {formatNumber(totalOutput)}
           </p>
         </div>
 
