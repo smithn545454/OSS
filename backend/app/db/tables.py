@@ -500,6 +500,7 @@ class PaperPositionTable:
         """Check if an open position exists for this option contract.
 
         Uses GSI2 to query by option_ticker with SK prefix OPEN.
+        Falls back to False if GSI2 doesn't exist yet (pre-CDK deploy).
 
         Args:
             option_ticker: The option contract ticker (e.g., O:AAPL260320C00170000)
@@ -507,15 +508,21 @@ class PaperPositionTable:
         Returns:
             True if an open position exists for this contract
         """
-        db = get_dynamodb()
-        items = await db.query(
-            PaperPositionTable.TABLE,
-            f"OPT#{option_ticker}",
-            sk_prefix="OPEN",
-            limit=1,
-            index_name="GSI2",
-        )
-        return len(items) > 0
+        try:
+            db = get_dynamodb()
+            items = await db.query(
+                PaperPositionTable.TABLE,
+                f"OPT#{option_ticker}",
+                sk_prefix="OPEN",
+                limit=1,
+                index_name="GSI2",
+            )
+            return len(items) > 0
+        except Exception as e:
+            if "GSI2" in str(e) or "specified index" in str(e):
+                logger.warning("GSI2 not available for dedup check — skipping: %s", e)
+                return False
+            raise
 
     @staticmethod
     async def list_open(limit: Optional[int] = None) -> list[PaperPosition]:
