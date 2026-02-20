@@ -332,8 +332,18 @@ async def get_evaluation_detail_by_id(
 
     company_name = await _get_company_name(ticker)
 
+    theta_adjusted_ev = calculate_theta_adjusted_ev(
+        delta=evaluation.get("delta", 0),
+        theta=evaluation.get("theta", 0),
+        mid=evaluation.get("mid", 0),
+        iv=evaluation.get("iv", 0),
+        underlying_price=evaluation.get("underlying_price", 0),
+        dte=evaluation.get("dte", 30),
+    )
+
     return {
         "evaluation": evaluation,
+        "thetaAdjustedEV": theta_adjusted_ev,
         "company_name": company_name,
         "pillar_scores": pillar_scores_dict,
         "gate_results": gate_results_dict,

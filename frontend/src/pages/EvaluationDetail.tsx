@@ -24,6 +24,7 @@ import type {
 import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
+import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 
 // ============================================================================
 // Score Bar Component
@@ -735,15 +736,10 @@ interface HeroSectionProps {
     option_type: string
     strike: number
     expiration_date: string
-    delta: number
-    gamma: number
-    theta: number
-    vega: number
-    iv: number
-    iv_percentile?: number
     underlying_price: number
     mid: number
   }
+  thetaAdjustedEV: number
   companyName?: string | null
   decision: {
     verdict: Verdict
@@ -752,8 +748,9 @@ interface HeroSectionProps {
   } | null
 }
 
-function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
+function HeroSection({ evaluation, thetaAdjustedEV, companyName, decision }: HeroSectionProps) {
   const isCall = evaluation.option_type === 'CALL'
+  const returnPct = calculateReturnPct(thetaAdjustedEV, evaluation.mid)
 
   return (
     <div className="detail-hero">
@@ -778,38 +775,40 @@ function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
         <div className="text-lg text-oss-muted" style={{ fontFamily: 'var(--font-primary)' }}>
           ${evaluation.strike} Strike · Exp {formatExpirationDate(evaluation.expiration_date)}
         </div>
-        
-        {/* Greeks Row */}
-        <div className="flex gap-8 mt-6 pt-4 border-t border-oss-border">
-          <div>
-            <span className="text-xs text-oss-muted block mb-1">Delta</span>
-            <span className="font-mono text-lg text-oss-text">{evaluation.delta.toFixed(3)}</span>
+
+        {/* Decision Metrics Row */}
+        <div className="flex mt-6 pt-4 border-t border-oss-border"
+             style={{ justifyContent: 'center', alignItems: 'center', gap: '80px' }}>
+          {/* θ-Adj EV */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+            <span style={{
+              fontFamily: 'var(--font-primary)', fontSize: '13px',
+              color: 'rgba(255, 255, 255, 0.5)', fontWeight: 400,
+            }}>θ-Adj EV</span>
+            <span style={{
+              fontFamily: 'var(--font-primary)', fontSize: '22px',
+              color: thetaAdjustedEV != null ? '#00E5CC' : 'rgba(255, 255, 255, 0.3)',
+              fontWeight: 700,
+            }}>
+              {thetaAdjustedEV != null ? `$${Math.round(thetaAdjustedEV)}` : '—'}
+            </span>
           </div>
-          <div>
-            <span className="text-xs text-oss-muted block mb-1">Gamma</span>
-            <span className="font-mono text-lg text-oss-text">{evaluation.gamma.toFixed(4)}</span>
+          {/* Return % */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+            <span style={{
+              fontFamily: 'var(--font-primary)', fontSize: '13px',
+              color: 'rgba(255, 255, 255, 0.5)', fontWeight: 400,
+            }}>Return</span>
+            <span style={{
+              fontFamily: 'var(--font-primary)', fontSize: '22px',
+              color: getReturnColor(returnPct), fontWeight: 700,
+            }}>
+              {returnPct != null ? `${returnPct.toFixed(1)}%` : '—'}
+            </span>
           </div>
-          <div>
-            <span className="text-xs text-oss-muted block mb-1">Theta</span>
-            <span className="font-mono text-lg text-oss-reject">{evaluation.theta.toFixed(3)}</span>
-          </div>
-          <div>
-            <span className="text-xs text-oss-muted block mb-1">Vega</span>
-            <span className="font-mono text-lg text-oss-text">{evaluation.vega.toFixed(3)}</span>
-          </div>
-          <div>
-            <span className="text-xs text-oss-muted block mb-1">IV</span>
-            <span className="font-mono text-lg text-oss-text">{(evaluation.iv * 100).toFixed(1)}%</span>
-          </div>
-          {evaluation.iv_percentile && (
-            <div>
-              <span className="text-xs text-oss-muted block mb-1">IV %ile</span>
-              <span className="font-mono text-lg text-oss-text">{evaluation.iv_percentile.toFixed(0)}</span>
-            </div>
-          )}
         </div>
       </div>
-      
+
       {/* Price and Score */}
       <div className="text-right">
         <div className="mb-4">
@@ -913,6 +912,7 @@ export default function EvaluationDetail() {
       {/* Hero Section */}
       <HeroSection
         evaluation={evaluation as HeroSectionProps['evaluation']}
+        thetaAdjustedEV={data.thetaAdjustedEV}
         companyName={data.company_name}
         decision={decision ? {
           verdict: decision.verdict as Verdict,

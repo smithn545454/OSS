@@ -13,6 +13,7 @@ import { ScannerBadge } from './ScannerBadge'
 import { ConvergenceBadge } from './ConvergenceBadge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 import { ConvictionGauge } from './ConvictionGauge'
+import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 
 interface OpportunityCardProps {
   evaluation: ApproveEvaluation
@@ -110,8 +111,8 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
   const contractCost = premium * 100
   const thetaAdjEV = evaluation.thetaAdjustedEV
 
-  // Return % calculation (guard against zero contract cost)
-  const returnPct = contractCost > 0 ? (thetaAdjEV / contractCost) * 100 : null
+  const returnPct = calculateReturnPct(thetaAdjEV, premium)
+  const returnColor = getReturnColor(returnPct)
 
   // Contract cost color by tier: LOW ≤$300 cyan, MED ≤$1000 amber, HIGH >$1000 red
   const costColor =
@@ -120,16 +121,6 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
       : contractCost <= 1000
         ? 'rgba(245,158,11,0.6)'
         : 'rgba(239,68,68,0.6)'
-
-  // Return % color by tier: Strong ≥8% cyan, Moderate ≥3% amber, Weak <3% red
-  const returnColor =
-    returnPct !== null
-      ? returnPct >= 8
-        ? '#00E5CC'
-        : returnPct >= 3
-          ? '#F59E0B'
-          : '#EF4444'
-      : 'var(--text-muted)'
 
   return (
     <div style={{

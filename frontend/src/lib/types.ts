@@ -415,6 +415,7 @@ export interface PipelineStatsResponse {
 // Evaluation Detail Types (Section 19.1)
 export interface EvaluationDetailResponse {
   evaluation: Evaluation & { decision?: Decision }
+  thetaAdjustedEV: number
   company_name: string | null
   pillar_scores: PillarScoreDetail[]
   gate_results: GateResultDetail[]
