@@ -29,6 +29,18 @@ from app.services.polygon import PolygonClient
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+def _enum_str(val: Any) -> str:
+    """Convert an enum-like value to string."""
+    return str(val.value) if hasattr(val, "value") else str(val)
+
+
+def _opt_enum_str(val: Any) -> str | None:
+    """Convert an optional enum-like value to string."""
+    if val is None:
+        return None
+    return str(val.value) if hasattr(val, "value") else str(val)
+
 # In-memory cache for ticker company names (survives across warm Lambda invocations)
 _ticker_name_cache: dict[str, Optional[str]] = {}
 
@@ -52,13 +64,13 @@ async def _get_company_name(ticker: str) -> Optional[str]:
 
 def _create_catalyst_service() -> CatalystDataService:
     """Create a CatalystDataService with Finnhub support if configured.
-    
+
     Returns:
         CatalystDataService with earnings cache if Finnhub API key is available,
         otherwise a basic service without earnings lookup.
     """
     settings = get_settings()
-    
+
     if settings.finnhub_api_key:
         finnhub_client = FinnhubClient(settings.finnhub_api_key)
         earnings_cache = EarningsCacheService(finnhub_client=finnhub_client)
@@ -89,53 +101,53 @@ def calculate_theta_adjusted_ev(
     expected_hold_days: int = 5,
 ) -> float:
     """Calculate theta-adjusted expected value.
-    
+
     Per Section 4.2.1:
     θ-Adjusted EV = (P_profit × E_gain) - (P_loss × E_loss) - (θ × T_hold)
-    
+
     Simplified calculation for display purposes.
     """
     if mid <= 0 or dte <= 0:
         return 0.0
-    
+
     # Daily expected move
     daily_expected_move = underlying_price * (iv / math.sqrt(252))
-    
+
     # Expected gain from delta exposure over holding period
     expected_price_move = daily_expected_move * math.sqrt(expected_hold_days)
     expected_gain = abs(delta) * expected_price_move * 100  # Per contract
-    
+
     # Theta cost over holding period
     theta_cost = abs(theta) * expected_hold_days * 100  # Per contract
-    
+
     # Simplified EV (assumes 50/50 probability for directional move)
     ev = (0.6 * expected_gain) - (0.4 * mid * 0.5 * 100) - theta_cost
-    
+
     return round(ev, 2)
 
 
 def calculate_gate_margin(gate_results: list[dict[str, Any]]) -> float:
     """Calculate average gate margin for conviction scoring.
-    
+
     Per Section 4.2.3:
     Per-gate margin = (Actual - Threshold) / Threshold × 100
     Gate Margin Score = average(all gate margins), clamped 0-100
     """
     if not gate_results:
         return 50.0  # Neutral score if no gates
-    
+
     margins = []
     for gate in gate_results:
         if not gate.get("enabled", True) or not gate.get("passed", False):
             continue
-        
+
         measured = gate.get("measured_value", 0)
         threshold = gate.get("threshold_value", 1)
         operator = gate.get("operator", "gte")
-        
+
         if threshold == 0:
             continue
-        
+
         # Calculate margin based on operator
         if operator in ("gte", ">="):
             margin = (measured - threshold) / abs(threshold) * 100
@@ -143,37 +155,37 @@ def calculate_gate_margin(gate_results: list[dict[str, Any]]) -> float:
             margin = (threshold - measured) / abs(threshold) * 100
         else:
             margin = 50  # Default for between/equals
-        
+
         margins.append(max(0, min(100, margin)))
-    
+
     if not margins:
         return 50.0
-    
+
     return round(sum(margins) / len(margins), 1)
 
 
 def determine_urgency(scanner_types: list[str]) -> str:
     """Determine urgency level from scanner types.
-    
+
     Per Section 4.2.5:
     - 🔴 Act Now: Breakout/Breakdown
     - 🟡 Hours: Unusual Volume
     - 🟢 Patient: Compression, Cheap Options
     """
     urgency_priority = {"act_now": 3, "hours": 2, "patient": 1}
-    
+
     max_urgency = "patient"
     max_priority = 0
-    
+
     for scanner in scanner_types:
         scanner_upper = scanner.upper()
         urgency = URGENCY_BY_SCANNER.get(scanner_upper, "patient")
         priority = urgency_priority.get(urgency, 1)
-        
+
         if priority > max_priority:
             max_priority = priority
             max_urgency = urgency
-    
+
     return max_urgency
 
 
@@ -220,7 +232,7 @@ async def get_evaluation_detail_by_id(
     pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
     pillar_scores_dict = [
         {
-            "pillar_id": str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id),
+            "pillar_id": _enum_str(ps.pillar_id),
             "score": ps.score,
             "contributors": [
                 {
@@ -246,7 +258,7 @@ async def get_evaluation_detail_by_id(
             "passed": gr.passed,
             "measured_value": gr.measured_value,
             "threshold_value": gr.threshold_value,
-            "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+            "operator": _enum_str(gr.operator),
             "units": gr.units,
             "reason_code": gr.reason_code,
             "notes": gr.notes,
@@ -263,17 +275,17 @@ async def get_evaluation_detail_by_id(
             "entry_price": position.entry_price,
             "entry_date": position.entry_date,
             "quantity": position.quantity,
-            "verdict_at_entry": str(position.verdict_at_entry.value) if hasattr(position.verdict_at_entry, 'value') else str(position.verdict_at_entry),
-            "quality_tier_at_entry": str(position.quality_tier_at_entry.value) if position.quality_tier_at_entry and hasattr(position.quality_tier_at_entry, 'value') else str(position.quality_tier_at_entry) if position.quality_tier_at_entry else None,
+            "verdict_at_entry": _enum_str(position.verdict_at_entry),
+            "quality_tier_at_entry": _opt_enum_str(position.quality_tier_at_entry),
             "exit_price": position.exit_price,
             "exit_date": position.exit_date,
-            "exit_reason": str(position.exit_reason.value) if position.exit_reason and hasattr(position.exit_reason, 'value') else str(position.exit_reason) if position.exit_reason else None,
+            "exit_reason": _opt_enum_str(position.exit_reason),
             "current_price": position.current_price,
             "current_pnl_pct": round(position.current_pnl_pct, 2),
             "max_favorable_excursion": round(position.max_favorable_excursion, 2),
             "max_adverse_excursion": round(position.max_adverse_excursion, 2),
             "days_held": position.days_held,
-            "status": str(position.status.value) if hasattr(position.status, 'value') else str(position.status),
+            "status": _enum_str(position.status),
             "last_updated": position.last_updated,
         }
 
@@ -285,7 +297,7 @@ async def get_evaluation_detail_by_id(
             if opp.opportunity_id == opportunity_id:
                 scanner_triggers = [
                     {
-                        "scanner_type": str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') else str(st.scanner_type),
+                        "scanner_type": _enum_str(st.scanner_type),
                         "reason_codes": st.reason_codes,
                         "metrics": st.metrics,
                         "triggered_at": st.triggered_at,
@@ -309,7 +321,7 @@ async def get_evaluation_detail_by_id(
     if thesis:
         thesis_dict = {
             "thesis_id": thesis.thesis_id,
-            "status": str(thesis.status.value) if hasattr(thesis.status, 'value') else str(thesis.status),
+            "status": _enum_str(thesis.status),
             "setup_summary": thesis.setup_summary,
             "thesis": thesis.thesis,
             "supporting_evidence": thesis.supporting_evidence,
@@ -320,7 +332,7 @@ async def get_evaluation_detail_by_id(
                 "stop_loss": thesis.exit_plan.stop_loss,
                 "time_exit": thesis.exit_plan.time_exit,
             },
-            "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, 'value') else str(thesis.llm_provider),
+            "llm_provider": _enum_str(thesis.llm_provider),
             "model_used": thesis.model_used,
             "tokens_used": thesis.tokens_used,
             "generated_at": thesis.generated_at,
@@ -386,11 +398,11 @@ async def get_evaluation_detail(
     evaluation_id: str,
 ) -> dict[str, Any]:
     """Get complete evaluation details including pillar scores, gates, and position.
-    
+
     Per Section 19.1 of OSS_Complete_Requirements.md - Evaluation Detail Page.
-    
+
     Returns:
-        Evaluation + Decision + PillarScores (3) + GateResults (all) + 
+        Evaluation + Decision + PillarScores (3) + GateResults (all) +
         PaperPosition (if exists) + Opportunity scanner triggers + Features
     """
     # 1. Get base evaluation with decision
@@ -400,12 +412,12 @@ async def get_evaluation_detail(
             status_code=404,
             detail=f"Evaluation not found: {ticker}/{timestamp}/{evaluation_id}",
         )
-    
+
     # 2. Fetch pillar scores (3 pillars: DIRECTIONAL, VOLATILITY, STRUCTURE)
     pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
     pillar_scores_dict = [
         {
-            "pillar_id": str(ps.pillar_id.value) if hasattr(ps.pillar_id, 'value') else str(ps.pillar_id),
+            "pillar_id": _enum_str(ps.pillar_id),
             "score": ps.score,
             "contributors": [
                 {
@@ -422,7 +434,7 @@ async def get_evaluation_detail(
         }
         for ps in pillar_scores
     ]
-    
+
     # 3. Fetch gate results (all 9 gates)
     gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
     gate_results_dict = [
@@ -432,14 +444,14 @@ async def get_evaluation_detail(
             "passed": gr.passed,
             "measured_value": gr.measured_value,
             "threshold_value": gr.threshold_value,
-            "operator": str(gr.operator.value) if hasattr(gr.operator, 'value') else str(gr.operator),
+            "operator": _enum_str(gr.operator),
             "units": gr.units,
             "reason_code": gr.reason_code,
             "notes": gr.notes,
         }
         for gr in gate_results
     ]
-    
+
     # 4. Fetch paper position if exists
     position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
     position_dict = None
@@ -450,33 +462,30 @@ async def get_evaluation_detail(
             "entry_price": position.entry_price,
             "entry_date": position.entry_date,
             "quantity": position.quantity,
-            "verdict_at_entry": str(position.verdict_at_entry.value) if hasattr(position.verdict_at_entry, 'value') else str(position.verdict_at_entry),
-            "quality_tier_at_entry": str(position.quality_tier_at_entry.value) if position.quality_tier_at_entry and hasattr(position.quality_tier_at_entry, 'value') else str(position.quality_tier_at_entry) if position.quality_tier_at_entry else None,
+            "verdict_at_entry": _enum_str(position.verdict_at_entry),
+            "quality_tier_at_entry": _opt_enum_str(position.quality_tier_at_entry),
             "exit_price": position.exit_price,
             "exit_date": position.exit_date,
-            "exit_reason": str(position.exit_reason.value) if position.exit_reason and hasattr(position.exit_reason, 'value') else str(position.exit_reason) if position.exit_reason else None,
+            "exit_reason": _opt_enum_str(position.exit_reason),
             "current_price": position.current_price,
             "current_pnl_pct": round(position.current_pnl_pct, 2),
             "max_favorable_excursion": round(position.max_favorable_excursion, 2),
             "max_adverse_excursion": round(position.max_adverse_excursion, 2),
             "days_held": position.days_held,
-            "status": str(position.status.value) if hasattr(position.status, 'value') else str(position.status),
+            "status": _enum_str(position.status),
             "last_updated": position.last_updated,
         }
-    
+
     # 5. Fetch opportunity to get scanner triggers
     opportunity_id = evaluation.get("opportunity_id")
     scanner_triggers = []
     if opportunity_id:
-        # Find opportunity - need timestamp from evaluation
-        eval_timestamp = evaluation.get("evaluated_at", "")
-        date_str = eval_timestamp[:10] if eval_timestamp else ""
         opportunities = await OpportunityTable.list_by_ticker(ticker, limit=20)
         for opp in opportunities:
             if opp.opportunity_id == opportunity_id:
                 scanner_triggers = [
                     {
-                        "scanner_type": str(st.scanner_type.value) if hasattr(st.scanner_type, 'value') else str(st.scanner_type),
+                        "scanner_type": _enum_str(st.scanner_type),
                         "reason_codes": st.reason_codes,
                         "metrics": st.metrics,
                         "triggered_at": st.triggered_at,
@@ -484,7 +493,7 @@ async def get_evaluation_detail(
                     for st in opp.scanner_triggers
                 ]
                 break
-    
+
     # 6. Fetch feature values
     features = await FeatureValueTable.list_by_evaluation(evaluation_id)
     features_dict = {
@@ -495,14 +504,14 @@ async def get_evaluation_detail(
         }
         for f in features
     }
-    
+
     # 7. Fetch trade thesis if exists (Phase 10 - LLM Integration)
     thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
     thesis_dict = None
     if thesis:
         thesis_dict = {
             "thesis_id": thesis.thesis_id,
-            "status": str(thesis.status.value) if hasattr(thesis.status, 'value') else str(thesis.status),
+            "status": _enum_str(thesis.status),
             "setup_summary": thesis.setup_summary,
             "thesis": thesis.thesis,
             "supporting_evidence": thesis.supporting_evidence,
@@ -513,17 +522,17 @@ async def get_evaluation_detail(
                 "stop_loss": thesis.exit_plan.stop_loss,
                 "time_exit": thesis.exit_plan.time_exit,
             },
-            "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, 'value') else str(thesis.llm_provider),
+            "llm_provider": _enum_str(thesis.llm_provider),
             "model_used": thesis.model_used,
             "tokens_used": thesis.tokens_used,
             "generated_at": thesis.generated_at,
             "error_message": thesis.error_message,
         }
-    
+
     # 8. Compute summary stats
     all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
     failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
-    
+
     return {
         "evaluation": evaluation,
         "pillar_scores": pillar_scores_dict,
@@ -576,15 +585,15 @@ async def list_evaluations_filtered(
     limit: int = 100,
 ) -> dict[str, Any]:
     """List evaluations with filters for Pipeline Monitor breakdown.
-    
+
     Per Section 19.2 - Pipeline Monitor breakdown controls.
-    
+
     Args:
         verdict: Filter by verdict (APPROVE, WATCH, REJECT)
         dte_bucket: Filter by DTE bucket (A, B, C, D)
         option_type: Filter by option type (CALL, PUT)
         limit: Maximum evaluations to return
-        
+
     Returns:
         Filtered list of evaluations with summary statistics
     """
@@ -597,20 +606,20 @@ async def list_evaluations_filtered(
         watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=200)
         reject_items = await EvaluationTable.list_by_verdict("REJECT", limit=200)
         items = approve_items + watch_items + reject_items
-    
+
     # Apply in-memory filters
     filtered = items
-    
+
     if dte_bucket:
         filtered = [e for e in filtered if e.get("dte_bucket") == dte_bucket.upper()]
-    
+
     if option_type:
         filtered = [e for e in filtered if e.get("option_type") == option_type.upper()]
-    
+
     # Sort by evaluated_at descending and limit
     filtered.sort(key=lambda x: x.get("evaluated_at", ""), reverse=True)
     filtered = filtered[:limit]
-    
+
     # Compute summary statistics
     stats = {
         "total": len(filtered),
@@ -618,23 +627,24 @@ async def list_evaluations_filtered(
         "by_dte_bucket": {},
         "by_option_type": {},
     }
-    
+
     for item in filtered:
         # By verdict
-        v = item.get("decision", {}).get("verdict") if isinstance(item.get("decision"), dict) else None
+        decision = item.get("decision")
+        v = decision.get("verdict") if isinstance(decision, dict) else None
         if v:
             stats["by_verdict"][v] = stats["by_verdict"].get(v, 0) + 1
-        
+
         # By DTE bucket
         bucket = item.get("dte_bucket")
         if bucket:
             stats["by_dte_bucket"][bucket] = stats["by_dte_bucket"].get(bucket, 0) + 1
-        
+
         # By option type
         ot = item.get("option_type")
         if ot:
             stats["by_option_type"][ot] = stats["by_option_type"].get(ot, 0) + 1
-    
+
     return {
         "evaluations": filtered,
         "count": len(filtered),
@@ -715,9 +725,7 @@ async def list_approve_evaluations(
             for opp in opp_by_ticker[ticker]:
                 if opp.opportunity_id == opportunity_id:
                     return [
-                        str(st.scanner_type.value)
-                        if hasattr(st.scanner_type, "value")
-                        else str(st.scanner_type)
+                        _enum_str(st.scanner_type)
                         for st in opp.scanner_triggers
                     ]
         eval_scanner_source = item.get("scanner_source")
@@ -789,8 +797,7 @@ async def list_approve_evaluations(
         )
 
         pillar_dict = {
-            str(ps.pillar_id.value) if hasattr(ps.pillar_id, "value")
-            else str(ps.pillar_id): ps.score
+            _enum_str(ps.pillar_id): ps.score
             for ps in pillar_scores
         }
 
@@ -801,10 +808,7 @@ async def list_approve_evaluations(
                 "passed": gr.passed,
                 "measured_value": gr.measured_value,
                 "threshold_value": gr.threshold_value,
-                "operator": (
-                    str(gr.operator.value) if hasattr(gr.operator, "value")
-                    else str(gr.operator)
-                ),
+                "operator": _enum_str(gr.operator),
             }
             for gr in gate_results
         ]
@@ -888,46 +892,50 @@ async def get_watch_insights(
     since_days: int = 7,
 ) -> dict[str, Any]:
     """Get WATCH intelligence insights for pattern detection.
-    
+
     Per Section 11 of OSS_Opportunities_Page_Specification:
     - Gate Pressure: identify gates causing most WATCH failures
     - Recurring Near-Miss: contracts evaluated multiple times
     - WATCH to APPROVE Conversion tracking
-    
+
     Args:
         since_days: Number of days to analyze
-        
+
     Returns:
         List of WatchInsight objects
     """
     # Fetch WATCH evaluations
     watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=500)
     approve_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
-    
+
     insights: list[dict[str, Any]] = []
-    
+
     # 1. Gate Pressure Analysis
     gate_failure_counts: dict[str, int] = defaultdict(int)
     total_watch = len(watch_items)
-    
+
     for item in watch_items:
         evaluation_id = item.get("evaluation_id", "")
         gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
-        
+
         for gr in gate_results:
             if gr.enabled and not gr.passed:
                 gate_failure_counts[gr.gate_id] += 1
-    
+
     # Find top failing gates
     if gate_failure_counts and total_watch > 0:
         sorted_gates = sorted(gate_failure_counts.items(), key=lambda x: x[1], reverse=True)
         top_gate, top_count = sorted_gates[0]
         percentage = round((top_count / total_watch) * 100, 1)
-        
+
         if percentage >= 10:  # Only report if significant
             insights.append({
                 "type": "gate_pressure",
-                "headline": f"{top_count} contracts failed the {top_gate.replace('_', ' ')} gate today ({percentage}% of all WATCH)",
+                "headline": (
+                    f"{top_count} contracts failed the "
+                    f"{top_gate.replace('_', ' ')} gate today "
+                    f"({percentage}% of all WATCH)"
+                ),
                 "gateName": top_gate,
                 "failCount": top_count,
                 "percentage": percentage,
@@ -937,39 +945,47 @@ async def get_watch_insights(
                     "url": "/config",
                 },
             })
-    
+
     # 2. Recurring Near-Miss Detection
     # Group by contract identifier (ticker + strike + expiration)
     contract_occurrences: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    
+
     for item in watch_items:
         ticker = item.get("underlying_ticker", "")
         strike = item.get("strike", 0)
         expiration = item.get("expiration_date", "")
         contract_key = f"{ticker}_{strike}_{expiration}"
         contract_occurrences[contract_key].append(item)
-    
+
     # Find contracts evaluated multiple times
     for contract_key, occurrences in contract_occurrences.items():
         if len(occurrences) >= 2:
             parts = contract_key.split("_")
             ticker = parts[0] if parts else ""
-            
+
             # Get the most recent evaluation's failing gate
             latest = max(occurrences, key=lambda x: x.get("evaluated_at", ""))
             evaluation_id = latest.get("evaluation_id", "")
             gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
-            
+
             failing_gate = None
             for gr in gate_results:
                 if gr.enabled and not gr.passed:
                     failing_gate = gr.gate_id
                     break
-            
+
             insights.append({
                 "type": "recurring_near_miss",
-                "headline": f"{ticker} {latest.get('strike', '')} {latest.get('option_type', '')} {latest.get('expiration_date', '')} has been evaluated {len(occurrences)} times this week",
-                "subInsight": f"Currently failing: {failing_gate.replace('_', ' ') if failing_gate else 'Unknown'}",
+                "headline": (
+                    f"{ticker} {latest.get('strike', '')} "
+                    f"{latest.get('option_type', '')} "
+                    f"{latest.get('expiration_date', '')} "
+                    f"has been evaluated {len(occurrences)} times this week"
+                ),
+                "subInsight": (
+                    f"Currently failing: "
+                    f"{failing_gate.replace('_', ' ') if failing_gate else 'Unknown'}"
+                ),
                 "contractId": contract_key,
                 "ticker": ticker,
                 "strike": latest.get("strike", 0),
@@ -977,7 +993,7 @@ async def get_watch_insights(
                 "occurrences": len(occurrences),
                 "failingGate": failing_gate,
             })
-    
+
     # 3. WATCH to APPROVE Conversion Tracking
     # Find contracts that were WATCH and later became APPROVE
     watch_contracts = set()
@@ -986,25 +1002,25 @@ async def get_watch_insights(
         strike = item.get("strike", 0)
         expiration = item.get("expiration_date", "")
         watch_contracts.add(f"{ticker}_{strike}_{expiration}")
-    
+
     conversions: list[dict[str, Any]] = []
     for item in approve_items:
         ticker = item.get("underlying_ticker", "")
         strike = item.get("strike", 0)
         expiration = item.get("expiration_date", "")
         contract_key = f"{ticker}_{strike}_{expiration}"
-        
+
         if contract_key in watch_contracts:
             evaluation_id = item.get("evaluation_id", "")
             gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
-            
+
             # Find which gate now passed
             gate_passed = None
             for gr in gate_results:
                 if gr.enabled and gr.passed:
                     gate_passed = gr.gate_id
                     break
-            
+
             conversions.append({
                 "contractId": contract_key,
                 "ticker": ticker,
@@ -1012,15 +1028,18 @@ async def get_watch_insights(
                 "expiration": expiration,
                 "gatePassed": gate_passed,
             })
-    
+
     if conversions:
         insights.append({
             "type": "watch_to_approve",
             "headline": f"{len(conversions)} contracts converted from WATCH to APPROVE",
-            "contracts": [f"{c['ticker']} {c['strike']} {c['expiration']}" for c in conversions[:5]],
+            "contracts": [
+                f"{c['ticker']} {c['strike']} {c['expiration']}"
+                for c in conversions[:5]
+            ],
             "conversions": conversions[:10],
         })
-    
+
     return {
         "insights": insights,
         "watchCount": total_watch,
