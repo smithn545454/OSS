@@ -9,12 +9,13 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ApproveEvaluation, UrgencyLevel, ScannerType } from '@/lib/types'
 import { formatContractId } from '@/lib/convictionScore'
+import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import { UrgencyBadge } from './UrgencyBadge'
 import { ScannerBadge } from './ScannerBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 
-type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'delta' | 'premium' | 'ev' | 'time'
+type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'ev' | 'returnPct' | 'time'
 type SortDirection = 'asc' | 'desc'
 
 interface AllApprovesTableProps {
@@ -164,9 +165,9 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
           aVal = a.convictionScore ?? 0
           bVal = b.convictionScore ?? 0
           break
-        case 'delta':
-          aVal = Math.abs(a.delta ?? 0)
-          bVal = Math.abs(b.delta ?? 0)
+        case 'returnPct':
+          aVal = calculateReturnPct(a.thetaAdjustedEV, a.mid) ?? -Infinity
+          bVal = calculateReturnPct(b.thetaAdjustedEV, b.mid) ?? -Infinity
           break
         case 'premium':
           aVal = a.mid ?? 0
@@ -336,32 +337,32 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
               }}>
                 Urgency
               </th>
-              <SortableHeader 
-                label="Delta" 
-                field="delta"
-                currentSort={sortField}
-                currentDirection={sortDirection}
-                onSort={handleSort}
-                align="right"
-              />
-              <SortableHeader 
-                label="Premium" 
+              <SortableHeader
+                label="Premium"
                 field="premium"
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
                 align="right"
               />
-              <SortableHeader 
-                label="θ-Adj EV" 
+              <SortableHeader
+                label="θ-Adj EV"
                 field="ev"
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
                 align="right"
               />
-              <SortableHeader 
-                label="Time" 
+              <SortableHeader
+                label="Return %"
+                field="returnPct"
+                currentSort={sortField}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+                align="right"
+              />
+              <SortableHeader
+                label="Time"
                 field="time"
                 currentSort={sortField}
                 currentDirection={sortDirection}
@@ -441,17 +442,8 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 <td style={{ padding: '12px 16px' }}>
                   <UrgencyBadge urgency={evaluation.urgency} size="small" />
                 </td>
-                <td style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-primary)',
-                  fontSize: '13px',
-                  color: 'var(--text-secondary)',
-                }}>
-                  {(evaluation.delta ?? 0).toFixed(2)}
-                </td>
-                <td style={{ 
-                  padding: '12px 16px', 
+                <td style={{
+                  padding: '12px 16px',
                   textAlign: 'right',
                   fontFamily: 'var(--font-primary)',
                   fontSize: '13px',
@@ -459,18 +451,33 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 }}>
                   ${(evaluation.mid ?? 0).toFixed(2)}
                 </td>
-                <td style={{ 
-                  padding: '12px 16px', 
+                <td style={{
+                  padding: '12px 16px',
                   textAlign: 'right',
                   fontFamily: 'var(--font-primary)',
                   fontSize: '13px',
                   fontWeight: 600,
-                  color: (evaluation.thetaAdjustedEV ?? 0) >= 0 
-                    ? 'var(--color-success-text)' 
+                  color: (evaluation.thetaAdjustedEV ?? 0) >= 0
+                    ? 'var(--color-success-text)'
                     : 'var(--color-error-text)',
                 }}>
                   ${(evaluation.thetaAdjustedEV ?? 0).toFixed(0)}
                 </td>
+                {(() => {
+                  const returnPct = calculateReturnPct(evaluation.thetaAdjustedEV, evaluation.mid)
+                  return (
+                    <td style={{
+                      padding: '12px 16px',
+                      textAlign: 'right',
+                      fontFamily: 'var(--font-primary)',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: getReturnColor(returnPct),
+                    }}>
+                      {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
+                    </td>
+                  )
+                })()}
                 <td style={{ 
                   padding: '12px 16px', 
                   textAlign: 'right',
