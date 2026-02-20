@@ -5,8 +5,9 @@
  * Per Section 8 of OSS_Opportunities_Page_Specification.
  */
 
+import { useState } from 'react'
 import type { ApproveEvaluation } from '@/lib/types'
-import { filterByConvictionThreshold } from '@/lib/convictionScore'
+import { filterByConvictionThreshold, sortByConviction, sortByComposite } from '@/lib/convictionScore'
 import { OpportunityCard } from './OpportunityCard'
 
 interface ConvictionQueueProps {
@@ -98,8 +99,11 @@ export function ConvictionQueue({
   hasNewData = false,
   newCount = 0,
 }: ConvictionQueueProps) {
-  // Filter to high-conviction only
-  const highConviction = filterByConvictionThreshold(evaluations, threshold)
+  const [sortMode, setSortMode] = useState<'composite' | 'conviction'>('composite')
+
+  // Filter to high-conviction only, then sort
+  const filtered = filterByConvictionThreshold(evaluations, threshold)
+  const highConviction = sortMode === 'composite' ? sortByComposite(filtered) : sortByConviction(filtered)
   const isEmpty = highConviction.length === 0
   
   return (
@@ -138,12 +142,50 @@ export function ConvictionQueue({
           </span>
         </div>
         
-        <span style={{ 
-          fontSize: '12px', 
-          color: 'var(--text-muted)',
-        }}>
-          Score ≥ {threshold}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            Ranked by {sortMode === 'composite' ? 'Composite' : 'Conviction'}
+          </span>
+          <span style={{
+            display: 'inline-flex',
+            gap: '2px',
+            fontSize: '11px',
+          }}>
+            <button
+              onClick={() => setSortMode('composite')}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                fontSize: '11px',
+                color: sortMode === 'composite' ? 'var(--text-secondary)' : 'var(--text-muted)',
+                borderBottom: sortMode === 'composite' ? '1px solid var(--text-secondary)' : '1px solid transparent',
+                opacity: sortMode === 'composite' ? 1 : 0.6,
+              }}
+            >
+              Composite
+            </button>
+            <button
+              onClick={() => setSortMode('conviction')}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                fontSize: '11px',
+                color: sortMode === 'conviction' ? 'var(--text-secondary)' : 'var(--text-muted)',
+                borderBottom: sortMode === 'conviction' ? '1px solid var(--text-secondary)' : '1px solid transparent',
+                opacity: sortMode === 'conviction' ? 1 : 0.6,
+              }}
+            >
+              Conviction
+            </button>
+          </span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            Score ≥ {threshold}
+          </span>
+        </div>
       </div>
       
       {/* Refresh notification */}

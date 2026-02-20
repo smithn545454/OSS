@@ -398,17 +398,14 @@ export function useApproveEvaluations(
         limit: options.limit,
       })
 
-      // Calculate conviction scores client-side, then sort by conviction descending
+      // Calculate conviction scores client-side (sorting is handled by consuming components)
       const enhanced = enhanceWithConvictionScores(
         response.evaluations as ApproveEvaluation[]
-      )
-      const sorted = [...enhanced].sort(
-        (a, b) => (b.convictionScore ?? 0) - (a.convictionScore ?? 0)
       )
 
       return {
         ...response,
-        evaluations: sorted,
+        evaluations: enhanced,
       }
     },
     staleTime: 30000, // Consider fresh for 30 seconds

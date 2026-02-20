@@ -7,6 +7,8 @@ import {
   calculateConvictionScore,
   enhanceWithConvictionScores,
   sortByConviction,
+  sortByComposite,
+  calculateCompositeScore,
   filterByConvictionThreshold,
   getConvictionColorClass,
   getConvictionColor,
@@ -576,6 +578,126 @@ describe('determineUrgency', () => {
 
   it('breakout takes priority over unusual volume', () => {
     expect(determineUrgency(['UNUSUAL_VOLUME', 'BREAKDOWN', 'CHEAP_OPTIONS'])).toBe('act_now')
+  })
+})
+
+// ===========================================================================
+// calculateCompositeScore
+// ===========================================================================
+describe('calculateCompositeScore', () => {
+  // Helper to compute expected composite: conviction * (1 + returnPct / 100)
+  // where returnPct = (thetaAdjEV / (mid * 100)) * 100 = thetaAdjEV / mid
+  function expected(conviction: number, mid: number, ev: number): number {
+    const returnPct = (ev / (mid * 100)) * 100
+    return Math.round(conviction * (1 + returnPct / 100) * 10) / 10
+  }
+
+  it('computes correct composite for the 7-row reference table', () => {
+    const rows: { ticker: string; conviction: number; mid: number; ev: number }[] = [
+      { ticker: 'ENPH', conviction: 81, mid: 3.30, ev: 34 },
+      { ticker: 'INTC', conviction: 81, mid: 2.70, ev: 25 },
+      { ticker: 'CF',   conviction: 80, mid: 2.33, ev: 21 },
+      { ticker: 'INTC', conviction: 81, mid: 2.49, ev: 18 },
+      { ticker: 'HAS',  conviction: 82, mid: 3.30, ev: 16 },
+      { ticker: 'PWR',  conviction: 80, mid: 30.70, ev: 230 },
+      { ticker: 'INTC', conviction: 82, mid: 5.00, ev: 17 },
+    ]
+
+    const results = rows.map(r => {
+      const evaluation = makeEval({
+        underlying_ticker: r.ticker,
+        convictionScore: r.conviction,
+        mid: r.mid,
+        thetaAdjustedEV: r.ev,
+      })
+      return calculateCompositeScore(evaluation)
+    })
+
+    // Verify each row matches the formula
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]
+      expect(results[i]).toBe(expected(r.conviction, r.mid, r.ev))
+    }
+
+    // Verify descending order (composite ranking)
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1]).toBeGreaterThanOrEqual(results[i])
+    }
+  })
+
+  it('falls back to conviction when premium is null', () => {
+    const evaluation = makeEval({ convictionScore: 80, mid: undefined as unknown as number, thetaAdjustedEV: 20 })
+    expect(calculateCompositeScore(evaluation)).toBe(80)
+  })
+
+  it('falls back to conviction when premium is zero', () => {
+    const evaluation = makeEval({ convictionScore: 80, mid: 0, thetaAdjustedEV: 20 })
+    expect(calculateCompositeScore(evaluation)).toBe(80)
+  })
+
+  it('falls back to conviction when thetaAdjustedEV is null', () => {
+    const evaluation = makeEval({ convictionScore: 80, mid: 5, thetaAdjustedEV: undefined as unknown as number })
+    expect(calculateCompositeScore(evaluation)).toBe(80)
+  })
+
+  it('produces composite < conviction when EV is negative', () => {
+    const evaluation = makeEval({ convictionScore: 80, mid: 5.0, thetaAdjustedEV: -10 })
+    expect(calculateCompositeScore(evaluation)).toBeLessThan(80)
+  })
+
+  it('uses custom alpha parameter', () => {
+    const evaluation = makeEval({ convictionScore: 80, mid: 2.0, thetaAdjustedEV: 20 })
+    const alpha0 = calculateCompositeScore(evaluation, 0)
+    const alpha2 = calculateCompositeScore(evaluation, 2)
+    expect(alpha0).toBe(80) // alpha=0 means no return% boost
+    expect(alpha2).toBeGreaterThan(calculateCompositeScore(evaluation, 1))
+  })
+})
+
+// ===========================================================================
+// sortByComposite
+// ===========================================================================
+describe('sortByComposite', () => {
+  it('sorts by composite score descending', () => {
+    const evals = [
+      makeEval({ evaluation_id: 'low', convictionScore: 80, mid: 5.0, thetaAdjustedEV: 5 }),
+      makeEval({ evaluation_id: 'high', convictionScore: 80, mid: 2.0, thetaAdjustedEV: 20 }),
+    ]
+    const sorted = sortByComposite(evals)
+    expect(sorted[0].evaluation_id).toBe('high')
+    expect(sorted[1].evaluation_id).toBe('low')
+  })
+
+  it('breaks ties by conviction descending', () => {
+    // Same composite but different conviction (arrange mid/EV to match composite)
+    const evals = [
+      makeEval({ evaluation_id: 'low-conv', convictionScore: 75, mid: 3.0, thetaAdjustedEV: 0 }),
+      makeEval({ evaluation_id: 'high-conv', convictionScore: 80, mid: 3.0, thetaAdjustedEV: 0 }),
+    ]
+    const sorted = sortByComposite(evals)
+    expect(sorted[0].evaluation_id).toBe('high-conv')
+  })
+
+  it('breaks conviction ties by thetaAdjustedEV descending', () => {
+    const evals = [
+      makeEval({ evaluation_id: 'low-ev', convictionScore: 80, mid: undefined as unknown as number, thetaAdjustedEV: 10 }),
+      makeEval({ evaluation_id: 'high-ev', convictionScore: 80, mid: undefined as unknown as number, thetaAdjustedEV: 20 }),
+    ]
+    const sorted = sortByComposite(evals)
+    expect(sorted[0].evaluation_id).toBe('high-ev')
+  })
+
+  it('does not mutate original array', () => {
+    const evals = [
+      makeEval({ evaluation_id: 'a', convictionScore: 70 }),
+      makeEval({ evaluation_id: 'b', convictionScore: 90 }),
+    ]
+    sortByComposite(evals)
+    expect(evals[0].evaluation_id).toBe('a')
+  })
+
+  it('handles empty array', () => {
+    expect(sortByComposite([])).toEqual([])
   })
 })
 
