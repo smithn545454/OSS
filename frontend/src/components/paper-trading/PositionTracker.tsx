@@ -52,8 +52,8 @@ export default function PositionTracker({ positions }: PositionTrackerProps) {
 
       switch (sortField) {
         case 'underlying_ticker':
-          aVal = a.underlying_ticker
-          bVal = b.underlying_ticker
+          aVal = a.underlying_ticker ?? ''
+          bVal = b.underlying_ticker ?? ''
           break
         case 'conviction_score':
           aVal = a.conviction_score ?? -1
@@ -268,8 +268,8 @@ function ExpandedPanel({ position: pos }: { position: EnrichedPosition }) {
             <div
               key={i}
               className={clsx('h-2.5 w-2.5 rounded-sm', {
-                'bg-oss-accent': i < pos.convergence_count,
-                'bg-oss-border': i >= pos.convergence_count,
+                'bg-oss-accent': i < (pos.convergence_count ?? 0),
+                'bg-oss-border': i >= (pos.convergence_count ?? 0),
               })}
             />
           ))}

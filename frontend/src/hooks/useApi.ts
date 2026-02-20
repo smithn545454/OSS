@@ -573,3 +573,28 @@ export function useAnalyzePosition() {
     },
   })
 }
+
+// Pre-aggregated summary metrics (instant KPI response)
+export function useSummaryMetrics() {
+  return useQuery({
+    queryKey: ['paper-trading', 'summary-metrics'] as const,
+    queryFn: api.getSummaryMetrics,
+    staleTime: 30000,
+  })
+}
+
+// Paginated positions with server-side filtering
+export function usePaginatedPositions(params: {
+  status?: string
+  limit?: number
+  cursor?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+} = {}) {
+  return useQuery({
+    queryKey: ['paper-trading', 'positions-paginated', params] as const,
+    queryFn: () => api.getPositionsPaginated(params),
+    staleTime: 15000,
+  })
+}

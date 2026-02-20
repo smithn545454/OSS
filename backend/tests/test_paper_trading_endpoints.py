@@ -110,9 +110,13 @@ class TestAnalyzePositionReturnsText:
         pos = _make_pos("pos-analyze-1", pnl=8.0)
 
         with patch(
-            "app.db.tables.PaperPositionTable.list_all",
+            "app.db.tables.PaperPositionTable.list_open",
             new_callable=AsyncMock,
             return_value=[pos],
+        ), patch(
+            "app.db.tables.PaperPositionTable.list_closed",
+            new_callable=AsyncMock,
+            return_value=[],
         ), patch(
             "app.db.tables.PaperPositionTable.update",
             new_callable=AsyncMock,
@@ -173,11 +177,15 @@ class TestAnalyzePositionUsesCache:
             ai_analysis_at=recent_time,
         )
 
-        # analyze_position does a local import of PaperPositionTable from app.db.tables
+        # analyze_position searches open then closed partitions
         with patch(
-            "app.db.tables.PaperPositionTable.list_all",
+            "app.db.tables.PaperPositionTable.list_open",
             new_callable=AsyncMock,
             return_value=[pos],
+        ), patch(
+            "app.db.tables.PaperPositionTable.list_closed",
+            new_callable=AsyncMock,
+            return_value=[],
         ):
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"

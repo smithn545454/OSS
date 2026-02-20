@@ -218,6 +218,31 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for daily paper trading position updates
+        # Runs once daily at 4:15 PM ET (21:15 UTC) after market close on weekdays
+        self.paper_update_rule = events.Rule(
+            self,
+            "PaperTradingUpdateRule",
+            rule_name=f"{project_name}-{env_name}-paper-trading-update",
+            description="Update paper trading positions daily after market close",
+            schedule=events.Schedule.cron(
+                minute="15",
+                hour="21",
+                week_day="MON-FRI",
+            ),
+            enabled=True,
+        )
+
+        self.paper_update_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "paper_trading_update",
+                }),
+            )
+        )
+
         # Outputs
         CfnOutput(
             self,

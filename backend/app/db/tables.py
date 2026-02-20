@@ -487,10 +487,35 @@ class PaperPositionTable:
         status = getattr(position.status, "value", position.status)
         item["PK"] = f"POS#{status}"
         item["SK"] = f"{position.entry_date}#{position.position_id}"
-        # GSI for evaluation_id lookups (duplicate prevention)
+        # GSI1 for evaluation_id lookups (duplicate prevention)
         item["GSI1PK"] = f"EVAL#{position.evaluation_id}"
         item["GSI1SK"] = position.entry_date
+        # GSI2 for option_ticker dedup (prevents duplicate open positions)
+        item["GSI2PK"] = f"OPT#{position.option_ticker}"
+        item["GSI2SK"] = f"{status}#{position.entry_date}"
         await db.put_item(PaperPositionTable.TABLE, item)
+
+    @staticmethod
+    async def has_open_position(option_ticker: str) -> bool:
+        """Check if an open position exists for this option contract.
+
+        Uses GSI2 to query by option_ticker with SK prefix OPEN.
+
+        Args:
+            option_ticker: The option contract ticker (e.g., O:AAPL260320C00170000)
+
+        Returns:
+            True if an open position exists for this contract
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            PaperPositionTable.TABLE,
+            f"OPT#{option_ticker}",
+            sk_prefix="OPEN",
+            limit=1,
+            index_name="GSI2",
+        )
+        return len(items) > 0
 
     @staticmethod
     async def list_open(limit: Optional[int] = None) -> list[PaperPosition]:
@@ -628,28 +653,45 @@ class PaperPositionTable:
         # Calculate final P&L
         final_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
 
-        # Create closed position
+        # Create closed position, preserving enrichment fields
         now = datetime.now(timezone.utc).isoformat()
-        closed_position = PaperPosition(
-            position_id=position.position_id,
-            evaluation_id=position.evaluation_id,
-            option_ticker=position.option_ticker,
-            entry_price=position.entry_price,
-            entry_date=position.entry_date,
-            quantity=position.quantity,
-            verdict_at_entry=position.verdict_at_entry,
-            quality_tier_at_entry=position.quality_tier_at_entry,
-            exit_price=exit_price,
-            exit_date=now[:10],  # YYYY-MM-DD
-            exit_reason=ExitReason(exit_reason),
-            current_price=exit_price,
-            current_pnl_pct=final_pnl_pct,
-            max_favorable_excursion=position.max_favorable_excursion,
-            max_adverse_excursion=position.max_adverse_excursion,
-            days_held=position.days_held,
-            status=PositionStatus.CLOSED,
-            last_updated=now,
-        )
+
+        # Build kwargs with enrichment fields carried over from open position
+        close_kwargs: dict[str, Any] = {
+            "position_id": position.position_id,
+            "evaluation_id": position.evaluation_id,
+            "option_ticker": position.option_ticker,
+            "entry_price": position.entry_price,
+            "entry_date": position.entry_date,
+            "quantity": position.quantity,
+            "verdict_at_entry": position.verdict_at_entry,
+            "quality_tier_at_entry": position.quality_tier_at_entry,
+            "exit_price": exit_price,
+            "exit_date": now[:10],
+            "exit_reason": ExitReason(exit_reason),
+            "current_price": exit_price,
+            "current_pnl_pct": final_pnl_pct,
+            "max_favorable_excursion": position.max_favorable_excursion,
+            "max_adverse_excursion": position.max_adverse_excursion,
+            "days_held": position.days_held,
+            "status": PositionStatus.CLOSED,
+            "last_updated": now,
+        }
+
+        # Carry over enrichment fields if present
+        enrichment_fields = [
+            "underlying_ticker", "scanner_source", "convergence_count",
+            "conviction_score", "pillar_directional", "pillar_volatility",
+            "pillar_structure", "strike", "option_type", "expiration_date",
+            "dte_at_entry", "dte_bucket", "entry_delta", "entry_iv",
+            "entry_theta", "gate_margin", "theta_adj_ev",
+        ]
+        for field in enrichment_fields:
+            val = getattr(position, field, None)
+            if val is not None:
+                close_kwargs[field] = val
+
+        closed_position = PaperPosition(**close_kwargs)
 
         # STEP 1: Write closed position FIRST (safe — creates duplicate at worst)
         await PaperPositionTable.put(closed_position)
@@ -660,6 +702,102 @@ class PaperPositionTable:
         await db.delete_item(PaperPositionTable.TABLE, old_pk, old_sk)
 
         return closed_position
+
+    @staticmethod
+    async def list_open_paginated(
+        limit: int = 50,
+        cursor: Optional[str] = None,
+        filter_expression: Optional[str] = None,
+        filter_values: Optional[dict[str, Any]] = None,
+        filter_names: Optional[dict[str, str]] = None,
+        sk_condition: Optional[dict[str, Any]] = None,
+    ) -> tuple[list[PaperPosition], Optional[str]]:
+        """List open positions with cursor-based pagination."""
+        db = get_dynamodb()
+        items, next_cursor = await db.query_paginated(
+            PaperPositionTable.TABLE,
+            "POS#OPEN",
+            limit=limit,
+            cursor=cursor,
+            scan_forward=False,
+            filter_expression=filter_expression,
+            filter_values=filter_values,
+            filter_names=filter_names,
+            sk_condition=sk_condition,
+        )
+        positions = []
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+            positions.append(PaperPosition(**item))
+        return positions, next_cursor
+
+    @staticmethod
+    async def list_closed_paginated(
+        limit: int = 50,
+        cursor: Optional[str] = None,
+        filter_expression: Optional[str] = None,
+        filter_values: Optional[dict[str, Any]] = None,
+        filter_names: Optional[dict[str, str]] = None,
+        sk_condition: Optional[dict[str, Any]] = None,
+    ) -> tuple[list[PaperPosition], Optional[str]]:
+        """List closed positions with cursor-based pagination."""
+        db = get_dynamodb()
+        items, next_cursor = await db.query_paginated(
+            PaperPositionTable.TABLE,
+            "POS#CLOSED",
+            limit=limit,
+            cursor=cursor,
+            scan_forward=False,
+            filter_expression=filter_expression,
+            filter_values=filter_values,
+            filter_names=filter_names,
+            sk_condition=sk_condition,
+        )
+        positions = []
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+            positions.append(PaperPosition(**item))
+        return positions, next_cursor
+
+    @staticmethod
+    async def count_open() -> int:
+        """Count open positions (used for total_count in pagination)."""
+        db = get_dynamodb()
+        table = db.get_table(PaperPositionTable.TABLE)
+        count = 0
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": "POS#OPEN"},
+            "Select": "COUNT",
+        }
+        while True:
+            response = table.query(**query_kwargs)
+            count += response.get("Count", 0)
+            if "LastEvaluatedKey" not in response:
+                break
+            query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        return count
+
+    @staticmethod
+    async def count_closed() -> int:
+        """Count closed positions."""
+        db = get_dynamodb()
+        table = db.get_table(PaperPositionTable.TABLE)
+        count = 0
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": "POS#CLOSED"},
+            "Select": "COUNT",
+        }
+        while True:
+            response = table.query(**query_kwargs)
+            count += response.get("Count", 0)
+            if "LastEvaluatedKey" not in response:
+                break
+            query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        return count
 
     @staticmethod
     async def list_all(limit: Optional[int] = None) -> list[PaperPosition]:

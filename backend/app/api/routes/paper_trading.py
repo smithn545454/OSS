@@ -43,6 +43,53 @@ class UpdateResponse(BaseModel):
     errors: int
 
 
+def _enum_val(v: Any) -> Any:
+    """Extract .value from an enum, or return the value as-is."""
+    return v.value if hasattr(v, "value") else v
+
+
+def _position_to_dict(pos: Any) -> dict[str, Any]:
+    """Convert a PaperPosition to a JSON-safe dict including enrichment fields."""
+    return {
+        "position_id": pos.position_id,
+        "evaluation_id": pos.evaluation_id,
+        "option_ticker": pos.option_ticker,
+        "entry_price": pos.entry_price,
+        "entry_date": pos.entry_date,
+        "quantity": pos.quantity,
+        "verdict_at_entry": str(_enum_val(pos.verdict_at_entry)),
+        "quality_tier_at_entry": str(_enum_val(pos.quality_tier_at_entry)) if pos.quality_tier_at_entry else None,
+        "exit_price": pos.exit_price,
+        "exit_date": pos.exit_date,
+        "exit_reason": str(_enum_val(pos.exit_reason)) if pos.exit_reason else None,
+        "current_price": pos.current_price,
+        "current_pnl_pct": round(pos.current_pnl_pct, 2),
+        "max_favorable_excursion": round(pos.max_favorable_excursion, 2),
+        "max_adverse_excursion": round(pos.max_adverse_excursion, 2),
+        "days_held": pos.days_held,
+        "status": str(_enum_val(pos.status)),
+        "last_updated": pos.last_updated,
+        # Enrichment fields (may be None for legacy positions)
+        "underlying_ticker": pos.underlying_ticker,
+        "scanner_source": pos.scanner_source,
+        "convergence_count": pos.convergence_count,
+        "conviction_score": pos.conviction_score,
+        "pillar_directional": pos.pillar_directional,
+        "pillar_volatility": pos.pillar_volatility,
+        "pillar_structure": pos.pillar_structure,
+        "strike": pos.strike,
+        "option_type": pos.option_type,
+        "expiration_date": pos.expiration_date,
+        "dte_at_entry": pos.dte_at_entry,
+        "dte_bucket": pos.dte_bucket,
+        "entry_delta": pos.entry_delta,
+        "entry_iv": pos.entry_iv,
+        "entry_theta": pos.entry_theta,
+        "gate_margin": pos.gate_margin,
+        "theta_adj_ev": pos.theta_adj_ev,
+    }
+
+
 # ============================================================================
 # Position Endpoints
 # ============================================================================
@@ -51,92 +98,119 @@ class UpdateResponse(BaseModel):
 @router.get("/positions")
 async def list_positions(
     status: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 50,
+    cursor: Optional[str] = None,
+    verdict: Optional[str] = None,
+    scanner: Optional[str] = None,
+    period: Optional[str] = None,
 ) -> dict[str, Any]:
-    """List paper trading positions.
-    
+    """List paper trading positions with server-side filtering and pagination.
+
     Args:
-        status: Filter by status (open, closed, or all)
-        limit: Maximum positions to return
-        
-    Returns:
-        List of positions with metadata
+        status: Filter by status (open, closed, or all). Default: open.
+        limit: Page size (default 50, max 200)
+        cursor: Base64-encoded pagination cursor from previous response
+        verdict: Filter by verdict_at_entry (APPROVE, WATCH)
+        scanner: Filter by scanner_source
+        period: Filter by entry_date (7d, 14d, 30d, 90d)
     """
-    if status and status.lower() == "open":
-        positions = await PaperPositionTable.list_open(limit=limit)
-    elif status and status.lower() == "closed":
-        positions = await PaperPositionTable.list_closed(limit=limit)
+    limit = min(limit, 200)
+
+    # Build optional DynamoDB FilterExpression
+    filter_parts: list[str] = []
+    filter_values: dict[str, Any] = {}
+    filter_names: dict[str, str] = {}
+
+    if verdict:
+        filter_parts.append("#verdict = :verdict")
+        filter_names["#verdict"] = "verdict_at_entry"
+        filter_values[":verdict"] = verdict
+
+    if scanner:
+        filter_parts.append("#scanner = :scanner")
+        filter_names["#scanner"] = "scanner_source"
+        filter_values[":scanner"] = scanner
+
+    filter_expr = " AND ".join(filter_parts) if filter_parts else None
+
+    # Build SK condition for period filtering (SK = entry_date#position_id)
+    sk_condition = None
+    if period and period != "all":
+        from datetime import datetime as dt, timedelta, timezone as tz
+        days_map = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+        days = days_map.get(period)
+        if days:
+            cutoff = (dt.now(tz.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            sk_condition = {"gte": cutoff}
+
+    resolved_status = (status or "open").lower()
+
+    if resolved_status == "open":
+        positions, next_cursor = await PaperPositionTable.list_open_paginated(
+            limit=limit, cursor=cursor,
+            filter_expression=filter_expr,
+            filter_values=filter_values or None,
+            filter_names=filter_names or None,
+            sk_condition=sk_condition,
+        )
+    elif resolved_status == "closed":
+        positions, next_cursor = await PaperPositionTable.list_closed_paginated(
+            limit=limit, cursor=cursor,
+            filter_expression=filter_expr,
+            filter_values=filter_values or None,
+            filter_names=filter_names or None,
+            sk_condition=sk_condition,
+        )
     else:
-        positions = await PaperPositionTable.list_all(limit=limit)
-    
-    # Convert to dict for JSON serialization
-    position_dicts = []
-    for pos in positions:
-        pos_dict = {
-            "position_id": pos.position_id,
-            "evaluation_id": pos.evaluation_id,
-            "option_ticker": pos.option_ticker,
-            "entry_price": pos.entry_price,
-            "entry_date": pos.entry_date,
-            "quantity": pos.quantity,
-            "verdict_at_entry": str(pos.verdict_at_entry.value) if hasattr(pos.verdict_at_entry, 'value') else str(pos.verdict_at_entry),
-            "quality_tier_at_entry": str(pos.quality_tier_at_entry.value) if pos.quality_tier_at_entry and hasattr(pos.quality_tier_at_entry, 'value') else str(pos.quality_tier_at_entry) if pos.quality_tier_at_entry else None,
-            "exit_price": pos.exit_price,
-            "exit_date": pos.exit_date,
-            "exit_reason": str(pos.exit_reason.value) if pos.exit_reason and hasattr(pos.exit_reason, 'value') else str(pos.exit_reason) if pos.exit_reason else None,
-            "current_price": pos.current_price,
-            "current_pnl_pct": round(pos.current_pnl_pct, 2),
-            "max_favorable_excursion": round(pos.max_favorable_excursion, 2),
-            "max_adverse_excursion": round(pos.max_adverse_excursion, 2),
-            "days_held": pos.days_held,
-            "status": str(pos.status.value) if hasattr(pos.status, 'value') else str(pos.status),
-            "last_updated": pos.last_updated,
-        }
-        position_dicts.append(pos_dict)
-    
+        # "all" — query both partitions sequentially
+        open_pos, open_cursor = await PaperPositionTable.list_open_paginated(
+            limit=limit, cursor=cursor,
+            filter_expression=filter_expr,
+            filter_values=filter_values or None,
+            filter_names=filter_names or None,
+            sk_condition=sk_condition,
+        )
+        remaining = limit - len(open_pos)
+        closed_pos: list = []
+        closed_cursor = None
+        if remaining > 0:
+            closed_pos, closed_cursor = await PaperPositionTable.list_closed_paginated(
+                limit=remaining,
+                filter_expression=filter_expr,
+                filter_values=filter_values or None,
+                filter_names=filter_names or None,
+                sk_condition=sk_condition,
+            )
+        positions = open_pos + closed_pos
+        next_cursor = open_cursor or closed_cursor
+
+    position_dicts = [_position_to_dict(pos) for pos in positions]
+
     return {
         "positions": position_dicts,
         "count": len(position_dicts),
-        "filter": {"status": status} if status else None,
+        "next_cursor": next_cursor,
+        "filter": {
+            "status": resolved_status,
+            "verdict": verdict,
+            "scanner": scanner,
+            "period": period,
+        },
     }
 
 
 @router.get("/positions/{position_id}")
 async def get_position(position_id: str) -> dict[str, Any]:
     """Get a specific position by ID.
-    
-    Args:
-        position_id: The position ID
-        
-    Returns:
-        Position details
+
+    Searches OPEN partition first, then CLOSED, avoiding a full table scan.
     """
-    # Search in both open and closed
-    all_positions = await PaperPositionTable.list_all()
-    
-    for pos in all_positions:
-        if pos.position_id == position_id:
-            return {
-                "position_id": pos.position_id,
-                "evaluation_id": pos.evaluation_id,
-                "option_ticker": pos.option_ticker,
-                "entry_price": pos.entry_price,
-                "entry_date": pos.entry_date,
-                "quantity": pos.quantity,
-                "verdict_at_entry": str(pos.verdict_at_entry.value) if hasattr(pos.verdict_at_entry, 'value') else str(pos.verdict_at_entry),
-                "quality_tier_at_entry": str(pos.quality_tier_at_entry.value) if pos.quality_tier_at_entry and hasattr(pos.quality_tier_at_entry, 'value') else str(pos.quality_tier_at_entry) if pos.quality_tier_at_entry else None,
-                "exit_price": pos.exit_price,
-                "exit_date": pos.exit_date,
-                "exit_reason": str(pos.exit_reason.value) if pos.exit_reason and hasattr(pos.exit_reason, 'value') else str(pos.exit_reason) if pos.exit_reason else None,
-                "current_price": pos.current_price,
-                "current_pnl_pct": round(pos.current_pnl_pct, 2),
-                "max_favorable_excursion": round(pos.max_favorable_excursion, 2),
-                "max_adverse_excursion": round(pos.max_adverse_excursion, 2),
-                "days_held": pos.days_held,
-                "status": str(pos.status.value) if hasattr(pos.status, 'value') else str(pos.status),
-                "last_updated": pos.last_updated,
-            }
-    
+    for fetch_fn in [PaperPositionTable.list_open, PaperPositionTable.list_closed]:
+        positions = await fetch_fn()
+        for pos in positions:
+            if pos.position_id == position_id:
+                return _position_to_dict(pos)
+
     raise HTTPException(
         status_code=404,
         detail=f"Position not found: {position_id}",
@@ -182,7 +256,59 @@ async def close_position(
 
 
 # ============================================================================
-# Metrics Endpoints
+# Summary Metrics (Pre-Aggregated — Instant Response)
+# ============================================================================
+
+
+@router.get("/summary-metrics")
+async def get_summary_metrics() -> dict[str, Any]:
+    """Get pre-aggregated summary metrics for the KPI strip and dashboards.
+
+    Returns global summary, per-scanner, per-verdict, per-tier breakdowns,
+    and daily equity curve points. All data is pre-computed via atomic
+    counters — this endpoint does zero computation, just reads.
+    """
+    from app.paper_trading.metrics_aggregator import MetricsAggregator
+
+    summary = await MetricsAggregator.get_summary()
+    scanners = await MetricsAggregator.get_scanner_metrics()
+    verdicts = await MetricsAggregator.get_verdict_metrics()
+    tiers = await MetricsAggregator.get_tier_metrics()
+    equity_curve = await MetricsAggregator.get_daily_equity(days=90)
+
+    # Compute derived metrics from atomic counters
+    closed = summary.get("closed_count", 0)
+    wins = summary.get("win_count", 0)
+    losses = summary.get("loss_count", 0)
+    total_pnl = summary.get("total_pnl", 0)
+
+    win_rate = (wins / closed * 100) if closed > 0 else 0
+    avg_return = (total_pnl / closed) if closed > 0 else 0
+
+    return {
+        "global": {
+            "open_count": summary.get("open_count", 0),
+            "closed_count": closed,
+            "total_count": summary.get("total_count", 0),
+            "win_count": wins,
+            "loss_count": losses,
+            "total_pnl": round(float(total_pnl), 2),
+            "win_rate": round(win_rate, 2),
+            "avg_return": round(float(avg_return), 2),
+            "last_updated": summary.get("last_updated"),
+        },
+        "by_scanner": {s.pop("SK", s.get("scanner_type", "?")): s for s in scanners}
+        if scanners else {},
+        "by_verdict": {v.pop("SK", v.get("verdict", "?")): v for v in verdicts}
+        if verdicts else {},
+        "by_tier": {t.pop("SK", t.get("tier", "?")): t for t in tiers}
+        if tiers else {},
+        "equity_curve": equity_curve,
+    }
+
+
+# ============================================================================
+# Metrics Endpoints (Legacy — Computed on Read)
 # ============================================================================
 
 
@@ -351,12 +477,14 @@ async def analyze_position(position_id: str) -> dict[str, Any]:
     from app.llm.provider import get_provider
     from app.paper_trading.position_manager import extract_underlying_from_option_ticker
 
-    # Find the position
-    all_positions = await PaperPositionTable.list_all()
+    # Find the position (search open then closed to avoid full scan)
     position = None
-    for p in all_positions:
-        if p.position_id == position_id:
-            position = p
+    for fetch_fn in [PaperPositionTable.list_open, PaperPositionTable.list_closed]:
+        for p in await fetch_fn():
+            if p.position_id == position_id:
+                position = p
+                break
+        if position:
             break
 
     if not position:

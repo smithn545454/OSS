@@ -382,6 +382,25 @@ class PaperPosition(OSSBaseModel):
     ai_analysis: Optional[str] = None
     ai_analysis_at: Optional[str] = None
 
+    # Denormalized enrichment fields (populated at creation, avoids eval join)
+    underlying_ticker: Optional[str] = None
+    scanner_source: Optional[str] = None
+    convergence_count: Optional[int] = None
+    conviction_score: Optional[float] = None
+    pillar_directional: Optional[float] = None
+    pillar_volatility: Optional[float] = None
+    pillar_structure: Optional[float] = None
+    strike: Optional[float] = None
+    option_type: Optional[str] = None
+    expiration_date: Optional[str] = None
+    dte_at_entry: Optional[int] = None
+    dte_bucket: Optional[str] = None
+    entry_delta: Optional[float] = None
+    entry_iv: Optional[float] = None
+    entry_theta: Optional[float] = None
+    gate_margin: Optional[float] = None
+    theta_adj_ev: Optional[float] = None
+
 
 # ============================================================================
 # Pipeline Run & Stage Events

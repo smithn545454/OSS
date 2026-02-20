@@ -198,6 +198,109 @@ class DynamoDBClient:
         items = response.get("Items", [])
         return [self.convert_from_dynamodb(item) for item in items]
 
+    async def query_paginated(
+        self,
+        table_suffix: str,
+        pk: str,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+        scan_forward: bool = False,
+        sk_prefix: Optional[str] = None,
+        sk_condition: Optional[dict[str, Any]] = None,
+        index_name: Optional[str] = None,
+        filter_expression: Optional[str] = None,
+        filter_values: Optional[dict[str, Any]] = None,
+        filter_names: Optional[dict[str, str]] = None,
+    ) -> tuple[list[dict[str, Any]], Optional[str]]:
+        """Query with cursor-based pagination.
+
+        Args:
+            table_suffix: Table suffix
+            pk: Partition key value
+            limit: Page size
+            cursor: Base64-encoded LastEvaluatedKey from previous page
+            scan_forward: Sort direction
+            sk_prefix: Optional SK begins_with prefix
+            sk_condition: Optional SK condition dict
+            index_name: Optional GSI name
+            filter_expression: Optional DynamoDB FilterExpression string
+            filter_values: ExpressionAttributeValues for the filter
+            filter_names: ExpressionAttributeNames for the filter
+
+        Returns:
+            Tuple of (items, next_cursor). next_cursor is None if no more pages.
+        """
+        import base64
+        import json as json_mod
+
+        table = self.get_table(table_suffix)
+
+        key_condition = "PK = :pk"
+        expression_values: dict[str, Any] = {":pk": pk}
+
+        if sk_prefix:
+            key_condition += " AND begins_with(SK, :sk_prefix)"
+            expression_values[":sk_prefix"] = sk_prefix
+        elif sk_condition:
+            if "gte" in sk_condition:
+                key_condition += " AND SK >= :sk_start"
+                expression_values[":sk_start"] = sk_condition["gte"]
+            elif "lte" in sk_condition:
+                key_condition += " AND SK <= :sk_end"
+                expression_values[":sk_end"] = sk_condition["lte"]
+            elif "between" in sk_condition:
+                key_condition += " AND SK BETWEEN :sk_start AND :sk_end"
+                expression_values[":sk_start"] = sk_condition["between"][0]
+                expression_values[":sk_end"] = sk_condition["between"][1]
+
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": key_condition,
+            "ExpressionAttributeValues": expression_values,
+            "ScanIndexForward": scan_forward,
+            "Limit": limit,
+        }
+
+        if index_name:
+            query_kwargs["IndexName"] = index_name
+            if index_name.startswith("GSI1"):
+                query_kwargs["KeyConditionExpression"] = query_kwargs[
+                    "KeyConditionExpression"
+                ].replace("PK", "GSI1PK").replace("SK", "GSI1SK")
+            elif index_name.startswith("GSI2"):
+                query_kwargs["KeyConditionExpression"] = query_kwargs[
+                    "KeyConditionExpression"
+                ].replace("PK", "GSI2PK").replace("SK", "GSI2SK")
+
+        if filter_expression:
+            query_kwargs["FilterExpression"] = filter_expression
+            if filter_values:
+                query_kwargs["ExpressionAttributeValues"].update(
+                    self._convert_floats(filter_values)
+                )
+            if filter_names:
+                query_kwargs["ExpressionAttributeNames"] = filter_names
+
+        if cursor:
+            try:
+                decoded = json_mod.loads(base64.b64decode(cursor))
+                query_kwargs["ExclusiveStartKey"] = decoded
+            except Exception:
+                pass  # Invalid cursor, start from beginning
+
+        response = table.query(**query_kwargs)
+        items = [self.convert_from_dynamodb(item) for item in response.get("Items", [])]
+
+        next_cursor = None
+        if "LastEvaluatedKey" in response:
+            raw_key = response["LastEvaluatedKey"]
+            # Convert Decimals to JSON-safe types
+            safe_key = self.convert_from_dynamodb(dict(raw_key))
+            next_cursor = base64.b64encode(
+                json_mod.dumps(safe_key).encode()
+            ).decode()
+
+        return items, next_cursor
+
     async def update_item(
         self,
         table_suffix: str,

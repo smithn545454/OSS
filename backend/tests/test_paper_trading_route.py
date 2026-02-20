@@ -43,11 +43,12 @@ class TestListPositions:
     @pytest.mark.asyncio
     async def test_list_all(self, app):
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_all = AsyncMock(return_value=[])
+            mock_table.list_open_paginated = AsyncMock(return_value=([], None))
+            mock_table.list_closed_paginated = AsyncMock(return_value=([], None))
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                resp = await client.get("/api/paper-trading/positions")
+                resp = await client.get("/api/paper-trading/positions?status=all")
             assert resp.status_code == 200
             assert resp.json()["count"] == 0
 
@@ -55,7 +56,7 @@ class TestListPositions:
     async def test_list_open(self, app):
         pos = _make_pos()
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_open = AsyncMock(return_value=[pos])
+            mock_table.list_open_paginated = AsyncMock(return_value=([pos], None))
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -66,7 +67,7 @@ class TestListPositions:
     @pytest.mark.asyncio
     async def test_list_closed(self, app):
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_closed = AsyncMock(return_value=[])
+            mock_table.list_closed_paginated = AsyncMock(return_value=([], None))
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -80,7 +81,8 @@ class TestGetPosition:
     async def test_position_found(self, app):
         pos = _make_pos("p-found")
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_all = AsyncMock(return_value=[pos])
+            mock_table.list_open = AsyncMock(return_value=[pos])
+            mock_table.list_closed = AsyncMock(return_value=[])
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -91,7 +93,8 @@ class TestGetPosition:
     @pytest.mark.asyncio
     async def test_position_not_found(self, app):
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_all = AsyncMock(return_value=[])
+            mock_table.list_open = AsyncMock(return_value=[])
+            mock_table.list_closed = AsyncMock(return_value=[])
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:

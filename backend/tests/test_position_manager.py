@@ -77,8 +77,11 @@ class TestCreatePositionFromEvaluation:
 
     @pytest.mark.asyncio
     async def test_creates_position(self):
-        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table:
+        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table, \
+             patch("app.paper_trading.metrics_aggregator.MetricsAggregator.on_position_opened",
+                   new_callable=AsyncMock):
             mock_table.get_by_evaluation_id = AsyncMock(return_value=None)
+            mock_table.has_open_position = AsyncMock(return_value=False)
             mock_table.put = AsyncMock()
 
             result = await create_position_from_evaluation(
@@ -104,8 +107,11 @@ class TestCreatePositionFromEvaluation:
 
     @pytest.mark.asyncio
     async def test_with_quality_tier(self):
-        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table:
+        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table, \
+             patch("app.paper_trading.metrics_aggregator.MetricsAggregator.on_position_opened",
+                   new_callable=AsyncMock):
             mock_table.get_by_evaluation_id = AsyncMock(return_value=None)
+            mock_table.has_open_position = AsyncMock(return_value=False)
             mock_table.put = AsyncMock()
 
             result = await create_position_from_evaluation(
@@ -131,8 +137,11 @@ class TestCreatePositionsFromDecisions:
             "e3": _decision("e3", Verdict.REJECT),
         }
 
-        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table:
+        with patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table, \
+             patch("app.paper_trading.metrics_aggregator.MetricsAggregator.on_position_opened",
+                   new_callable=AsyncMock):
             mock_table.get_by_evaluation_id = AsyncMock(return_value=None)
+            mock_table.has_open_position = AsyncMock(return_value=False)
             mock_table.put = AsyncMock()
 
             result = await create_positions_from_decisions(evals, decisions)

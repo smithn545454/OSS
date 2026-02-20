@@ -45,6 +45,8 @@ import type {
   PaperTradingExitsResponse,
   AIInsightsResponse,
   UpdatePositionsResponse,
+  PaginatedPositionsResponse,
+  SummaryMetricsResponse,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -444,6 +446,28 @@ export async function triggerUVScan(): Promise<{ run_id: string; status: string;
 // ============================================================================
 // Paper Trading Workstation API
 // ============================================================================
+
+export async function getSummaryMetrics(): Promise<SummaryMetricsResponse> {
+  return fetchApi<SummaryMetricsResponse>('/api/paper-trading/summary-metrics')
+}
+
+export async function getPositionsPaginated(params: {
+  status?: string
+  limit?: number
+  cursor?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+} = {}): Promise<PaginatedPositionsResponse> {
+  const qs = new URLSearchParams()
+  if (params.status) qs.set('status', params.status)
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.cursor) qs.set('cursor', params.cursor)
+  if (params.verdict) qs.set('verdict', params.verdict)
+  if (params.scanner) qs.set('scanner', params.scanner)
+  if (params.period) qs.set('period', params.period)
+  return fetchApi<PaginatedPositionsResponse>(`/api/paper-trading/positions?${qs}`)
+}
 
 export async function getPaperTradingSummary(): Promise<PaperTradingSummary> {
   return fetchApi<PaperTradingSummary>('/api/paper-trading/summary')

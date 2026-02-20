@@ -87,8 +87,8 @@ export default function ScoreCalibration({ positions }: ScoreCalibrationProps) {
     },
     {
       axis: 'Convergence',
-      winners: avg(winners, (p) => (p.convergence_count / 4) * 100),
-      losers: avg(losers, (p) => (p.convergence_count / 4) * 100),
+      winners: avg(winners, (p) => ((p.convergence_count ?? 0) / 4) * 100),
+      losers: avg(losers, (p) => ((p.convergence_count ?? 0) / 4) * 100),
     },
     {
       axis: 'Theta-Adj EV',

@@ -31,6 +31,8 @@ def _mock_pos_table():
     mock.list_closed = AsyncMock(return_value=[])
     mock.list_by_status = AsyncMock(return_value=[])
     mock.list_all = AsyncMock(return_value=[])
+    mock.list_open_paginated = AsyncMock(return_value=([], None))
+    mock.list_closed_paginated = AsyncMock(return_value=([], None))
     mock.get = AsyncMock(return_value=None)
     return mock
 

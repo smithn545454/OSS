@@ -2,12 +2,12 @@
  * Paper Trading Workstation page.
  *
  * Four tabs: Performance Overview, Position Tracker, Score Calibration, AI Strategy Advisor.
- * Uses client-side join of positions with evaluations via useEnrichedPositions hook.
+ * Uses server-side filtering and pre-aggregated metrics.
  */
 
 import { useState } from 'react'
 import clsx from 'clsx'
-import { RefreshCw, Sparkles } from 'lucide-react'
+import { Clock, Sparkles, RefreshCw } from 'lucide-react'
 import FilterBar, { useFilterParams } from '@/components/paper-trading/FilterBar'
 import KPIStrip from '@/components/paper-trading/KPIStrip'
 import PerformanceOverview from '@/components/paper-trading/PerformanceOverview'
@@ -15,7 +15,7 @@ import PositionTracker from '@/components/paper-trading/PositionTracker'
 import ScoreCalibration from '@/components/paper-trading/ScoreCalibration'
 import AIStrategyAdvisor from '@/components/paper-trading/AIStrategyAdvisor'
 import { useEnrichedPositions } from '@/hooks/useEnrichedPositions'
-import { useUpdatePositions } from '@/hooks/useApi'
+import { useSummaryMetrics } from '@/hooks/useApi'
 
 const TABS = [
   { id: 'overview', label: 'Performance Overview' },
@@ -26,10 +26,26 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
+function formatLastSynced(iso: string | null | undefined): string {
+  if (!iso) return 'Never'
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return 'Just now'
+    if (diffMin < 60) return `${diffMin}m ago`
+    const diffHr = Math.floor(diffMin / 60)
+    if (diffHr < 24) return `${diffHr}h ago`
+    return d.toLocaleDateString()
+  } catch {
+    return iso
+  }
+}
+
 export default function PaperTrading() {
   const [filters, setFilters] = useFilterParams()
   const [activeTab, setActiveTab] = useState<TabId>('overview')
-  const updatePositions = useUpdatePositions()
 
   const { enrichedPositions, isLoading, error, rawMetrics } = useEnrichedPositions({
     period: filters.period,
@@ -38,9 +54,8 @@ export default function PaperTrading() {
     status: filters.status,
   })
 
-  const handleSync = () => {
-    updatePositions.mutate()
-  }
+  const summaryMetrics = useSummaryMetrics()
+  const lastSynced = summaryMetrics.data?.global?.last_updated
 
   return (
     <div className="space-y-6">
@@ -57,18 +72,10 @@ export default function PaperTrading() {
           <span className="text-xs text-oss-muted">
             {enrichedPositions.length} position{enrichedPositions.length !== 1 ? 's' : ''}
           </span>
-          <button
-            onClick={handleSync}
-            disabled={updatePositions.isPending}
-            className="flex items-center gap-1.5 rounded-lg border border-oss-border bg-oss-surface px-3 py-2 text-xs font-medium text-oss-text hover:bg-oss-border transition-colors disabled:opacity-50"
-          >
-            <RefreshCw
-              className={clsx('h-3.5 w-3.5', {
-                'animate-spin': updatePositions.isPending,
-              })}
-            />
-            {updatePositions.isPending ? 'Syncing...' : 'Sync Prices'}
-          </button>
+          <span className="flex items-center gap-1 text-xs text-oss-muted">
+            <Clock className="h-3 w-3" />
+            Synced: {formatLastSynced(lastSynced)}
+          </span>
         </div>
       </div>
 

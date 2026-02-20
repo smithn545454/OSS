@@ -557,20 +557,106 @@ async def _run_scheduled_scan() -> dict[str, Any]:
 
 
 async def _run_paper_update() -> dict[str, Any]:
-    """Run daily paper trading position update."""
-    from app.paper_trading.position_manager import update_open_positions
+    """Coordinator: fan out paper trading position updates to worker chunks.
+
+    If the number of open positions exceeds CHUNK_SIZE, dispatches workers
+    via async Lambda invocations. Otherwise processes directly.
+    """
+    import boto3
+    from app.db.tables import PaperPositionTable
+
+    logger.info("Paper update coordinator starting")
+
+    try:
+        # Collect all open position IDs
+        open_positions = await PaperPositionTable.list_open()
+        if not open_positions:
+            logger.info("No open positions to update")
+            return {"status": "success", "positions_updated": 0}
+
+        position_ids = [p.position_id for p in open_positions]
+        total = len(position_ids)
+        logger.info(f"Paper update: {total} open positions")
+
+        chunk_size = 50  # Positions per worker
+        if total <= chunk_size:
+            # Small enough to process directly
+            return await _run_paper_update_worker(position_ids)
+
+        # Fan out to workers
+        chunks = _chunk_list(position_ids, chunk_size)
+        function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+        lambda_client = boto3.client("lambda")
+
+        dispatched = 0
+        errors: list[str] = []
+
+        for idx, chunk in enumerate(chunks):
+            if idx > 0:
+                time.sleep(3)  # Stagger workers
+
+            payload = {
+                "source": "oss.scheduler",
+                "action": "paper_update_worker",
+                "position_ids": chunk,
+                "chunk_index": idx,
+            }
+
+            try:
+                lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+                dispatched += 1
+            except Exception as e:
+                errors.append(f"Failed to dispatch chunk {idx}: {e}")
+
+        return {
+            "status": "success",
+            "mode": "coordinator",
+            "total_positions": total,
+            "chunks_dispatched": dispatched,
+            "errors": errors if errors else None,
+        }
+
+    except Exception as e:
+        logger.error(f"Paper update coordinator failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+async def _run_paper_update_worker(
+    position_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Worker: update a chunk of positions with current prices."""
+    from app.paper_trading.batch_updater import update_position_chunk
     from app.services.polygon import PolygonClient
 
-    async with PolygonClient() as polygon:
-        results = await update_open_positions(polygon)
+    if not position_ids:
+        # Fallback: update all open positions (legacy mode)
+        from app.paper_trading.position_manager import update_open_positions
+        async with PolygonClient() as polygon:
+            results = await update_open_positions(polygon)
+        exits = sum(1 for r in results if r.exit_triggered)
+        errors = sum(1 for r in results if r.error)
+        return {
+            "status": "success",
+            "positions_updated": len(results),
+            "exits_triggered": exits,
+            "errors": errors,
+        }
 
-    exits = sum(1 for r in results if r.exit_triggered)
-    errors = sum(1 for r in results if r.error)
+    logger.info(f"Paper update worker processing {len(position_ids)} positions")
+
+    async with PolygonClient() as polygon:
+        result = await update_position_chunk(position_ids, polygon)
+
     return {
         "status": "success",
-        "positions_updated": len(results),
-        "exits_triggered": exits,
-        "errors": errors,
+        "mode": "worker",
+        "positions_processed": result.positions_processed,
+        "exits_triggered": result.exits_triggered,
+        "errors": result.errors,
     }
 
 
@@ -615,8 +701,23 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             ))
 
         elif action == "paper_update":
-            # Paper trading daily update: fetch prices, update positions
+            # Paper trading daily update: coordinator dispatches worker chunks
             logger.info("Received paper_update event from EventBridge")
+            return asyncio.run(_run_paper_update())
+
+        elif action == "paper_update_worker":
+            # Worker: process a chunk of position IDs
+            position_ids = event.get("position_ids", [])
+            chunk_idx = event.get("chunk_index", 0)
+            logger.info(
+                f"Paper update worker chunk {chunk_idx} "
+                f"({len(position_ids)} positions)"
+            )
+            return asyncio.run(_run_paper_update_worker(position_ids))
+
+        elif action == "paper_trading_update":
+            # Alias for paper_update (used by new EventBridge rule)
+            logger.info("Received paper_trading_update event from EventBridge")
             return asyncio.run(_run_paper_update())
 
         else:

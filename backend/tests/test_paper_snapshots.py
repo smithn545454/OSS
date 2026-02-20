@@ -223,25 +223,22 @@ class TestPaperUpdateHandlerEvent:
             "action": "paper_update",
         }
 
+        mock_result = {
+            "status": "success",
+            "mode": "direct",
+            "positions_updated": 0,
+            "exits_triggered": 0,
+            "errors": 0,
+        }
+
         with patch(
-            "app.paper_trading.position_manager.update_open_positions",
+            "app.main._run_paper_update",
             new_callable=AsyncMock,
-        ) as mock_update, patch(
-            "app.services.polygon.PolygonClient"
-        ) as MockPolygonClass:
-            # Set up the async context manager mock
-            mock_polygon_instance = AsyncMock()
-            MockPolygonClass.return_value.__aenter__ = AsyncMock(
-                return_value=mock_polygon_instance
-            )
-            MockPolygonClass.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            # Return empty results (no positions)
-            mock_update.return_value = []
-
+            return_value=mock_result,
+        ) as mock_coordinator:
             result = handler(event, None)
 
             assert result["status"] == "success"
             assert result["positions_updated"] == 0
             assert result["exits_triggered"] == 0
-            mock_update.assert_called_once()
+            mock_coordinator.assert_called_once()

@@ -154,7 +154,7 @@ export interface Decision {
   decided_at: string
 }
 
-// Paper Position
+// Paper Position (includes denormalized enrichment fields from backend)
 export interface PaperPosition {
   position_id: string
   evaluation_id: string
@@ -174,27 +174,83 @@ export interface PaperPosition {
   days_held: number
   status: PositionStatus
   last_updated: string
-}
-
-// Enriched position (paper trading + evaluation join)
-export interface EnrichedPosition extends PaperPosition {
+  // Denormalized enrichment fields (may be null for legacy positions)
+  underlying_ticker: string | null
+  scanner_source: ScannerType | null
+  convergence_count: number | null
   conviction_score: number | null
   pillar_directional: number | null
   pillar_volatility: number | null
   pillar_structure: number | null
-  scanner_source: ScannerType | null
-  convergence_count: number
-  underlying_ticker: string
   strike: number | null
-  option_type_parsed: 'CALL' | 'PUT' | null
+  option_type: OptionType | null
   expiration_date: string | null
+  dte_at_entry: number | null
+  dte_bucket: string | null
   entry_delta: number | null
   entry_iv: number | null
   entry_theta: number | null
-  dte_at_entry: number | null
-  dte_bucket: string | null
   gate_margin: number | null
   theta_adj_ev: number | null
+}
+
+// Enriched position — now just an alias since enrichment is on PaperPosition
+export interface EnrichedPosition extends PaperPosition {
+  // Parsed fallback fields (used by frontend when denormalized fields are null)
+  option_type_parsed: 'CALL' | 'PUT' | null
+}
+
+// Paginated positions response from /api/paper-trading/positions
+export interface PaginatedPositionsResponse {
+  positions: PaperPosition[]
+  count: number
+  next_cursor: string | null
+  filter: {
+    status: string
+    verdict: string | null
+    scanner: string | null
+    period: string | null
+  }
+}
+
+// Pre-aggregated summary metrics from /api/paper-trading/summary-metrics
+export interface SummaryMetricsResponse {
+  global: {
+    open_count: number
+    closed_count: number
+    total_count: number
+    win_count: number
+    loss_count: number
+    total_pnl: number
+    win_rate: number
+    avg_return: number
+    last_updated: string | null
+  }
+  by_scanner: Record<string, {
+    count?: number
+    closed_count?: number
+    win_count?: number
+    loss_count?: number
+    total_pnl?: number
+  }>
+  by_verdict: Record<string, {
+    count?: number
+    closed_count?: number
+    win_count?: number
+    loss_count?: number
+    total_pnl?: number
+  }>
+  by_tier: Record<string, {
+    count?: number
+    closed_count?: number
+    win_count?: number
+    loss_count?: number
+    total_pnl?: number
+  }>
+  equity_curve: Array<{
+    daily_pnl: number
+    updated_at?: string
+  }>
 }
 
 // Equity curve / snapshots / analysis response types

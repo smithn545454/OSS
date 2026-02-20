@@ -418,12 +418,12 @@ def moto_dynamodb():
             BillingMode="PAY_PER_REQUEST",
         )
 
-        # Paper positions: GSI1
+        # Paper positions: GSI1 + GSI2
         db.create_table(
             TableName=f"{table_prefix}-paper-positions",
             KeySchema=pk_sk_schema["KeySchema"],
-            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
-            GlobalSecondaryIndexes=gsi1,
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs + gsi2_attrs,
+            GlobalSecondaryIndexes=gsi1 + gsi2,
             BillingMode="PAY_PER_REQUEST",
         )
 

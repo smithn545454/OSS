@@ -507,7 +507,7 @@ class TestPaperTradingErrorPaths:
     async def test_list_positions_open_filter(self, client):
         """GET /positions?status=open filters correctly."""
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_open = AsyncMock(return_value=[])
+            mock_table.list_open_paginated = AsyncMock(return_value=([], None))
             resp = await client.get("/api/paper-trading/positions?status=open")
         assert resp.status_code == 200
         assert resp.json()["count"] == 0
@@ -516,7 +516,7 @@ class TestPaperTradingErrorPaths:
     async def test_list_positions_closed_filter(self, client):
         """GET /positions?status=closed filters correctly."""
         with patch("app.api.routes.paper_trading.PaperPositionTable") as mock_table:
-            mock_table.list_closed = AsyncMock(return_value=[])
+            mock_table.list_closed_paginated = AsyncMock(return_value=([], None))
             resp = await client.get("/api/paper-trading/positions?status=closed")
         assert resp.status_code == 200
 

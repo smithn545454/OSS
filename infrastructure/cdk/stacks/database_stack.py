@@ -150,7 +150,7 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
-        # 6. Paper positions table
+        # 6. Paper positions table (GSI1 for evaluation_id, GSI2 for option_ticker dedup)
         self.paper_positions_table = dynamodb.Table(
             self,
             "PaperPositionsTable",
@@ -163,6 +163,24 @@ class DatabaseStack(Stack):
             ),
             billing_mode=billing_mode,
             removal_policy=removal_policy,
+        )
+        self.paper_positions_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+        self.paper_positions_table.add_global_secondary_index(
+            index_name="GSI2",
+            partition_key=dynamodb.Attribute(
+                name="GSI2PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI2SK", type=dynamodb.AttributeType.STRING
+            ),
         )
 
         # 7. Feature values table

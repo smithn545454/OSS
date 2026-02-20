@@ -52,11 +52,19 @@ async def create_position_from_evaluation(
     Returns:
         Created PaperPosition or None if position already exists
     """
-    # Check for duplicate (position already exists for this evaluation)
+    # Check for duplicate by evaluation_id
     existing = await PaperPositionTable.get_by_evaluation_id(evaluation.evaluation_id)
     if existing:
         logger.debug(
             f"Position already exists for evaluation {evaluation.evaluation_id}"
+        )
+        return None
+
+    # Check for duplicate by option_ticker (same contract already has an open position)
+    has_open = await PaperPositionTable.has_open_position(evaluation.option_ticker)
+    if has_open:
+        logger.debug(
+            f"Open position already exists for contract {evaluation.option_ticker}"
         )
         return None
     
@@ -68,10 +76,16 @@ async def create_position_from_evaluation(
         else:
             quality_tier = decision.quality_tier
     
-    # Create position
+    # Create position with denormalized enrichment fields
     now = datetime.now(timezone.utc).isoformat()
     entry_date = now[:10]  # YYYY-MM-DD
-    
+
+    # Extract scanner source from evaluation
+    scanner_source = getattr(evaluation, "scanner_source", None)
+
+    # Count convergence (number of scanner triggers from the opportunity)
+    convergence_count = 1  # At least the primary scanner
+
     position = PaperPosition(
         evaluation_id=evaluation.evaluation_id,
         option_ticker=evaluation.option_ticker,
@@ -87,6 +101,22 @@ async def create_position_from_evaluation(
         days_held=0,
         status=PositionStatus.OPEN,
         last_updated=now,
+        # Denormalized enrichment fields
+        underlying_ticker=evaluation.underlying_ticker,
+        scanner_source=scanner_source,
+        convergence_count=convergence_count,
+        conviction_score=decision.final_score,
+        pillar_directional=decision.directional_score,
+        pillar_volatility=decision.volatility_score,
+        pillar_structure=decision.structure_score,
+        strike=evaluation.strike,
+        option_type=evaluation.option_type,
+        expiration_date=evaluation.expiration_date,
+        dte_at_entry=evaluation.dte,
+        dte_bucket=evaluation.dte_bucket,
+        entry_delta=evaluation.delta,
+        entry_iv=evaluation.iv,
+        entry_theta=evaluation.theta,
     )
     
     # Persist position
@@ -95,7 +125,14 @@ async def create_position_from_evaluation(
         f"Created paper position for {evaluation.option_ticker} "
         f"(verdict={decision.verdict}, tier={quality_tier})"
     )
-    
+
+    # Update pre-aggregated metrics
+    try:
+        from app.paper_trading.metrics_aggregator import MetricsAggregator
+        await MetricsAggregator.on_position_opened(position)
+    except Exception as e:
+        logger.warning(f"Failed to update metrics on open: {e}")
+
     return position
 
 
@@ -206,7 +243,16 @@ async def update_position(
             f"Closed position {position.position_id} ({position.option_ticker}): "
             f"{exit_reason.value} at {current_pnl_pct:.1f}%"
         )
-        
+
+        # Update pre-aggregated metrics on close
+        try:
+            from app.paper_trading.metrics_aggregator import MetricsAggregator
+            # Set the final PnL on position for metric tracking
+            position.current_pnl_pct = current_pnl_pct
+            await MetricsAggregator.on_position_closed(position)
+        except Exception as e:
+            logger.warning(f"Failed to update metrics on close: {e}")
+
         return UpdateResult(
             position_id=position.position_id,
             option_ticker=position.option_ticker,
