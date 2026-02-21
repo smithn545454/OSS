@@ -9,6 +9,7 @@ import PipelineMonitor from './pages/PipelineMonitor'
 import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
 import PaperTrading from './pages/PaperTrading'
+import Opps from './pages/Opps'
 
 class EvaluationErrorBoundary extends Component<
   { children: ReactNode },
@@ -28,7 +29,7 @@ class EvaluationErrorBoundary extends Component<
       return (
         <div className="space-y-8">
           <Link
-            to="/opportunities"
+            to="/opps"
             className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-oss-muted hover:bg-oss-surface hover:text-oss-text transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -55,6 +56,7 @@ function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="opportunities" element={<Opportunities />} />
+        <Route path="opps" element={<Opps />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
         <Route path="paper-trading" element={<PaperTrading />} />
