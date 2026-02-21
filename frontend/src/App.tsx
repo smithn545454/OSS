@@ -62,7 +62,7 @@ function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="opportunities" element={<ResponsiveOpportunities />} />
-        <Route path="opps" element={<Opps />} />
+        <Route path="opps" element={<Navigate to="/opportunities" replace />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
         <Route path="paper-trading" element={<PaperTrading />} />
