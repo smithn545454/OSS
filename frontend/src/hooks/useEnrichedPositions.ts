@@ -63,8 +63,13 @@ export function useEnrichedPositions(
     period: filters.period !== 'all' ? filters.period : undefined,
   })
 
-  // Use pre-aggregated metrics for KPI strip (instant)
-  const metricsQuery = useSummaryMetrics()
+  // Use summary metrics — pre-aggregated when unfiltered, computed when filtered
+  const metricsQuery = useSummaryMetrics({
+    status: filters.status || 'open',
+    verdict: mappedVerdict,
+    scanner: mappedScanner,
+    period: filters.period !== 'all' ? filters.period : undefined,
+  })
 
   const enrichedPositions = useMemo(() => {
     const positions: PaperPosition[] = positionsQuery.data?.positions ?? []

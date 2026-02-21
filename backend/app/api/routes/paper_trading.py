@@ -261,50 +261,179 @@ async def close_position(
 
 
 @router.get("/summary-metrics")
-async def get_summary_metrics() -> dict[str, Any]:
-    """Get pre-aggregated summary metrics for the KPI strip and dashboards.
+async def get_summary_metrics(
+    status: Optional[str] = None,
+    verdict: Optional[str] = None,
+    scanner: Optional[str] = None,
+    period: Optional[str] = None,
+) -> dict[str, Any]:
+    """Get summary metrics for the KPI strip and dashboards.
 
-    Returns global summary, per-scanner, per-verdict, per-tier breakdowns,
-    and daily equity curve points. All data is pre-computed via atomic
-    counters — this endpoint does zero computation, just reads.
+    When no filters are active, returns pre-aggregated atomic counters (<50ms).
+    When any filter is active, computes metrics from matching positions.
+
+    Args:
+        status: Filter by status (open, closed). Omit for all.
+        verdict: Filter by verdict_at_entry (APPROVE, WATCH)
+        scanner: Filter by scanner_source
+        period: Filter by entry_date (7d, 14d, 30d, 90d)
     """
     from app.paper_trading.metrics_aggregator import MetricsAggregator
 
-    summary = await MetricsAggregator.get_summary()
-    scanners = await MetricsAggregator.get_scanner_metrics()
-    verdicts = await MetricsAggregator.get_verdict_metrics()
-    tiers = await MetricsAggregator.get_tier_metrics()
-    equity_curve = await MetricsAggregator.get_daily_equity(days=90)
+    has_filters = any([verdict, scanner, period and period != "all",
+                       status and status not in ("all", None)])
 
-    # Compute derived metrics from atomic counters
-    closed = summary.get("closed_count", 0)
-    wins = summary.get("win_count", 0)
-    losses = summary.get("loss_count", 0)
-    total_pnl = summary.get("total_pnl", 0)
+    if not has_filters:
+        # Fast path: pre-aggregated counters
+        summary = await MetricsAggregator.get_summary()
+        scanners_data = await MetricsAggregator.get_scanner_metrics()
+        verdicts_data = await MetricsAggregator.get_verdict_metrics()
+        tiers = await MetricsAggregator.get_tier_metrics()
+        equity_curve = await MetricsAggregator.get_daily_equity(days=90)
 
-    win_rate = (wins / closed * 100) if closed > 0 else 0
-    avg_return = (total_pnl / closed) if closed > 0 else 0
+        closed = summary.get("closed_count", 0)
+        wins = summary.get("win_count", 0)
+        losses = summary.get("loss_count", 0)
+        total_pnl = summary.get("total_pnl", 0)
+
+        win_rate = (wins / closed * 100) if closed > 0 else 0
+        avg_return = (total_pnl / closed) if closed > 0 else 0
+
+        return {
+            "global": {
+                "open_count": summary.get("open_count", 0),
+                "closed_count": closed,
+                "total_count": summary.get("total_count", 0),
+                "win_count": wins,
+                "loss_count": losses,
+                "total_pnl": round(float(total_pnl), 2),
+                "win_rate": round(win_rate, 2),
+                "avg_return": round(float(avg_return), 2),
+                "last_updated": summary.get("last_updated"),
+            },
+            "by_scanner": {
+                s.pop("SK", s.get("scanner_type", "?")): s for s in scanners_data
+            } if scanners_data else {},
+            "by_verdict": {
+                v.pop("SK", v.get("verdict", "?")): v for v in verdicts_data
+            } if verdicts_data else {},
+            "by_tier": {
+                t.pop("SK", t.get("tier", "?")): t for t in tiers
+            } if tiers else {},
+            "equity_curve": equity_curve,
+        }
+
+    # Filtered path: compute from matching positions
+    positions = await _query_filtered_positions(status, verdict, scanner, period)
+
+    open_positions = [p for p in positions if _enum_val(p.status) == "OPEN"]
+    closed_positions = [p for p in positions if _enum_val(p.status) == "CLOSED"]
+
+    wins = sum(1 for p in closed_positions if p.current_pnl_pct > 0)
+    losses = sum(1 for p in closed_positions if p.current_pnl_pct < 0)
+    closed_count = len(closed_positions)
+    total_pnl = sum(
+        (p.exit_price - p.entry_price) * 100
+        if p.exit_price is not None
+        else (p.current_price - p.entry_price) * 100
+        for p in positions
+    )
+
+    win_rate = (wins / closed_count * 100) if closed_count > 0 else 0
+    avg_return = (total_pnl / closed_count) if closed_count > 0 else 0
 
     return {
         "global": {
-            "open_count": summary.get("open_count", 0),
-            "closed_count": closed,
-            "total_count": summary.get("total_count", 0),
+            "open_count": len(open_positions),
+            "closed_count": closed_count,
+            "total_count": len(positions),
             "win_count": wins,
             "loss_count": losses,
             "total_pnl": round(float(total_pnl), 2),
             "win_rate": round(win_rate, 2),
             "avg_return": round(float(avg_return), 2),
-            "last_updated": summary.get("last_updated"),
+            "last_updated": None,
         },
-        "by_scanner": {s.pop("SK", s.get("scanner_type", "?")): s for s in scanners}
-        if scanners else {},
-        "by_verdict": {v.pop("SK", v.get("verdict", "?")): v for v in verdicts}
-        if verdicts else {},
-        "by_tier": {t.pop("SK", t.get("tier", "?")): t for t in tiers}
-        if tiers else {},
-        "equity_curve": equity_curve,
+        "by_scanner": {},
+        "by_verdict": {},
+        "by_tier": {},
+        "equity_curve": [],
     }
+
+
+async def _query_filtered_positions(
+    status: Optional[str],
+    verdict: Optional[str],
+    scanner: Optional[str],
+    period: Optional[str],
+) -> list:
+    """Query all positions matching filters (no pagination limit)."""
+    filter_parts: list[str] = []
+    filter_values: dict[str, Any] = {}
+    filter_names: dict[str, str] = {}
+
+    if verdict:
+        filter_parts.append("#verdict = :verdict")
+        filter_names["#verdict"] = "verdict_at_entry"
+        filter_values[":verdict"] = verdict
+
+    if scanner:
+        filter_parts.append("#scanner = :scanner")
+        filter_names["#scanner"] = "scanner_source"
+        filter_values[":scanner"] = scanner
+
+    filter_expr = " AND ".join(filter_parts) if filter_parts else None
+
+    sk_condition = None
+    if period and period != "all":
+        from datetime import datetime as dt, timedelta, timezone as tz
+        days_map = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+        days = days_map.get(period)
+        if days:
+            cutoff = (dt.now(tz.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            sk_condition = {"gte": cutoff}
+
+    resolved_status = (status or "all").lower()
+
+    all_positions: list = []
+    if resolved_status in ("open", "all"):
+        all_positions.extend(await _exhaust_paginated(
+            PaperPositionTable.list_open_paginated,
+            filter_expr, filter_values or None, filter_names or None, sk_condition,
+        ))
+    if resolved_status in ("closed", "all"):
+        all_positions.extend(await _exhaust_paginated(
+            PaperPositionTable.list_closed_paginated,
+            filter_expr, filter_values or None, filter_names or None, sk_condition,
+        ))
+
+    return all_positions
+
+
+async def _exhaust_paginated(
+    query_fn,
+    filter_expression,
+    filter_values,
+    filter_names,
+    sk_condition,
+) -> list:
+    """Iterate through all pages of a paginated query."""
+    all_items: list = []
+    cursor = None
+    while True:
+        positions, next_cursor = await query_fn(
+            limit=200,
+            cursor=cursor,
+            filter_expression=filter_expression,
+            filter_values=filter_values,
+            filter_names=filter_names,
+            sk_condition=sk_condition,
+        )
+        all_items.extend(positions)
+        if not next_cursor:
+            break
+        cursor = next_cursor
+    return all_items
 
 
 # ============================================================================

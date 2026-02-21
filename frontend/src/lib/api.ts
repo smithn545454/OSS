@@ -447,8 +447,21 @@ export async function triggerUVScan(): Promise<{ run_id: string; status: string;
 // Paper Trading Workstation API
 // ============================================================================
 
-export async function getSummaryMetrics(): Promise<SummaryMetricsResponse> {
-  return fetchApi<SummaryMetricsResponse>('/api/paper-trading/summary-metrics')
+export async function getSummaryMetrics(params: {
+  status?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+} = {}): Promise<SummaryMetricsResponse> {
+  const qs = new URLSearchParams()
+  if (params.status) qs.set('status', params.status)
+  if (params.verdict) qs.set('verdict', params.verdict)
+  if (params.scanner) qs.set('scanner', params.scanner)
+  if (params.period) qs.set('period', params.period)
+  const query = qs.toString()
+  return fetchApi<SummaryMetricsResponse>(
+    `/api/paper-trading/summary-metrics${query ? `?${query}` : ''}`
+  )
 }
 
 export async function getPositionsPaginated(params: {

@@ -574,11 +574,16 @@ export function useAnalyzePosition() {
   })
 }
 
-// Pre-aggregated summary metrics (instant KPI response)
-export function useSummaryMetrics() {
+// Summary metrics — pre-aggregated when unfiltered, computed when filtered
+export function useSummaryMetrics(params: {
+  status?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+} = {}) {
   return useQuery({
-    queryKey: ['paper-trading', 'summary-metrics'] as const,
-    queryFn: api.getSummaryMetrics,
+    queryKey: ['paper-trading', 'summary-metrics', params] as const,
+    queryFn: () => api.getSummaryMetrics(params),
     staleTime: 30000,
   })
 }
