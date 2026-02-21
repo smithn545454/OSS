@@ -4,7 +4,7 @@ import clsx from 'clsx'
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', shortLabel: 'Dash', icon: BarChart3 },
-  { path: '/opps', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
+  { path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
   { path: '/pipeline', label: 'Pipeline', shortLabel: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', shortLabel: 'Paper', icon: TrendingUp },
   { path: '/calibration', label: 'Calibration', shortLabel: 'Cal', icon: Target },

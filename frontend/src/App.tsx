@@ -10,6 +10,12 @@ import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
 import PaperTrading from './pages/PaperTrading'
 import Opps from './pages/Opps'
+import { useIsMobile } from './hooks/useIsMobile'
+
+function ResponsiveOpportunities() {
+  const isMobile = useIsMobile()
+  return isMobile ? <Opps /> : <Opportunities />
+}
 
 class EvaluationErrorBoundary extends Component<
   { children: ReactNode },
@@ -29,7 +35,7 @@ class EvaluationErrorBoundary extends Component<
       return (
         <div className="space-y-8">
           <Link
-            to="/opps"
+            to="/opportunities"
             className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-oss-muted hover:bg-oss-surface hover:text-oss-text transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -55,7 +61,7 @@ function App() {
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="opportunities" element={<Opportunities />} />
+        <Route path="opportunities" element={<ResponsiveOpportunities />} />
         <Route path="opps" element={<Opps />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
