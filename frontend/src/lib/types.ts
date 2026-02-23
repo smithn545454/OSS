@@ -1237,3 +1237,63 @@ export interface UpdatePositionsResponse {
   }>
   errors: number
 }
+
+// ============================================================================
+// Backtest Types
+// ============================================================================
+
+export type DatasetStatusLevel = 'complete' | 'partial' | 'missing' | 'error' | 'unknown'
+
+export interface DatasetStatus {
+  name: string
+  prefix: string
+  file_count: number
+  date_count: number
+  earliest_date: string | null
+  latest_date: string | null
+  total_size_mb: number
+  status: DatasetStatusLevel
+}
+
+export interface DataStoreStatusResponse {
+  bucket: string
+  datasets: DatasetStatus[]
+  overall_status: 'ready' | 'incomplete' | 'empty'
+  total_size_mb: number
+  timestamp: string
+}
+
+export interface ValidationCheck {
+  check_name: string
+  passed: boolean
+  message: string
+  details: Record<string, unknown> | null
+}
+
+export interface DataStoreValidationResponse {
+  passed: boolean
+  checks: ValidationCheck[]
+  timestamp: string
+}
+
+export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+
+export interface BacktestRun {
+  run_id: string
+  name: string
+  status: BacktestRunStatus
+  config: Record<string, unknown>
+  progress: {
+    days_completed: number
+    days_total: number
+    trades_found?: number
+  }
+  summary: Record<string, unknown> | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface BacktestRunsResponse {
+  runs: BacktestRun[]
+  count: number
+}

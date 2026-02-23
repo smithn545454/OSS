@@ -551,5 +551,36 @@ export async function analyzePosition(
   )
 }
 
+// ============================================================================
+// Backtest API
+// ============================================================================
+
+export async function getDataStoreStatus(): Promise<
+  import('./types').DataStoreStatusResponse
+> {
+  return fetchApi('/api/backtest/data-store/status')
+}
+
+export async function validateDataStore(): Promise<
+  import('./types').DataStoreValidationResponse
+> {
+  return fetchApi('/api/backtest/data-store/validate', { method: 'POST' })
+}
+
+export async function listBacktestRuns(
+  status?: string
+): Promise<import('./types').BacktestRunsResponse> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  const query = params.toString()
+  return fetchApi(`/api/backtest/runs${query ? `?${query}` : ''}`)
+}
+
+export async function getBacktestRun(
+  runId: string
+): Promise<import('./types').BacktestRun> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }

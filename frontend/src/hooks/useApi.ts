@@ -603,3 +603,38 @@ export function usePaginatedPositions(params: {
     staleTime: 15000,
   })
 }
+
+// ============================================================================
+// Backtest Hooks
+// ============================================================================
+
+export function useDataStoreStatus() {
+  return useQuery({
+    queryKey: ['backtest', 'data-store-status'] as const,
+    queryFn: api.getDataStoreStatus,
+    staleTime: 60000,
+  })
+}
+
+export function useValidateDataStore() {
+  return useMutation({
+    mutationFn: api.validateDataStore,
+  })
+}
+
+export function useBacktestRuns(status?: string) {
+  return useQuery({
+    queryKey: ['backtest', 'runs', status] as const,
+    queryFn: () => api.listBacktestRuns(status),
+    staleTime: 30000,
+  })
+}
+
+export function useBacktestRun(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'runs', runId] as const,
+    queryFn: () => api.getBacktestRun(runId),
+    enabled: !!runId,
+    staleTime: 10000,
+  })
+}

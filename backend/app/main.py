@@ -31,6 +31,7 @@ from app.api.routes import observability as observability_routes
 from app.api.routes import paper_trading as paper_trading_routes
 from app.api.routes import pipeline as pipeline_routes
 from app.api.routes import policies as policies_routes
+from app.api.routes import backtest as backtest_routes
 from app.api.routes import scanners as scanners_routes
 from app.config import get_settings
 
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_routes.thesis_router, prefix="/api/thesis", tags=["Thesis"])
     app.include_router(observability_routes.router, prefix="/api/observability", tags=["Observability"])
     app.include_router(market_routes.router, prefix="/api/market", tags=["Market"])
+    app.include_router(backtest_routes.router, prefix="/api/backtest", tags=["Backtest"])
 
     return app
 

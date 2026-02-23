@@ -457,6 +457,27 @@ def moto_dynamodb():
         # S&P 500 tickers: simple PK/SK
         db.create_table(TableName=f"{table_prefix}-sp500-tickers", **pk_sk_schema)
 
+        # Backtest runs: GSI1 (status)
+        db.create_table(
+            TableName=f"{table_prefix}-backtest-runs",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
+            GlobalSecondaryIndexes=gsi1,
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Backtest trades: GSI1 (scanner) + GSI2 (regime)
+        db.create_table(
+            TableName=f"{table_prefix}-backtest-trades",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs + gsi2_attrs,
+            GlobalSecondaryIndexes=gsi1 + gsi2,
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Backtest insights: simple PK/SK
+        db.create_table(TableName=f"{table_prefix}-backtest-insights", **pk_sk_schema)
+
         yield db
 
 
