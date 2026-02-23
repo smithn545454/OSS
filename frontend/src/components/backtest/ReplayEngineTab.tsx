@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Play, Trash2, ChevronDown, ChevronUp, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import {
@@ -506,27 +506,28 @@ export default function ReplayEngineTab() {
   const deleteRun = useDeleteBacktestRun()
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
-  const runs = data?.runs ?? []
+  const runs = useMemo(() => data?.runs ?? [], [data?.runs])
 
   // Auto-select first completed run
-  if (!selectedRunId && runs.length > 0) {
-    const completed = runs.find((r) => r.status === 'COMPLETED')
-    if (completed) {
-      setSelectedRunId(completed.run_id)
-    } else if (runs[0]) {
-      setSelectedRunId(runs[0].run_id)
+  useEffect(() => {
+    if (!selectedRunId && runs.length > 0) {
+      const completed = runs.find((r) => r.status === 'COMPLETED')
+      if (completed) {
+        setSelectedRunId(completed.run_id)
+      } else if (runs[0]) {
+        setSelectedRunId(runs[0].run_id)
+      }
     }
-  }
+  }, [runs, selectedRunId])
 
-  // Poll running runs
+  // Poll running runs every 5s
   const hasRunning = runs.some((r) => r.status === 'RUNNING' || r.status === 'PENDING')
 
-  // Refetch runs list every 5s when there's an active run
-  useState(() => {
+  useEffect(() => {
     if (!hasRunning) return
     const interval = setInterval(() => refetch(), 5000)
     return () => clearInterval(interval)
-  })
+  }, [hasRunning, refetch])
 
   const handleCreate = (req: CreateBacktestRunRequest) => {
     createRun.mutate(req, {
