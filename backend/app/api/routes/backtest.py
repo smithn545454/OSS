@@ -16,6 +16,10 @@ Phase 3 endpoints (Results):
 - GET  /runs/{run_id}/equity-curve  — Daily equity data
 - GET  /runs/{run_id}/monthly-pnl   — Monthly P&L breakdown
 - GET  /runs/{run_id}/segments/{type} — Segmented analysis
+
+Phase 4 endpoints (AI Advisor):
+- GET  /runs/{run_id}/readiness     — Go-live readiness assessment
+- GET  /runs/{run_id}/insights      — AI-generated insights
 """
 
 from __future__ import annotations
@@ -836,4 +840,85 @@ async def get_segments(
         }
     except Exception as e:
         logger.error(f"Error computing segments for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AI Advisor Endpoints (Phase 4)
+# ============================================================================
+
+
+@router.get("/runs/{run_id}/readiness")
+async def get_readiness_assessment(
+    run_id: str,
+) -> dict[str, Any]:
+    """Get go-live readiness assessment for a completed backtest run.
+
+    Evaluates backtest results against configurable readiness criteria
+    (Sharpe, profit factor, drawdown, trade count, monthly/scanner/regime
+    profitability) and returns a structured pass/fail verdict.
+    """
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    if run.get("status") != "COMPLETED":
+        return {
+            "run_id": run_id,
+            "status": run.get("status"),
+            "readiness": None,
+            "message": f"Run is {run.get('status')} — readiness not available",
+        }
+
+    try:
+        from app.backtest.readiness import assess_readiness
+        from app.core.schemas import BacktestTrade
+
+        # Get summary (compute if needed)
+        summary = run.get("summary")
+        if not summary:
+            from app.backtest.metrics import calculate_metrics
+
+            trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+            trades = [BacktestTrade(**t) for t in trade_dicts]
+            config = run.get("config", {})
+            summary = calculate_metrics(
+                trades, starting_capital=config.get("starting_capital", 10_000.0)
+            )
+        else:
+            trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+            trades = [BacktestTrade(**t) for t in trade_dicts]
+
+        readiness = assess_readiness(summary, trades)
+
+        return {
+            "run_id": run_id,
+            "status": "COMPLETED",
+            "readiness": readiness,
+        }
+    except Exception as e:
+        logger.error(f"Error computing readiness for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/{run_id}/insights")
+async def get_insights(
+    run_id: str,
+) -> dict[str, Any]:
+    """Get all AI-generated insights for a backtest run."""
+    from app.db.backtest_tables import BacktestInsightTable
+
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    try:
+        insights = await BacktestInsightTable.list_by_run(run_id)
+        return {
+            "run_id": run_id,
+            "insights": insights,
+            "count": len(insights),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching insights for {run_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

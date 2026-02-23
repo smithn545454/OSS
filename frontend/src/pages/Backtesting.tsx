@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import DataStoreTab from '@/components/backtest/DataStoreTab'
 import ReplayEngineTab from '@/components/backtest/ReplayEngineTab'
 import ResultsTab from '@/components/backtest/ResultsTab'
+import AIAdvisorTab from '@/components/backtest/AIAdvisorTab'
 
 const TABS = [
   { id: 'data-store', label: 'Data Store' },
@@ -68,11 +69,7 @@ export default function Backtesting() {
 
       {activeTab === 'results' && <ResultsTab />}
 
-      {activeTab === 'ai-advisor' && (
-        <div className="rounded-xl border border-oss-border bg-oss-surface p-12 text-center">
-          <p className="text-oss-muted">AI Strategy Advisor — coming in Phase 4</p>
-        </div>
-      )}
+      {activeTab === 'ai-advisor' && <AIAdvisorTab />}
     </div>
   )
 }

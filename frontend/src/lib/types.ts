@@ -1452,3 +1452,48 @@ export interface SegmentResponse {
   segments: SegmentData[]
   total_segments: number
 }
+
+// Phase 4: AI Advisor Types
+
+export interface ReadinessCheck {
+  criterion: string
+  threshold: string
+  actual: string | number | null
+  passed: boolean
+  severity: 'critical' | 'warning'
+}
+
+export interface ReadinessAssessment {
+  verdict: 'READY' | 'CONDITIONAL' | 'NOT_READY'
+  message: string
+  checks: ReadinessCheck[]
+  passed_count: number
+  total_checks: number
+  criteria_used: Record<string, number>
+}
+
+export interface ReadinessResponse {
+  run_id: string
+  status: string
+  readiness: ReadinessAssessment | null
+  message?: string
+}
+
+export interface BacktestInsight {
+  insight_id: string
+  run_id: string
+  insight_type: string
+  severity: string
+  title: string
+  summary: string
+  recommended_action: string | null
+  confidence: number | null
+  data_evidence: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface InsightsResponse {
+  run_id: string
+  insights: BacktestInsight[]
+  count: number
+}

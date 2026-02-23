@@ -708,3 +708,23 @@ export function useBacktestSegments(runId: string, segmentType: string) {
     staleTime: 60000,
   })
 }
+
+// Phase 4: AI Advisor hooks
+
+export function useReadinessAssessment(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'readiness', runId] as const,
+    queryFn: () => api.getReadinessAssessment(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestInsights(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'insights', runId] as const,
+    queryFn: () => api.getBacktestInsights(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}

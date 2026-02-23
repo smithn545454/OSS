@@ -643,5 +643,19 @@ export async function getBacktestSegments(
   )
 }
 
+// Phase 4: AI Advisor API
+
+export async function getReadinessAssessment(
+  runId: string
+): Promise<import('./types').ReadinessResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/readiness`)
+}
+
+export async function getBacktestInsights(
+  runId: string
+): Promise<import('./types').InsightsResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/insights`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }
