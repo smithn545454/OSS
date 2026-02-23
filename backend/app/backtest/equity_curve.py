@@ -4,8 +4,11 @@ Builds a daily equity curve from trade lifecycle data,
 tracking cumulative P&L, drawdown, and benchmark comparison.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 
 from app.core.schemas import BacktestTrade
 
@@ -15,8 +18,8 @@ logger = logging.getLogger(__name__)
 def generate_equity_curve(
     trades: list[BacktestTrade],
     starting_capital: float = 10_000.0,
-    start_date: str | None = None,
-    end_date: str | None = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> list[dict]:
     """Build a daily equity curve from trade P&L.
 
