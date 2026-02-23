@@ -22,13 +22,11 @@ Direction Hint:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import date, datetime, timedelta
 
 from app.core.schemas import DirectionHint, ScannerType
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
 from app.scanners.utils import calculate_atr_series
-from app.services.polygon import DailyBar
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +69,28 @@ class CompressionScanner(BaseScanner):
             cached_bars = context.cached_data.get("daily_bars", {})
             if ticker in cached_bars:
                 bars = cached_bars[ticker]
-            else:
-                # Fallback: fetch if not in cache
+            elif context.data_provider:
+                # Use DataProvider for unified access (live or backtest)
+                end = context.as_of_date or date.today()
+                lookback = atr_period + compression_lookback + 15
+                bars = await context.data_provider.get_daily_bars(
+                    ticker, end, lookback_days=lookback,
+                )
+            elif context.polygon:
+                # Legacy fallback for standalone/test use
                 fetch_days = atr_period + compression_lookback + 15
                 to_date = datetime.now().strftime("%Y-%m-%d")
-                from_date = (datetime.now() - timedelta(days=fetch_days + 10)).strftime("%Y-%m-%d")
-                bars = await context.polygon.get_daily_bars_parsed(ticker, from_date, to_date)
+                from_date = (
+                    datetime.now() - timedelta(days=fetch_days + 10)
+                ).strftime("%Y-%m-%d")
+                bars = await context.polygon.get_daily_bars_parsed(
+                    ticker, from_date, to_date,
+                )
+            else:
+                return ScanResult(
+                    ticker=ticker, triggered=False,
+                    error="No data source available",
+                )
 
             # Need enough bars for full calculation
             min_bars_needed = atr_period + compression_lookback + 1

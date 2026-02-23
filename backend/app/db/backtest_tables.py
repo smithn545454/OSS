@@ -65,12 +65,43 @@ class BacktestRunTable:
         await db.update_item(BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META", updates)
 
     @staticmethod
-    async def update_progress(run_id: str, progress: dict[str, Any]) -> None:
-        """Update run progress counters."""
+    async def update_progress(
+        run_id: str,
+        progress: Optional[dict[str, Any]] = None,
+        days_increment: int = 0,
+        trades_increment: int = 0,
+        summary: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Update run progress counters.
+
+        If progress dict is provided, overwrites the entire progress field.
+        If increments are provided, fetches current state and increments.
+        """
         db = get_dynamodb()
-        await db.update_item(
-            BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META", {"progress": progress}
-        )
+        updates: dict[str, Any] = {}
+
+        if progress is not None:
+            updates["progress"] = progress
+        elif days_increment or trades_increment:
+            # Fetch current progress and increment
+            current = await BacktestRunTable.get(run_id)
+            if current:
+                current_progress = current.get("progress", {})
+                current_progress["days_completed"] = (
+                    int(current_progress.get("days_completed", 0)) + days_increment
+                )
+                current_progress["trades_found"] = (
+                    int(current_progress.get("trades_found", 0)) + trades_increment
+                )
+                updates["progress"] = current_progress
+
+        if summary is not None:
+            updates["summary"] = summary
+
+        if updates:
+            await db.update_item(
+                BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META", updates
+            )
 
     @staticmethod
     async def list_runs(

@@ -1297,3 +1297,66 @@ export interface BacktestRunsResponse {
   runs: BacktestRun[]
   count: number
 }
+
+export interface BacktestTrade {
+  trade_id: string
+  run_id: string
+  entry_date: string
+  exit_date: string | null
+  ticker: string
+  option_ticker: string
+  option_type: string
+  strike: number
+  expiration_date: string
+  scanner_type: string
+  verdict: string
+  combined_score: number
+  entry_price: number
+  exit_price: number | null
+  exit_reason: string | null
+  pnl_dollars: number | null
+  pnl_pct: number | null
+  days_held: number | null
+  mfe_pct: number | null
+  mae_pct: number | null
+  peak_price: number | null
+  market_regime: string | null
+}
+
+export interface BacktestTradesResponse {
+  run_id: string
+  trades: BacktestTrade[]
+  count: number
+  total_in_run: number
+}
+
+export interface CreateBacktestRunRequest {
+  name: string
+  start_date: string
+  end_date: string
+  policy_snapshot?: Record<string, unknown>
+  scanners_enabled?: string[]
+  slippage_model?: string
+  slippage_pct?: number
+  exit_rules?: {
+    stop_loss_pct?: number
+    profit_target_pct?: number
+    min_dte_at_exit?: number
+    max_holding_days?: number
+    trailing_stop_pct?: number | null
+  }
+  starting_capital?: number
+}
+
+export interface CreateBacktestRunResponse {
+  status: string
+  run_id: string
+  mode: string
+  trading_days: number
+}
+
+export interface DeleteBacktestRunResponse {
+  status: string
+  run_id: string
+  trades_deleted: number
+}

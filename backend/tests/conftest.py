@@ -23,6 +23,7 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
+os.environ.setdefault("POLYGON_API_KEY", "fake-test-key")
 
 from app.core.schemas import (
     Decision,
@@ -273,6 +274,14 @@ def mock_polygon_client() -> AsyncMock:
 
     # Mock previous close
     client.get_previous_close.return_value = {"c": 189.0, "v": 60_000_000}
+
+    # Batch methods used by LiveDataProvider
+    client.get_daily_bars_batch.return_value = {
+        "AAPL": client.get_daily_bars_parsed.return_value,
+    }
+    client.get_previous_close_batch.return_value = {
+        "AAPL": {"c": 189.0, "v": 60_000_000},
+    }
 
     # Mock options chain
     client.get_options_chain.return_value = [
@@ -687,23 +696,31 @@ def make_mock_polygon(
     fail_tickers = fail_tickers or set()
     client = AsyncMock()
 
-    # Mock daily bars
-    bars = []
+    # Mock daily bars — both individual and batch methods
+    bars_by_ticker: dict[str, list] = {}
+    all_bars = []
     for ticker in tickers:
+        ticker_bars = []
         for i in range(bars_per_ticker):
-            bars.append(
-                MagicMock(
-                    ticker=ticker,
-                    date=f"2026-01-{(i % 28) + 1:02d}",
-                    open=180.0 + i,
-                    high=185.0 + i,
-                    low=178.0 + i,
-                    close=183.0 + i,
-                    volume=50_000_000 + i * 1_000_000,
-                )
+            bar = MagicMock(
+                ticker=ticker,
+                date=f"2026-01-{(i % 28) + 1:02d}",
+                open=180.0 + i,
+                high=185.0 + i,
+                low=178.0 + i,
+                close=183.0 + i,
+                volume=50_000_000 + i * 1_000_000,
+                vwap=182.0 + i,
             )
-    client.get_daily_bars_parsed.return_value = bars
+            ticker_bars.append(bar)
+            all_bars.append(bar)
+        bars_by_ticker[ticker] = ticker_bars
+    client.get_daily_bars_parsed.return_value = all_bars
+    client.get_daily_bars_batch.return_value = bars_by_ticker
     client.get_previous_close.return_value = {"c": 189.0, "v": 60_000_000}
+    client.get_previous_close_batch.return_value = {
+        t: {"c": 189.0, "v": 60_000_000} for t in tickers
+    }
 
     def mock_chain(ticker, **kwargs):
         if ticker in fail_tickers:

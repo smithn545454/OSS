@@ -97,6 +97,8 @@ class ExitReason(str, Enum):
     PROFIT_TARGET = "PROFIT_TARGET"
     STOP_LOSS = "STOP_LOSS"
     TIME_EXIT = "TIME_EXIT"
+    MAX_HOLDING = "MAX_HOLDING"
+    TRAILING_STOP = "TRAILING_STOP"
     EXPIRATION = "EXPIRATION"
     MANUAL = "MANUAL"
 
@@ -1222,3 +1224,99 @@ class GetRunDetailResponse(OSSBaseModel):
 
     run: PipelineRunListItem
     data: PipelineMonitorData
+
+
+# ============================================================================
+# Backtest Models
+# ============================================================================
+
+
+class BacktestExitConfig(OSSBaseModel):
+    """Exit rule configuration for backtesting."""
+
+    stop_loss_pct: float = 50.0
+    profit_target_pct: float = 100.0
+    min_dte_at_exit: int = 7
+    max_holding_days: int = 21
+    trailing_stop_pct: Optional[float] = None  # Enable at e.g. 30%
+
+
+class BacktestRunConfig(OSSBaseModel):
+    """Configuration for a backtest run."""
+
+    name: str
+    start_date: str  # YYYY-MM-DD
+    end_date: str  # YYYY-MM-DD
+    policy_snapshot: PolicyConfig  # Frozen at run creation
+    scanners_enabled: list[str] = Field(
+        default_factory=lambda: [
+            "breakout", "compression", "cheap_options", "unusual_volume",
+        ]
+    )
+    slippage_model: str = "ask_plus_pct"  # "mid" | "ask" | "ask_plus_pct"
+    slippage_pct: float = 0.05  # 5% slippage on ask price
+    exit_rules: BacktestExitConfig = Field(default_factory=BacktestExitConfig)
+    min_option_volume: int = 50
+    min_open_interest: int = 200
+    starting_capital: float = 10_000.0
+
+
+class BacktestRun(OSSBaseModel):
+    """A backtest run record."""
+
+    model_config = ConfigDict(frozen=False, use_enum_values=True)  # Mutable for status updates
+
+    run_id: str
+    config: BacktestRunConfig
+    status: str = "PENDING"  # PENDING | RUNNING | COMPLETED | FAILED
+    progress: dict = Field(default_factory=lambda: {
+        "days_completed": 0,
+        "days_total": 0,
+        "trades_found": 0,
+    })
+    summary: Optional[dict] = None
+    error: Optional[str] = None
+    created_at: str = ""
+    completed_at: Optional[str] = None
+
+
+class BacktestTrade(OSSBaseModel):
+    """A single trade from a backtest run."""
+
+    trade_id: str
+    run_id: str
+    entry_date: str  # YYYY-MM-DD
+    exit_date: Optional[str] = None
+    ticker: str
+    option_ticker: str
+    option_type: str  # CALL or PUT
+    strike: float
+    expiration_date: str
+    scanner_type: str
+    verdict: str  # APPROVE or WATCH
+    combined_score: float
+    entry_price: float
+    exit_price: Optional[float] = None
+    exit_reason: Optional[str] = None
+    pnl_dollars: Optional[float] = None
+    pnl_pct: Optional[float] = None
+    days_held: Optional[int] = None
+    mfe_pct: Optional[float] = None  # Maximum favorable excursion
+    mae_pct: Optional[float] = None  # Maximum adverse excursion
+    peak_price: Optional[float] = None
+    market_regime: Optional[str] = None  # bull_trend, low_vol, high_vol, choppy
+
+
+class BacktestInsight(OSSBaseModel):
+    """An AI-generated insight for a backtest run."""
+
+    insight_id: str
+    run_id: str
+    insight_type: str  # pattern | regime | overfitting | risk | readiness
+    severity: str  # info | warning | critical
+    title: str
+    summary: str
+    recommended_action: Optional[str] = None
+    confidence: Optional[float] = None
+    data_evidence: Optional[dict] = None
+    created_at: str = ""

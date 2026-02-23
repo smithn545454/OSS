@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -128,3 +128,211 @@ class TestBacktestRuns:
         assert response.status_code == 200
         data = response.json()
         assert data["count"] >= 1
+
+
+class TestCreateRun:
+    def test_create_run_invalid_dates(self, client, moto_dynamodb):
+        response = client.post("/api/backtest/runs", json={
+            "name": "Test",
+            "start_date": "not-a-date",
+            "end_date": "2026-01-10",
+        })
+        assert response.status_code == 400
+
+    def test_create_run_start_after_end(self, client, moto_dynamodb):
+        response = client.post("/api/backtest/runs", json={
+            "name": "Test",
+            "start_date": "2026-01-20",
+            "end_date": "2026-01-10",
+        })
+        assert response.status_code == 400
+
+    def test_create_run_weekend_only(self, client, moto_dynamodb):
+        # Saturday to Sunday — no trading days
+        response = client.post("/api/backtest/runs", json={
+            "name": "Test",
+            "start_date": "2026-01-24",  # Saturday
+            "end_date": "2026-01-25",  # Sunday
+        })
+        assert response.status_code == 400
+
+    def test_create_run_success(self, client, moto_dynamodb):
+        """Test successful run creation with inline mode."""
+        # Mock the background task to prevent import of pyarrow
+        with patch(
+            "app.api.routes.backtest._run_backtest_inline",
+            new_callable=AsyncMock,
+        ):
+            response = client.post("/api/backtest/runs", json={
+                "name": "Test Run",
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-09",
+            })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+        assert data["run_id"]
+        assert data["trading_days"] == 5
+        assert data["mode"] == "inline"
+
+    def test_create_run_custom_params(self, client, moto_dynamodb):
+        with patch(
+            "app.api.routes.backtest._run_backtest_inline",
+            new_callable=AsyncMock,
+        ):
+            response = client.post("/api/backtest/runs", json={
+                "name": "Custom Run",
+                "start_date": "2026-01-05",
+                "end_date": "2026-01-09",
+                "slippage_model": "mid",
+                "slippage_pct": 0.0,
+                "scanners_enabled": ["breakout", "compression"],
+                "starting_capital": 50_000.0,
+                "exit_rules": {
+                    "stop_loss_pct": 30.0,
+                    "profit_target_pct": 80.0,
+                    "max_holding_days": 14,
+                },
+            })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+
+
+class TestDeleteRun:
+    @pytest.mark.asyncio
+    async def test_delete_run_not_found(self, client, moto_dynamodb):
+        response = client.delete("/api/backtest/runs/nonexistent")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_run_success(self, client, moto_dynamodb):
+        from app.db.backtest_tables import BacktestRunTable
+
+        await BacktestRunTable.put({
+            "run_id": "del-run-1",
+            "name": "Delete Me",
+            "status": "COMPLETED",
+            "created_at": "2026-01-15T12:00:00+00:00",
+        })
+
+        response = client.delete("/api/backtest/runs/del-run-1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "deleted"
+        assert data["run_id"] == "del-run-1"
+
+        # Verify it's gone
+        response = client.get("/api/backtest/runs/del-run-1")
+        assert response.status_code == 404
+
+
+class TestListTrades:
+    @pytest.mark.asyncio
+    async def test_list_trades_run_not_found(self, client, moto_dynamodb):
+        response = client.get("/api/backtest/runs/nonexistent/trades")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_trades_empty(self, client, moto_dynamodb):
+        from app.db.backtest_tables import BacktestRunTable
+
+        await BacktestRunTable.put({
+            "run_id": "trades-run-1",
+            "name": "Trades Run",
+            "status": "COMPLETED",
+            "progress": {"days_completed": 5, "days_total": 5, "trades_found": 0},
+            "created_at": "2026-01-15T12:00:00+00:00",
+        })
+
+        response = client.get("/api/backtest/runs/trades-run-1/trades")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["trades"] == []
+        assert data["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_trades_with_data(self, client, moto_dynamodb):
+        from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
+
+        await BacktestRunTable.put({
+            "run_id": "trades-run-2",
+            "name": "Trades Run",
+            "status": "COMPLETED",
+            "progress": {"days_completed": 5, "days_total": 5, "trades_found": 2},
+            "created_at": "2026-01-15T12:00:00+00:00",
+        })
+
+        await BacktestTradeTable.put({
+            "trade_id": "t1",
+            "run_id": "trades-run-2",
+            "ticker": "AAPL",
+            "option_ticker": "O:AAPL260220C00200000",
+            "option_type": "CALL",
+            "strike": 200.0,
+            "entry_date": "2026-01-05",
+            "exit_date": "2026-01-08",
+            "expiration_date": "2026-02-20",
+            "scanner_type": "breakout",
+            "verdict": "APPROVE",
+            "combined_score": 82.0,
+            "entry_price": 5.25,
+            "exit_price": 7.88,
+            "exit_reason": "PROFIT_TARGET",
+            "pnl_pct": 50.0,
+        })
+
+        await BacktestTradeTable.put({
+            "trade_id": "t2",
+            "run_id": "trades-run-2",
+            "ticker": "MSFT",
+            "option_ticker": "O:MSFT260220P00350000",
+            "option_type": "PUT",
+            "strike": 350.0,
+            "entry_date": "2026-01-05",
+            "expiration_date": "2026-02-20",
+            "scanner_type": "compression",
+            "verdict": "WATCH",
+            "combined_score": 68.0,
+            "entry_price": 3.50,
+        })
+
+        response = client.get("/api/backtest/runs/trades-run-2/trades")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_list_trades_with_scanner_filter(self, client, moto_dynamodb):
+        from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
+
+        await BacktestRunTable.put({
+            "run_id": "trades-run-3",
+            "name": "Filtered Run",
+            "status": "COMPLETED",
+            "progress": {"trades_found": 2},
+            "created_at": "2026-01-15T12:00:00+00:00",
+        })
+
+        for i, scanner in enumerate(["breakout", "compression"]):
+            await BacktestTradeTable.put({
+                "trade_id": f"tf{i}",
+                "run_id": "trades-run-3",
+                "ticker": "AAPL",
+                "option_ticker": f"O:AAPL{i}",
+                "option_type": "CALL",
+                "strike": 200.0,
+                "entry_date": "2026-01-05",
+                "expiration_date": "2026-02-20",
+                "scanner_type": scanner,
+                "verdict": "APPROVE",
+                "combined_score": 80.0,
+                "entry_price": 5.0,
+            })
+
+        # Filter by scanner
+        response = client.get("/api/backtest/runs/trades-run-3/trades?scanner=breakout")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["trades"][0]["scanner_type"] == "breakout"

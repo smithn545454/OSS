@@ -4,22 +4,30 @@ Phase 1 endpoints (Data Store):
 - GET  /data-store/status   — S3 bucket inventory
 - POST /data-store/validate — Run integrity checks
 
-Phase 2+ endpoints (Replay Engine, Results, AI Advisor) will be added later.
+Phase 2 endpoints (Replay Engine):
+- POST /runs               — Create and start a backtest run
+- GET  /runs               — List all runs (with status filter)
+- GET  /runs/{run_id}      — Get run details + progress
+- DELETE /runs/{run_id}    — Cancel/delete a run
+- GET  /runs/{run_id}/trades — List trades for a run
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.db.backtest_tables import BacktestRunTable
+from app.core.schemas import BacktestRunConfig, PolicyConfig
+from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
 
 logger = logging.getLogger(__name__)
 
@@ -348,8 +356,190 @@ async def validate_data_store() -> ValidationResponse:
 
 
 # ============================================================================
-# Backtest Runs (stub for Phase 2 — list runs is needed by Data Store tab)
+# Replay Engine Endpoints (Phase 2)
 # ============================================================================
+
+
+class CreateRunRequest(BaseModel):
+    """Request body for creating a new backtest run."""
+
+    name: str
+    start_date: str  # YYYY-MM-DD
+    end_date: str  # YYYY-MM-DD
+    policy_snapshot: Optional[dict[str, Any]] = None
+    scanners_enabled: list[str] = Field(
+        default_factory=lambda: [
+            "breakout", "compression", "cheap_options", "unusual_volume",
+        ]
+    )
+    slippage_model: str = "ask_plus_pct"
+    slippage_pct: float = 0.05
+    exit_rules: Optional[dict[str, Any]] = None
+    starting_capital: float = 10_000.0
+
+
+async def _run_backtest_inline(config: BacktestRunConfig) -> None:
+    """Run a backtest inline (used as background task).
+
+    Creates the run, processes all days, and marks complete/failed.
+    """
+    from app.backtest.coordinator import (
+        create_backtest_run,
+        mark_run_completed,
+        mark_run_failed,
+        start_backtest_run,
+    )
+    from app.backtest.worker import process_batch
+    from app.core.historical_data_provider import HistoricalDataProvider
+
+    run = None
+    try:
+        run = await create_backtest_run(config, persist=True)
+        batches = await start_backtest_run(run, persist=True)
+
+        if not batches:
+            await mark_run_completed(
+                run.run_id, summary={"total_trades": 0, "note": "no trading days"}
+            )
+            return
+
+        s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+
+        def data_provider_factory(as_of_date):
+            return HistoricalDataProvider(
+                as_of_date=as_of_date,
+                s3_bucket=s3_bucket,
+            )
+
+        all_trades = []
+        for batch in batches:
+            batch_trades = await process_batch(
+                run_id=run.run_id,
+                days=batch,
+                config=config,
+                data_provider_factory=data_provider_factory,
+                persist=True,
+            )
+            all_trades.extend(batch_trades)
+
+        summary = {
+            "total_trades": len(all_trades),
+            "total_days": sum(len(b) for b in batches),
+        }
+        await mark_run_completed(run.run_id, summary=summary)
+
+    except Exception as e:
+        logger.error(f"Backtest run failed: {e}", exc_info=True)
+        if run:
+            await mark_run_failed(run.run_id, error=str(e))
+
+
+@router.post("/runs")
+async def create_backtest_run_endpoint(
+    request: CreateRunRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Create and start a new backtest run.
+
+    The run is created immediately and processing happens in the background.
+    Poll GET /runs/{run_id} for progress updates.
+    """
+    from datetime import date
+
+    from app.backtest.coordinator import (
+        create_backtest_run,
+        generate_trading_days,
+    )
+
+    try:
+        # Validate dates
+        try:
+            start = date.fromisoformat(request.start_date)
+            end = date.fromisoformat(request.end_date)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid date format: {e}"
+            )
+
+        if start > end:
+            raise HTTPException(
+                status_code=400, detail="start_date must be before end_date"
+            )
+
+        trading_days = generate_trading_days(start, end)
+        if not trading_days:
+            raise HTTPException(
+                status_code=400, detail="No trading days in the specified range"
+            )
+
+        # Build policy snapshot — use provided or defaults
+        if request.policy_snapshot:
+            policy_snapshot = PolicyConfig(**request.policy_snapshot)
+        else:
+            policy_snapshot = PolicyConfig()
+
+        # Build run config
+        config_kwargs: dict[str, Any] = {
+            "name": request.name,
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+            "policy_snapshot": policy_snapshot,
+            "scanners_enabled": request.scanners_enabled,
+            "slippage_model": request.slippage_model,
+            "slippage_pct": request.slippage_pct,
+            "starting_capital": request.starting_capital,
+        }
+        if request.exit_rules:
+            from app.core.schemas import BacktestExitConfig
+            config_kwargs["exit_rules"] = BacktestExitConfig(**request.exit_rules)
+
+        config = BacktestRunConfig(**config_kwargs)
+
+        # Try Lambda invocation first (production), fall back to inline
+        s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+        function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+
+        if function_name and s3_bucket:
+            # Production: invoke Lambda coordinator
+            try:
+                lambda_client = boto3.client("lambda")
+                payload = {
+                    "source": "oss.scheduler",
+                    "action": "backtest_coordinator",
+                    "config": config.model_dump(mode="json"),
+                }
+                lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+                # Create run record so we can return the ID immediately
+                run = await create_backtest_run(config, persist=True)
+                return {
+                    "status": "started",
+                    "run_id": run.run_id,
+                    "mode": "lambda",
+                    "trading_days": len(trading_days),
+                }
+            except Exception as e:
+                logger.warning(f"Lambda invocation failed, falling back to inline: {e}")
+
+        # Fallback: create run and process inline via background task
+        run = await create_backtest_run(config, persist=True)
+        background_tasks.add_task(_run_backtest_inline, config)
+
+        return {
+            "status": "started",
+            "run_id": run.run_id,
+            "mode": "inline",
+            "trading_days": len(trading_days),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create backtest run: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/runs")
@@ -378,3 +568,74 @@ async def get_backtest_run(run_id: str) -> dict[str, Any]:
     if not run:
         raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
     return run
+
+
+@router.delete("/runs/{run_id}")
+async def delete_backtest_run(run_id: str) -> dict[str, Any]:
+    """Delete a backtest run and all associated trades.
+
+    If the run is RUNNING, it will be marked as FAILED first.
+    """
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    try:
+        # If running, mark as failed first
+        if run.get("status") == "RUNNING":
+            await BacktestRunTable.update_status(run_id, "FAILED", error="Cancelled by user")
+
+        # Delete associated trades
+        trades_deleted = await BacktestTradeTable.delete_by_run(run_id)
+
+        # Delete the run itself
+        await BacktestRunTable.delete(run_id)
+
+        return {
+            "status": "deleted",
+            "run_id": run_id,
+            "trades_deleted": trades_deleted,
+        }
+    except Exception as e:
+        logger.error(f"Failed to delete backtest run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/{run_id}/trades")
+async def list_backtest_trades(
+    run_id: str,
+    scanner: Optional[str] = None,
+    verdict: Optional[str] = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """List trades for a backtest run.
+
+    Args:
+        run_id: Backtest run ID
+        scanner: Filter by scanner type
+        verdict: Filter by verdict
+        limit: Maximum results
+    """
+    # Verify run exists
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    try:
+        trades = await BacktestTradeTable.list_by_run(run_id, limit=limit)
+
+        # Apply client-side filters if needed
+        if scanner:
+            trades = [t for t in trades if t.get("scanner_type") == scanner]
+        if verdict:
+            trades = [t for t in trades if t.get("verdict") == verdict]
+
+        return {
+            "run_id": run_id,
+            "trades": trades,
+            "count": len(trades),
+            "total_in_run": run.get("progress", {}).get("trades_found", 0),
+        }
+    except Exception as e:
+        logger.error(f"Error listing trades for run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

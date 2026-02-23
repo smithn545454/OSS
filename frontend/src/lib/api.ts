@@ -582,5 +582,37 @@ export async function getBacktestRun(
   return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}`)
 }
 
+export async function createBacktestRun(
+  request: import('./types').CreateBacktestRunRequest
+): Promise<import('./types').CreateBacktestRunResponse> {
+  return fetchApi('/api/backtest/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function deleteBacktestRun(
+  runId: string
+): Promise<import('./types').DeleteBacktestRunResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function listBacktestTrades(
+  runId: string,
+  params?: { scanner?: string; verdict?: string; limit?: number }
+): Promise<import('./types').BacktestTradesResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.scanner) searchParams.set('scanner', params.scanner)
+  if (params?.verdict) searchParams.set('verdict', params.verdict)
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  const query = searchParams.toString()
+  return fetchApi(
+    `/api/backtest/runs/${encodeURIComponent(runId)}/trades${query ? `?${query}` : ''}`
+  )
+}
+
 // Export the ApiError for error handling
 export { ApiError }

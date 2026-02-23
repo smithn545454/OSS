@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 import DataStoreTab from '@/components/backtest/DataStoreTab'
+import ReplayEngineTab from '@/components/backtest/ReplayEngineTab'
 
 const TABS = [
   { id: 'data-store', label: 'Data Store' },
@@ -62,11 +63,7 @@ export default function Backtesting() {
       {/* Tab Content */}
       {activeTab === 'data-store' && <DataStoreTab />}
 
-      {activeTab === 'replay-engine' && (
-        <div className="rounded-xl border border-oss-border bg-oss-surface p-12 text-center">
-          <p className="text-oss-muted">Replay Engine — coming in Phase 2</p>
-        </div>
-      )}
+      {activeTab === 'replay-engine' && <ReplayEngineTab />}
 
       {activeTab === 'results' && (
         <div className="rounded-xl border border-oss-border bg-oss-surface p-12 text-center">

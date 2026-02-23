@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from app.core.schemas import Opportunity, PipelineStage, UnderlyingFilterConfig
+from app.core.schemas import Opportunity, UnderlyingFilterConfig
 from app.services.polygon import DailyBar, PolygonClient
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class UnderlyingFilterStats:
 
 class UnderlyingFilter:
     """Applies underlying quality filters to opportunities.
-    
+
     Per Section 11 of requirements:
     - Filter 1: Minimum Underlying Price (>= $5.00)
     - Filter 2: Minimum Average Dollar Volume (>= $20M)
@@ -76,6 +76,8 @@ class UnderlyingFilter:
         config: UnderlyingFilterConfig,
         polygon_client: Optional[PolygonClient] = None,
         earnings_cache: Optional[Any] = None,
+        data_provider: Optional[Any] = None,
+        as_of_date: Optional[date] = None,
     ) -> None:
         """Initialize the underlying filter.
 
@@ -83,30 +85,40 @@ class UnderlyingFilter:
             config: Filter configuration from policy
             polygon_client: Optional Polygon client (will be set externally if not provided)
             earnings_cache: Optional EarningsCacheService for earnings window filter
+            data_provider: Optional DataProvider for unified data access (backtest mode)
+            as_of_date: Target date for backtesting (defaults to today)
         """
         self._config = config
         self._polygon: Optional[PolygonClient] = polygon_client
         self._earnings_cache = earnings_cache
+        self._data_provider = data_provider
+        self._as_of_date = as_of_date
         self._stats = UnderlyingFilterStats()
 
     def set_polygon_client(self, client: PolygonClient) -> None:
         """Set the Polygon client for data fetching."""
         self._polygon = client
 
+    def set_data_provider(self, provider: Any, as_of_date: Optional[date] = None) -> None:
+        """Set the DataProvider for unified data access."""
+        self._data_provider = provider
+        if as_of_date is not None:
+            self._as_of_date = as_of_date
+
     async def filter_opportunities(
         self,
         opportunities: list[Opportunity],
     ) -> tuple[list[Opportunity], UnderlyingFilterStats]:
         """Filter opportunities based on underlying quality.
-        
+
         Args:
             opportunities: List of opportunities from Stage 1
-            
+
         Returns:
             Tuple of (filtered opportunities, statistics)
         """
-        if not self._polygon:
-            raise RuntimeError("Polygon client not set")
+        if not self._data_provider and not self._polygon:
+            raise RuntimeError("No data source available (set DataProvider or Polygon client)")
 
         self._stats = UnderlyingFilterStats(opportunities_in=len(opportunities))
         passed_opportunities: list[Opportunity] = []
@@ -115,11 +127,27 @@ class UnderlyingFilter:
         tickers = list(set(opp.underlying_ticker for opp in opportunities))
         logger.info(f"Filtering {len(opportunities)} opportunities across {len(tickers)} tickers")
 
+        effective_date = self._as_of_date or date.today()
+
         # Batch fetch daily bars for all tickers (need 60+ days for calculations)
-        daily_bars = await self._polygon.get_daily_bars_batch(tickers, days=60)
+        if self._data_provider:
+            daily_bars = await self._data_provider.get_daily_bars_batch(
+                tickers, end_date=effective_date, lookback_days=60,
+            )
+        else:
+            daily_bars = await self._polygon.get_daily_bars_batch(tickers, days=60)
 
         # Get current prices (previous close)
-        prev_closes = await self._polygon.get_previous_close_batch(tickers)
+        if self._data_provider:
+            snapshots = await self._data_provider.get_stock_snapshots_batch(
+                tickers, as_of=effective_date,
+            )
+            # Convert StockSnapshot to dict format expected by _filter_single
+            prev_closes = {
+                t: {"c": s.close} for t, s in snapshots.items()
+            }
+        else:
+            prev_closes = await self._polygon.get_previous_close_batch(tickers)
 
         # Process each opportunity
         for opp in opportunities:
@@ -157,12 +185,12 @@ class UnderlyingFilter:
         prev_close: Optional[dict[str, Any]],
     ) -> FilterResult:
         """Apply all filters to a single opportunity.
-        
+
         Args:
             opportunity: The opportunity to filter
             bars: Daily bars for the underlying
             prev_close: Previous close data
-            
+
         Returns:
             FilterResult with pass/fail status and metrics
         """
@@ -210,11 +238,11 @@ class UnderlyingFilter:
         metrics: dict[str, Any],
     ) -> bool:
         """Check minimum underlying price filter.
-        
+
         Args:
             current_price: Current underlying price
             metrics: Dict to store filter metrics
-            
+
         Returns:
             True if passes filter, False otherwise
         """
@@ -237,16 +265,16 @@ class UnderlyingFilter:
         metrics: dict[str, Any],
     ) -> bool:
         """Check minimum average dollar volume filter.
-        
+
         Calculation per Section 11.2:
         For each of the last 20 trading days:
             daily_dollar_volume[i] = close[i] * volume[i]
         avg_dollar_volume = AVERAGE(daily_dollar_volume)
-        
+
         Args:
             bars: Daily bars for the underlying
             metrics: Dict to store filter metrics
-            
+
         Returns:
             True if passes filter, False otherwise
         """
@@ -285,14 +313,14 @@ class UnderlyingFilter:
         metrics: dict[str, Any],
     ) -> bool:
         """Check data completeness filter.
-        
+
         Count missing trading day bars in 30-day lookback.
         Fail if > max_missing_bars missing.
-        
+
         Args:
             bars: Daily bars for the underlying
             metrics: Dict to store filter metrics
-            
+
         Returns:
             True if passes filter, False otherwise
         """
@@ -347,15 +375,22 @@ class UnderlyingFilter:
         exclude_days = self._config.exclude_earnings_within_days
         metrics["earnings_window_days"] = exclude_days
 
-        if not self._earnings_cache:
+        # Use DataProvider if available, fall back to earnings_cache
+        if not self._earnings_cache and not self._data_provider:
             metrics["days_to_earnings"] = None
             metrics["earnings_window_passed"] = True
-            metrics["earnings_window_note"] = "Earnings cache not available"
-            logger.debug(f"Earnings filter skipped for {ticker} - no earnings cache")
+            metrics["earnings_window_note"] = "Earnings data not available"
+            logger.debug(f"Earnings filter skipped for {ticker} - no data source")
             return True
 
         try:
-            days_to_earnings = await self._earnings_cache.get_days_to_earnings(ticker)
+            if self._data_provider:
+                effective_date = self._as_of_date or date.today()
+                days_to_earnings = await self._data_provider.get_days_to_earnings(
+                    ticker, as_of=effective_date,
+                )
+            else:
+                days_to_earnings = await self._earnings_cache.get_days_to_earnings(ticker)
             metrics["days_to_earnings"] = days_to_earnings
 
             if days_to_earnings is None:
@@ -384,7 +419,7 @@ class UnderlyingFilter:
 
     def get_drop_reasons(self) -> dict[str, int]:
         """Get drop reasons for telemetry.
-        
+
         Returns:
             Dict mapping reason codes to counts
         """
@@ -392,7 +427,7 @@ class UnderlyingFilter:
 
     def get_stats(self) -> UnderlyingFilterStats:
         """Get filter statistics.
-        
+
         Returns:
             UnderlyingFilterStats object
         """

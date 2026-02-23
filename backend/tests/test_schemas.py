@@ -131,6 +131,8 @@ class TestEnumStability:
             ExitReason.PROFIT_TARGET,
             ExitReason.STOP_LOSS,
             ExitReason.TIME_EXIT,
+            ExitReason.MAX_HOLDING,
+            ExitReason.TRAILING_STOP,
             ExitReason.EXPIRATION,
             ExitReason.MANUAL,
         }

@@ -49,25 +49,33 @@ def _make_mock_polygon(
     client = AsyncMock()
     fail_tickers = fail_tickers or set()
 
-    # Mock daily bars
-    bars = []
+    # Mock daily bars — both individual and batch methods
+    bars_by_ticker: dict[str, list] = {}
+    all_bars = []
     for ticker in tickers:
+        ticker_bars = []
         for i in range(bars_per_ticker):
-            bars.append(
-                MagicMock(
-                    ticker=ticker,
-                    date=f"2026-01-{(i % 28) + 1:02d}",
-                    open=180.0 + i,
-                    high=185.0 + i,
-                    low=178.0 + i,
-                    close=183.0 + i,
-                    volume=50_000_000 + i * 1_000_000,
-                )
+            bar = MagicMock(
+                ticker=ticker,
+                date=f"2026-01-{(i % 28) + 1:02d}",
+                open=180.0 + i,
+                high=185.0 + i,
+                low=178.0 + i,
+                close=183.0 + i,
+                volume=50_000_000 + i * 1_000_000,
+                vwap=182.0 + i,
             )
-    client.get_daily_bars_parsed.return_value = bars
+            ticker_bars.append(bar)
+            all_bars.append(bar)
+        bars_by_ticker[ticker] = ticker_bars
+    client.get_daily_bars_parsed.return_value = all_bars
+    client.get_daily_bars_batch.return_value = bars_by_ticker
 
-    # Mock previous close
+    # Mock previous close — both individual and batch methods
     client.get_previous_close.return_value = {"c": 189.0, "v": 60_000_000}
+    client.get_previous_close_batch.return_value = {
+        t: {"c": 189.0, "v": 60_000_000} for t in tickers
+    }
 
     # Mock options chain
     def mock_chain(ticker, **kwargs):
@@ -188,7 +196,9 @@ class TestEmptyScan:
         mock_polygon = AsyncMock()
         # Return empty bars => no breakout/compression signals
         mock_polygon.get_daily_bars_parsed.return_value = []
+        mock_polygon.get_daily_bars_batch.return_value = {}
         mock_polygon.get_previous_close.return_value = {"c": 0, "v": 0}
+        mock_polygon.get_previous_close_batch.return_value = {}
         mock_polygon.get_options_chain.return_value = []
         mock_polygon.get_aggregated_options_volume.return_value = MagicMock(
             total_call_volume=0, total_put_volume=0,

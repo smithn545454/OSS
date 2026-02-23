@@ -638,3 +638,35 @@ export function useBacktestRun(runId: string) {
     staleTime: 10000,
   })
 }
+
+export function useCreateBacktestRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.createBacktestRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'runs'] })
+    },
+  })
+}
+
+export function useDeleteBacktestRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.deleteBacktestRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'runs'] })
+    },
+  })
+}
+
+export function useBacktestTrades(
+  runId: string,
+  params?: { scanner?: string; verdict?: string; limit?: number }
+) {
+  return useQuery({
+    queryKey: ['backtest', 'trades', runId, params] as const,
+    queryFn: () => api.listBacktestTrades(runId, params),
+    enabled: !!runId,
+    staleTime: 30000,
+  })
+}
