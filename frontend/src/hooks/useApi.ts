@@ -670,3 +670,41 @@ export function useBacktestTrades(
     staleTime: 30000,
   })
 }
+
+// Phase 3: Results hooks
+
+export function useBacktestSummary(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'summary', runId] as const,
+    queryFn: () => api.getBacktestSummary(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestEquityCurve(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'equity-curve', runId] as const,
+    queryFn: () => api.getBacktestEquityCurve(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestMonthlyPnl(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'monthly-pnl', runId] as const,
+    queryFn: () => api.getBacktestMonthlyPnl(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestSegments(runId: string, segmentType: string) {
+  return useQuery({
+    queryKey: ['backtest', 'segments', runId, segmentType] as const,
+    queryFn: () => api.getBacktestSegments(runId, segmentType),
+    enabled: !!runId && !!segmentType,
+    staleTime: 60000,
+  })
+}

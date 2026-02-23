@@ -620,13 +620,16 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
                 )
                 all_trades.extend(batch_trades)
 
-            # Mark complete
-            summary = {
-                "total_trades": len(all_trades),
-                "total_days": sum(len(b) for b in batches),
-                "total_batches": total_batches,
-            }
-            await mark_run_completed(run_id, summary=summary)
+            # Compute full metrics and mark complete
+            from app.backtest.metrics import calculate_metrics
+
+            metrics = calculate_metrics(
+                all_trades,
+                starting_capital=config.starting_capital,
+            )
+            metrics["total_days"] = sum(len(b) for b in batches)
+            metrics["total_batches"] = total_batches
+            await mark_run_completed(run_id, summary=metrics)
 
             return {
                 "status": "success",

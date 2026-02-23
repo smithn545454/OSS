@@ -10,6 +10,12 @@ Phase 2 endpoints (Replay Engine):
 - GET  /runs/{run_id}      — Get run details + progress
 - DELETE /runs/{run_id}    — Cancel/delete a run
 - GET  /runs/{run_id}/trades — List trades for a run
+
+Phase 3 endpoints (Results):
+- GET  /runs/{run_id}/summary       — Core metrics summary
+- GET  /runs/{run_id}/equity-curve  — Daily equity data
+- GET  /runs/{run_id}/monthly-pnl   — Monthly P&L breakdown
+- GET  /runs/{run_id}/segments/{type} — Segmented analysis
 """
 
 from __future__ import annotations
@@ -422,11 +428,15 @@ async def _run_backtest_inline(config: BacktestRunConfig) -> None:
             )
             all_trades.extend(batch_trades)
 
-        summary = {
-            "total_trades": len(all_trades),
-            "total_days": sum(len(b) for b in batches),
-        }
-        await mark_run_completed(run.run_id, summary=summary)
+        # Compute full metrics
+        from app.backtest.metrics import calculate_metrics
+
+        metrics = calculate_metrics(
+            all_trades,
+            starting_capital=config.starting_capital,
+        )
+        metrics["total_days"] = sum(len(b) for b in batches)
+        await mark_run_completed(run.run_id, summary=metrics)
 
     except Exception as e:
         logger.error(f"Backtest run failed: {e}", exc_info=True)
@@ -638,4 +648,192 @@ async def list_backtest_trades(
         }
     except Exception as e:
         logger.error(f"Error listing trades for run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Results Endpoints (Phase 3)
+# ============================================================================
+
+
+@router.get("/runs/{run_id}/summary")
+async def get_run_summary(run_id: str) -> dict[str, Any]:
+    """Get computed metrics summary for a completed backtest run.
+
+    Returns the summary dict stored on the BacktestRun record.
+    If the run is still running or has no summary, returns partial info.
+    """
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    summary = run.get("summary")
+    if summary:
+        return {
+            "run_id": run_id,
+            "status": run.get("status"),
+            "summary": summary,
+        }
+
+    # If no summary yet, compute from trades on the fly
+    if run.get("status") == "COMPLETED":
+        try:
+            from app.backtest.metrics import calculate_metrics
+            from app.core.schemas import BacktestTrade
+
+            trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+            trades = [BacktestTrade(**t) for t in trade_dicts]
+
+            config = run.get("config", {})
+            starting_capital = config.get("starting_capital", 10_000.0)
+            summary = calculate_metrics(trades, starting_capital=starting_capital)
+
+            # Persist the computed summary for future requests
+            await BacktestRunTable.update_progress(run_id, summary=summary)
+
+            return {
+                "run_id": run_id,
+                "status": "COMPLETED",
+                "summary": summary,
+            }
+        except Exception as e:
+            logger.error(f"Error computing summary for {run_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "run_id": run_id,
+        "status": run.get("status"),
+        "summary": None,
+        "message": f"Run is {run.get('status')} — summary not yet available",
+    }
+
+
+@router.get("/runs/{run_id}/equity-curve")
+async def get_equity_curve(run_id: str) -> dict[str, Any]:
+    """Get the daily equity curve for a completed backtest run."""
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    if run.get("status") != "COMPLETED":
+        return {
+            "run_id": run_id,
+            "status": run.get("status"),
+            "curve": [],
+            "message": f"Run is {run.get('status')} — equity curve not yet available",
+        }
+
+    try:
+        from app.backtest.equity_curve import generate_equity_curve
+        from app.core.schemas import BacktestTrade
+
+        trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+        trades = [BacktestTrade(**t) for t in trade_dicts]
+
+        config = run.get("config", {})
+        starting_capital = config.get("starting_capital", 10_000.0)
+        start_date = config.get("start_date")
+        end_date = config.get("end_date")
+
+        curve = generate_equity_curve(
+            trades,
+            starting_capital=starting_capital,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        return {
+            "run_id": run_id,
+            "starting_capital": starting_capital,
+            "curve": curve,
+            "data_points": len(curve),
+        }
+    except Exception as e:
+        logger.error(f"Error generating equity curve for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/{run_id}/monthly-pnl")
+async def get_monthly_pnl(run_id: str) -> dict[str, Any]:
+    """Get monthly P&L breakdown for a completed backtest run."""
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    if run.get("status") != "COMPLETED":
+        return {
+            "run_id": run_id,
+            "status": run.get("status"),
+            "months": [],
+        }
+
+    try:
+        from app.backtest.equity_curve import generate_monthly_pnl
+        from app.core.schemas import BacktestTrade
+
+        trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+        trades = [BacktestTrade(**t) for t in trade_dicts]
+
+        months = generate_monthly_pnl(trades)
+
+        return {
+            "run_id": run_id,
+            "months": months,
+            "total_months": len(months),
+        }
+    except Exception as e:
+        logger.error(f"Error generating monthly P&L for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/{run_id}/segments/{segment_type}")
+async def get_segments(
+    run_id: str,
+    segment_type: str,
+) -> dict[str, Any]:
+    """Get segmented analysis for a completed backtest run.
+
+    Args:
+        run_id: Backtest run ID
+        segment_type: One of: scanner, verdict, score_bucket, regime,
+                      month, holding_period, exit_reason
+    """
+    from app.backtest.segments import SEGMENT_TYPES
+
+    if segment_type not in SEGMENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid segment type '{segment_type}'. "
+                   f"Must be one of: {SEGMENT_TYPES}",
+        )
+
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    if run.get("status") != "COMPLETED":
+        return {
+            "run_id": run_id,
+            "status": run.get("status"),
+            "segment_type": segment_type,
+            "segments": [],
+        }
+
+    try:
+        from app.backtest.segments import analyze_segment
+        from app.core.schemas import BacktestTrade
+
+        trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+        trades = [BacktestTrade(**t) for t in trade_dicts]
+
+        segments = analyze_segment(trades, segment_type)
+
+        return {
+            "run_id": run_id,
+            "segment_type": segment_type,
+            "segments": segments,
+            "total_segments": len(segments),
+        }
+    except Exception as e:
+        logger.error(f"Error computing segments for {run_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

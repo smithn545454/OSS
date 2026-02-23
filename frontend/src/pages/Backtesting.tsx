@@ -4,6 +4,7 @@ import { FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 import DataStoreTab from '@/components/backtest/DataStoreTab'
 import ReplayEngineTab from '@/components/backtest/ReplayEngineTab'
+import ResultsTab from '@/components/backtest/ResultsTab'
 
 const TABS = [
   { id: 'data-store', label: 'Data Store' },
@@ -65,11 +66,7 @@ export default function Backtesting() {
 
       {activeTab === 'replay-engine' && <ReplayEngineTab />}
 
-      {activeTab === 'results' && (
-        <div className="rounded-xl border border-oss-border bg-oss-surface p-12 text-center">
-          <p className="text-oss-muted">Results Tracker — coming in Phase 3</p>
-        </div>
-      )}
+      {activeTab === 'results' && <ResultsTab />}
 
       {activeTab === 'ai-advisor' && (
         <div className="rounded-xl border border-oss-border bg-oss-surface p-12 text-center">

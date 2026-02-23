@@ -614,5 +614,34 @@ export async function listBacktestTrades(
   )
 }
 
+// Phase 3: Results API
+
+export async function getBacktestSummary(
+  runId: string
+): Promise<import('./types').BacktestSummaryResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/summary`)
+}
+
+export async function getBacktestEquityCurve(
+  runId: string
+): Promise<import('./types').EquityCurveResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/equity-curve`)
+}
+
+export async function getBacktestMonthlyPnl(
+  runId: string
+): Promise<import('./types').MonthlyPnlResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/monthly-pnl`)
+}
+
+export async function getBacktestSegments(
+  runId: string,
+  segmentType: string
+): Promise<import('./types').SegmentResponse> {
+  return fetchApi(
+    `/api/backtest/runs/${encodeURIComponent(runId)}/segments/${encodeURIComponent(segmentType)}`
+  )
+}
+
 // Export the ApiError for error handling
 export { ApiError }

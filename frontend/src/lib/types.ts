@@ -1360,3 +1360,95 @@ export interface DeleteBacktestRunResponse {
   run_id: string
   trades_deleted: number
 }
+
+// Phase 3: Results Types
+
+export interface BacktestSummary {
+  total_trades: number
+  winners: number
+  losers: number
+  breakevens: number
+  win_rate: number
+  net_pnl: number
+  gross_profit: number
+  gross_loss: number
+  total_return_pct: number
+  profit_factor: number | null
+  avg_win_pct: number
+  avg_loss_pct: number
+  avg_pnl_per_trade: number
+  avg_days_held: number
+  trades_per_day: number
+  sharpe_ratio: number | null
+  max_drawdown_pct: number
+  max_drawdown_duration_days: number
+  expectancy: number
+  avg_mfe_pct: number
+  avg_mae_pct: number
+  exit_reasons: Record<string, number>
+  starting_capital: number
+  first_trade_date: string | null
+  last_trade_date: string | null
+}
+
+export interface BacktestSummaryResponse {
+  run_id: string
+  status: string
+  summary: BacktestSummary | null
+  message?: string
+}
+
+export interface EquityCurvePoint {
+  date: string
+  equity: number
+  daily_pnl: number
+  drawdown_pct: number
+  peak_equity: number
+  trades_closed: number
+  return_pct: number
+}
+
+export interface EquityCurveResponse {
+  run_id: string
+  starting_capital: number
+  curve: EquityCurvePoint[]
+  data_points: number
+}
+
+export interface MonthlyPnl {
+  month: string
+  pnl: number
+  trades: number
+  winners: number
+  losers: number
+  win_rate: number
+}
+
+export interface MonthlyPnlResponse {
+  run_id: string
+  months: MonthlyPnl[]
+  total_months: number
+}
+
+export interface SegmentData {
+  segment: string
+  segment_type: string
+  trades: number
+  winners: number
+  losers: number
+  win_rate: number
+  net_pnl: number
+  avg_return_pct: number
+  avg_win_pct: number
+  avg_loss_pct: number
+  profit_factor: number | null
+  sharpe: number | null
+  avg_days_held: number
+}
+
+export interface SegmentResponse {
+  run_id: string
+  segment_type: string
+  segments: SegmentData[]
+  total_segments: number
+}
