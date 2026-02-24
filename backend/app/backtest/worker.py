@@ -62,13 +62,15 @@ async def process_day(
         )
 
         # Run the full pipeline (stages 1-7)
-        # Side effects suppressed: no Slack, no LLM, no live DDB writes
+        # Side effects are naturally suppressed because:
+        # - No SlackClient configured → no Slack notifications
+        # - No LLM provider → no thesis generation
+        # - Paper trading positions not created by scanner
         result = await orchestrator.run_scan(
+            policy_config=config.policy_snapshot,
             tickers=config.policy_snapshot.watchlist.tickers,
             run_full_pipeline=True,
-            persist_results=False,
-            generate_theses=False,
-            create_positions=False,
+            as_of_date=as_of_date,
         )
 
         # Process each evaluation that received APPROVE or WATCH
