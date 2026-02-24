@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 class HistoricalDataProvider:
     """DataProvider backed by S3 parquet files for backtesting."""
 
-    def __init__(self, s3_bucket: str, s3_client: Any = None) -> None:
+    def __init__(
+        self, s3_bucket: str, s3_client: Any = None, as_of_date: Any = None
+    ) -> None:
         self.s3_bucket = s3_bucket
+        self.as_of_date = as_of_date  # Contextual: callers track which date is being processed
         if s3_client is None:
             import boto3
 

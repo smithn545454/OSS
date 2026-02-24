@@ -574,8 +574,15 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
         config_data = event.get("config", {})
         config = BacktestRunConfig(**config_data)
 
-        # Create run record
-        run = await create_backtest_run(config, persist=True)
+        # Use existing run_id if provided (created by API endpoint), else create new
+        existing_run_id = event.get("run_id")
+        if existing_run_id:
+            # Load the existing run and update it
+            run = await create_backtest_run(
+                config, persist=True, run_id=existing_run_id
+            )
+        else:
+            run = await create_backtest_run(config, persist=True)
         run_id = run.run_id
 
         # Generate batches

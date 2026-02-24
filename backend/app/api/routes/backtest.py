@@ -514,21 +514,21 @@ async def create_backtest_run_endpoint(
         function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
 
         if function_name and s3_bucket:
-            # Production: invoke Lambda coordinator
+            # Production: create run first, then invoke Lambda coordinator with run_id
             try:
+                run = await create_backtest_run(config, persist=True)
                 lambda_client = boto3.client("lambda")
                 payload = {
                     "source": "oss.scheduler",
                     "action": "backtest_coordinator",
                     "config": config.model_dump(mode="json"),
+                    "run_id": run.run_id,
                 }
                 lambda_client.invoke(
                     FunctionName=function_name,
                     InvocationType="Event",
                     Payload=json.dumps(payload),
                 )
-                # Create run record so we can return the ID immediately
-                run = await create_backtest_run(config, persist=True)
                 return {
                     "status": "started",
                     "run_id": run.run_id,

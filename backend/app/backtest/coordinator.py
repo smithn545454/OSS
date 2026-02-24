@@ -67,17 +67,20 @@ def batch_days(days: list[date], batch_size: int = DAYS_PER_BATCH) -> list[list[
 async def create_backtest_run(
     config: BacktestRunConfig,
     persist: bool = True,
+    run_id: Optional[str] = None,
 ) -> BacktestRun:
     """Create a new backtest run record.
 
     Args:
         config: Run configuration
         persist: Whether to save to DynamoDB
+        run_id: Optional existing run ID (to reuse a pre-created run record)
 
     Returns:
         BacktestRun record with status=PENDING.
     """
-    run_id = str(uuid.uuid4())
+    if run_id is None:
+        run_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
     # Calculate total trading days
