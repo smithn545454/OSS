@@ -73,25 +73,39 @@ async def process_day(
             as_of_date=as_of_date,
         )
 
+        # Build opportunity_id → scanner type lookup
+        opp_scanner_map: dict[str, str] = {}
+        for opp in result.opportunities + result.filtered_opportunities:
+            if opp.scanner_triggers:
+                opp_scanner_map[opp.opportunity_id] = (
+                    opp.scanner_triggers[0].scanner_type.value
+                )
+
         # Process each evaluation that received APPROVE or WATCH
-        for eval_record in result.evaluations:
-            verdict = eval_record.get("verdict") or eval_record.get("final_verdict")
-            if verdict not in (Verdict.APPROVE.value, Verdict.WATCH.value, "APPROVE", "WATCH"):
+        for evaluation in result.evaluations:
+            # Look up the decision for this evaluation
+            decision = result.decisions.get(evaluation.evaluation_id)
+            if not decision:
+                continue
+            verdict = decision.verdict
+            if verdict not in (Verdict.APPROVE, Verdict.WATCH):
                 continue
 
-            # Extract trade entry data
-            option_ticker = eval_record.get("option_ticker", "")
-            underlying_ticker = eval_record.get("underlying_ticker", "")
-            option_type = eval_record.get("option_type", "CALL")
-            strike = float(eval_record.get("strike", 0) or 0)
-            expiration_date = eval_record.get("expiration_date", "")
-            scanner_type = eval_record.get("scanner_type", "UNKNOWN")
-            combined_score = float(eval_record.get("combined_score", 0) or 0)
+            # Extract trade entry data from the Evaluation object
+            option_ticker = evaluation.option_ticker
+            underlying_ticker = evaluation.underlying_ticker
+            option_type = evaluation.option_type.value
+            strike = evaluation.strike
+            expiration_date = evaluation.expiration_date
+            scanner_type = (
+                evaluation.scanner_source
+                or opp_scanner_map.get(evaluation.opportunity_id, "UNKNOWN")
+            )
+            combined_score = decision.final_score
 
             # Get entry price with slippage
-            ask = float(eval_record.get("ask", 0) or 0)
-            bid = float(eval_record.get("bid", 0) or 0)
-            mid = (ask + bid) / 2 if (ask + bid) > 0 else float(eval_record.get("mid", 0) or 0)
+            ask = evaluation.ask
+            mid = evaluation.mid
 
             if mid <= 0 and ask <= 0:
                 logger.debug(f"Skipping {option_ticker}: no valid price data")
@@ -122,7 +136,7 @@ async def process_day(
                 expiration_date=expiration_date,
                 exit_config=config.exit_rules,
                 scanner_type=scanner_type,
-                verdict=str(verdict),
+                verdict=verdict.value,
                 combined_score=combined_score,
                 run_id=run_id,
                 slippage_model=config.slippage_model,
