@@ -141,6 +141,8 @@ async def resolve_exit(
         # Get contract price for this day
         current_price = await _get_contract_price(
             data_provider, underlying_ticker, option_ticker, current,
+            strike=strike, expiration_date=expiration_date,
+            option_type=option_type,
         )
 
         if current_price is None:
@@ -188,6 +190,8 @@ async def resolve_exit(
     # Reached expiration or max scan — force exit
     final_price = await _get_contract_price(
         data_provider, underlying_ticker, option_ticker, exp_date,
+        strike=strike, expiration_date=expiration_date,
+        option_type=option_type,
     )
     if final_price is None:
         # Contract expired worthless or no data
@@ -246,21 +250,37 @@ async def _get_contract_price(
     underlying_ticker: str,
     option_ticker: str,
     as_of: date,
+    strike: float = 0.0,
+    expiration_date: str = "",
+    option_type: str = "",
 ) -> Optional[float]:
     """Get contract mid price from historical data.
 
-    Attempts to find the contract in the options chain for the given date.
-    Returns the mid price (bid+ask)/2, or close price as fallback.
+    Matches contract by underlying ticker + strike + expiry + type.
+    Returns the mid price (bid+ask)/2, or last_price as fallback.
     """
     try:
         chain = await data_provider.get_options_chain(
             underlying_ticker, as_of=as_of, min_dte=0, max_dte=365,
         )
+        # Normalize option_type for matching
+        ot_lower = option_type.lower() if option_type else ""
+        target_type = "call" if ot_lower in ("call", "c") else "put"
+
         for contract in chain:
             details = contract.get("details", {})
-            ticker = details.get("ticker") or contract.get("ticker")
-            if ticker == option_ticker:
-                # Get mid price
+
+            # Match by strike, expiry, and contract type
+            c_strike = float(details.get("strike_price", 0) or 0)
+            c_expiry = str(details.get("expiration_date", ""))
+            c_type = str(details.get("contract_type", "")).lower()
+
+            if (
+                abs(c_strike - strike) < 0.01
+                and c_expiry == expiration_date
+                and c_type == target_type
+            ):
+                # Get mid price from bid/ask
                 quote = contract.get("last_quote", {})
                 if isinstance(quote, dict):
                     bid = float(quote.get("bid", 0) or 0)
@@ -272,7 +292,7 @@ async def _get_contract_price(
                 if bid > 0 and ask > 0:
                     return (bid + ask) / 2
 
-                # Fallback to day close
+                # Fallback to last_price (day close)
                 day = contract.get("day", {})
                 if isinstance(day, dict):
                     close = float(day.get("close", 0) or 0)
@@ -284,7 +304,10 @@ async def _get_contract_price(
         return None
 
     except Exception as e:
-        logger.debug(f"Could not get price for {option_ticker} on {as_of}: {e}")
+        logger.debug(
+            f"Could not get price for {underlying_ticker} "
+            f"{strike} {option_type} {expiration_date} on {as_of}: {e}"
+        )
         return None
 
 
