@@ -77,8 +77,9 @@ async def process_day(
         opp_scanner_map: dict[str, str] = {}
         for opp in result.opportunities + result.filtered_opportunities:
             if opp.scanner_triggers:
+                st = opp.scanner_triggers[0].scanner_type
                 opp_scanner_map[opp.opportunity_id] = (
-                    opp.scanner_triggers[0].scanner_type.value
+                    st.value if hasattr(st, "value") else str(st)
                 )
 
         # Process each evaluation that received APPROVE or WATCH
@@ -94,7 +95,8 @@ async def process_day(
             # Extract trade entry data from the Evaluation object
             option_ticker = evaluation.option_ticker
             underlying_ticker = evaluation.underlying_ticker
-            option_type = evaluation.option_type.value
+            ot = evaluation.option_type
+            option_type = ot.value if hasattr(ot, "value") else str(ot)
             strike = evaluation.strike
             expiration_date = evaluation.expiration_date
             scanner_type = (
@@ -136,7 +138,7 @@ async def process_day(
                 expiration_date=expiration_date,
                 exit_config=config.exit_rules,
                 scanner_type=scanner_type,
-                verdict=verdict.value,
+                verdict=verdict.value if hasattr(verdict, "value") else str(verdict),
                 combined_score=combined_score,
                 run_id=run_id,
                 slippage_model=config.slippage_model,
@@ -152,7 +154,10 @@ async def process_day(
         )
 
     except Exception as e:
-        logger.error(f"Error processing day {as_of_date}: {e}")
+        import traceback
+        logger.error(
+            f"Error processing day {as_of_date}: {e}\n{traceback.format_exc()}"
+        )
 
     return trades
 
