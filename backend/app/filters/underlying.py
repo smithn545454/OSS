@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from app.core.schemas import Opportunity, UnderlyingFilterConfig
@@ -334,8 +334,9 @@ class UnderlyingFilter:
         if not bars:
             actual_bars = 0
         else:
-            # Get bars from last 30 calendar days
-            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+            # Get bars from last 30 calendar days relative to as_of_date (or today)
+            effective_date = self._as_of_date or date.today()
+            cutoff_date = (effective_date - timedelta(days=30)).isoformat()
             recent_bars = [b for b in bars if b.date >= cutoff_date]
             actual_bars = len(recent_bars)
 
