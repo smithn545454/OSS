@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     # OpenAI - can be set directly or via OPENAI_SECRET_ARN
     openai_api_key: Optional[str] = None
 
+    # Backtest S3 bucket (set via BACKTEST_S3_BUCKET env var)
+    backtest_s3_bucket: Optional[str] = None
+
     # Slack webhook for opportunity alerts (optional)
     slack_webhook_url: Optional[str] = None
 

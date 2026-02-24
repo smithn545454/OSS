@@ -7,31 +7,32 @@ and individual feature calculations.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from datetime import date
+from typing import Any, Optional, Sequence
 
 from app.core.schemas import (
     Evaluation,
-    Opportunity,
+    FeatureConfig,
     IVHistory,
     OIHistory,
-    FeatureConfig,
+    Opportunity,
 )
-from app.services.polygon import DailyBar, PolygonClient
-from app.services.catalyst import CatalystDataService
-from app.features.models import FeatureSet
-from app.features.underlying import compute_underlying_features, UnderlyingFeatures
-from app.features.relative_strength import compute_relative_strength_features
-from app.features.volatility import compute_volatility_features
+from app.features.catalyst import compute_catalyst_features
 from app.features.contract import compute_contract_features
 from app.features.liquidity import compute_liquidity_features
-from app.features.catalyst import compute_catalyst_features
+from app.features.models import FeatureSet
+from app.features.relative_strength import compute_relative_strength_features
+from app.features.underlying import UnderlyingFeatures, compute_underlying_features
+from app.features.volatility import compute_volatility_features
+from app.services.catalyst import CatalystDataService
+from app.services.polygon import DailyBar, PolygonClient
 
 logger = logging.getLogger(__name__)
 
 
 class FeatureComputer:
     """Orchestrates feature computation for Stage 4 of the pipeline.
-    
+
     This class coordinates:
     1. Fetching required market data (underlying bars, SPY bars)
     2. Retrieving historical IV and OI data from DynamoDB
@@ -39,30 +40,36 @@ class FeatureComputer:
     4. Computing all feature categories
     5. Assembling FeatureSet records
     """
-    
+
     def __init__(
         self,
-        polygon_client: PolygonClient,
+        polygon_client: Optional[PolygonClient] = None,
         catalyst_service: Optional[CatalystDataService] = None,
         config: Optional[FeatureConfig] = None,
+        data_provider: Optional[Any] = None,
+        as_of_date: Optional[date] = None,
     ) -> None:
         """Initialize the feature computer.
-        
+
         Args:
-            polygon_client: Polygon API client for market data
+            polygon_client: Polygon API client for market data (live mode)
             catalyst_service: Service for earnings/SEC filing data (optional)
             config: Feature computation configuration
+            data_provider: Optional DataProvider for unified data access (backtest mode)
+            as_of_date: Target date for backtesting (defaults to today)
         """
         self._polygon = polygon_client
         self._catalyst = catalyst_service
         self._config = config or FeatureConfig()
-        
+        self._data_provider = data_provider
+        self._as_of_date = as_of_date
+
         # Cache for underlying bars (ticker -> bars)
         self._underlying_bars_cache: dict[str, list[DailyBar]] = {}
-        
+
         # Cache for SPY bars
         self._spy_bars: Optional[list[DailyBar]] = None
-    
+
     async def compute_features(
         self,
         evaluation: Evaluation,
@@ -75,7 +82,7 @@ class FeatureComputer:
         recent_sec_filing: Optional[bool] = None,
     ) -> FeatureSet:
         """Compute all features for a single evaluation.
-        
+
         Args:
             evaluation: Evaluation record from Stage 3
             opportunity: Parent opportunity (for scanner triggers)
@@ -85,61 +92,87 @@ class FeatureComputer:
             spy_bars: Daily bars for SPY (optional, will be fetched if None)
             days_to_earnings: Pre-fetched days to earnings (optional)
             recent_sec_filing: Pre-fetched SEC filing status (optional)
-            
+
         Returns:
             FeatureSet with all computed features
         """
         ticker = evaluation.underlying_ticker
-        
+
+        effective_date = self._as_of_date or date.today()
+
         # Get underlying bars if not provided
         if underlying_bars is None:
             underlying_bars = self._underlying_bars_cache.get(ticker)
             if underlying_bars is None:
-                underlying_bars = await self._polygon.get_daily_bars_parsed(
-                    ticker=ticker,
-                    from_date=self._get_lookback_date(60),
-                    to_date=self._get_today(),
-                )
+                if self._data_provider:
+                    underlying_bars = await self._data_provider.get_daily_bars(
+                        ticker, end_date=effective_date, lookback_days=60,
+                    )
+                elif self._polygon:
+                    underlying_bars = await self._polygon.get_daily_bars_parsed(
+                        ticker=ticker,
+                        from_date=self._get_lookback_date(60),
+                        to_date=self._get_today(),
+                    )
+                else:
+                    underlying_bars = []
                 self._underlying_bars_cache[ticker] = underlying_bars
-        
+
         # Get SPY bars if not provided
         if spy_bars is None:
             if self._spy_bars is None:
-                self._spy_bars = await self._polygon.get_daily_bars_parsed(
-                    ticker=self._config.rs_benchmark_ticker,
-                    from_date=self._get_lookback_date(60),
-                    to_date=self._get_today(),
-                )
+                if self._data_provider:
+                    self._spy_bars = await self._data_provider.get_daily_bars(
+                        self._config.rs_benchmark_ticker,
+                        end_date=effective_date, lookback_days=60,
+                    )
+                elif self._polygon:
+                    self._spy_bars = await self._polygon.get_daily_bars_parsed(
+                        ticker=self._config.rs_benchmark_ticker,
+                        from_date=self._get_lookback_date(60),
+                        to_date=self._get_today(),
+                    )
+                else:
+                    self._spy_bars = []
             spy_bars = self._spy_bars
-        
+
         # =========================================================================
         # Category F: Catalyst Features (fetch early for IV regime classification)
         # =========================================================================
-        # Fetch catalyst data if not provided and service is available
-        if self._catalyst is not None:
+        # Fetch catalyst data from DataProvider or CatalystDataService
+        if self._data_provider:
+            if days_to_earnings is None:
+                days_to_earnings = await self._data_provider.get_days_to_earnings(
+                    ticker, as_of=effective_date,
+                )
+            if recent_sec_filing is None:
+                recent_sec_filing = await self._data_provider.get_recent_sec_filing(
+                    ticker, as_of=effective_date,
+                )
+        elif self._catalyst is not None:
             if days_to_earnings is None:
                 days_to_earnings = await self._catalyst.get_days_to_earnings(ticker)
             if recent_sec_filing is None:
                 recent_sec_filing = await self._catalyst.get_recent_sec_filing(ticker)
-        
+
         # Default to None/False if still not available
         if recent_sec_filing is None:
             recent_sec_filing = False
-        
+
         catalyst_features = compute_catalyst_features(
             days_to_earnings=days_to_earnings,
             recent_sec_filing=recent_sec_filing,
         )
-        
+
         # =========================================================================
         # Category A: Underlying Technical Features
         # =========================================================================
         underlying_features = compute_underlying_features(underlying_bars)
-        
+
         if underlying_features is None:
             # Fallback with minimal data from evaluation
             underlying_features = UnderlyingFeatures(close=evaluation.underlying_price)
-        
+
         # =========================================================================
         # Category B: Relative Strength Features
         # =========================================================================
@@ -148,7 +181,7 @@ class FeatureComputer:
             underlying_return_20d=underlying_features.return_20d,
             spy_bars=spy_bars,
         )
-        
+
         # =========================================================================
         # Category C: Volatility Features (uses days_to_earnings for IV regime)
         # =========================================================================
@@ -159,12 +192,12 @@ class FeatureComputer:
             days_to_earnings=days_to_earnings,  # Now passed from catalyst data
             config=self._config,
         )
-        
+
         # =========================================================================
         # Category D: Contract-Specific Features
         # =========================================================================
         contract_features = compute_contract_features(evaluation)
-        
+
         # =========================================================================
         # Category E: Liquidity Features
         # =========================================================================
@@ -173,7 +206,7 @@ class FeatureComputer:
             volume=evaluation.volume,
             oi_history=oi_history,
         )
-        
+
         # =========================================================================
         # Assemble FeatureSet
         # =========================================================================
@@ -219,7 +252,7 @@ class FeatureComputer:
             days_to_earnings=catalyst_features.days_to_earnings,
             recent_sec_filing=catalyst_features.recent_sec_filing,
         )
-    
+
     async def compute_features_batch(
         self,
         evaluations: Sequence[Evaluation],
@@ -228,65 +261,74 @@ class FeatureComputer:
         oi_history_map: Optional[dict[str, Sequence[OIHistory]]] = None,
     ) -> list[FeatureSet]:
         """Compute features for multiple evaluations.
-        
+
         Optimizes data fetching by batching API calls.
-        
+
         Args:
             evaluations: List of Evaluation records
             opportunities: List of Opportunity records (for linking)
             iv_history_map: Pre-fetched IV history by ticker
             oi_history_map: Pre-fetched OI history by option_ticker
-            
+
         Returns:
             List of FeatureSet records
         """
         if not evaluations:
             return []
-        
+
         # Build opportunity lookup
         opp_by_ticker = {opp.underlying_ticker: opp for opp in opportunities}
-        
+
         # Get unique tickers for batch fetching
         tickers = list(set(e.underlying_ticker for e in evaluations))
         tickers.append(self._config.rs_benchmark_ticker)  # Add SPY
-        
+
+        effective_date = self._as_of_date or date.today()
+
         # Batch fetch underlying bars
         logger.info(f"Fetching daily bars for {len(tickers)} tickers")
-        bars_by_ticker = await self._polygon.get_daily_bars_batch(tickers, days=60)
-        
+        if self._data_provider:
+            bars_by_ticker = await self._data_provider.get_daily_bars_batch(
+                tickers, end_date=effective_date, lookback_days=60,
+            )
+        elif self._polygon:
+            bars_by_ticker = await self._polygon.get_daily_bars_batch(tickers, days=60)
+        else:
+            bars_by_ticker = {}
+
         # Cache bars
         self._underlying_bars_cache.update(bars_by_ticker)
         self._spy_bars = bars_by_ticker.get(self._config.rs_benchmark_ticker)
-        
+
         # Prefetch catalyst data for all tickers (if service available)
         catalyst_tickers = [t for t in tickers if t != self._config.rs_benchmark_ticker]
         if self._catalyst is not None and catalyst_tickers:
             logger.info(f"Prefetching catalyst data for {len(catalyst_tickers)} tickers")
             await self._catalyst.prefetch_batch(catalyst_tickers)
-        
+
         # Compute features for each evaluation
         feature_sets: list[FeatureSet] = []
-        
+
         for evaluation in evaluations:
             ticker = evaluation.underlying_ticker
             opportunity = opp_by_ticker.get(ticker)
-            
+
             if not opportunity:
                 logger.warning(f"No opportunity found for ticker {ticker}")
                 continue
-            
+
             # Get historical data
             iv_history = None
             if iv_history_map:
                 iv_history = iv_history_map.get(ticker)
-            
+
             oi_history = None
             if oi_history_map:
                 oi_history = oi_history_map.get(evaluation.option_ticker)
-            
+
             underlying_bars = bars_by_ticker.get(ticker)
             spy_bars = self._spy_bars
-            
+
             try:
                 feature_set = await self.compute_features(
                     evaluation=evaluation,
@@ -301,23 +343,23 @@ class FeatureComputer:
             except Exception as e:
                 logger.error(f"Error computing features for {evaluation.option_ticker}: {e}")
                 continue
-        
+
         logger.info(f"Computed features for {len(feature_sets)} evaluations")
         return feature_sets
-    
+
     def clear_cache(self) -> None:
         """Clear cached data."""
         self._underlying_bars_cache.clear()
         self._spy_bars = None
         if self._catalyst is not None:
             self._catalyst.clear_cache()
-    
+
     @staticmethod
     def _get_today() -> str:
         """Get today's date as YYYY-MM-DD."""
         from datetime import datetime
         return datetime.now().strftime("%Y-%m-%d")
-    
+
     @staticmethod
     def _get_lookback_date(days: int) -> str:
         """Get date N days ago as YYYY-MM-DD."""

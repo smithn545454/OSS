@@ -10,7 +10,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from app.core.schemas import (
@@ -31,17 +31,23 @@ class ScanContext:
     Contains shared resources and data used across multiple ticker scans.
     """
 
-    polygon: PolygonClient
+    polygon: Optional[PolygonClient]  # None in backtest mode
     policy_config: PolicyConfig
     run_timestamp: str
     # Pre-fetched data that can be shared across tickers
     cached_data: dict[str, Any]
+    # DataProvider for unified data access (live or historical)
+    data_provider: Optional[Any] = None
+    # Target date for backtesting (defaults to today for live mode)
+    as_of_date: Optional[date] = None
 
     @classmethod
     def create(
         cls,
-        polygon: PolygonClient,
+        polygon: Optional[PolygonClient],
         policy_config: PolicyConfig,
+        data_provider: Any = None,
+        as_of_date: Optional[date] = None,
     ) -> "ScanContext":
         """Create a new scan context."""
         return cls(
@@ -49,6 +55,8 @@ class ScanContext:
             policy_config=policy_config,
             run_timestamp=datetime.now(timezone.utc).isoformat(),
             cached_data={},
+            data_provider=data_provider,
+            as_of_date=as_of_date,
         )
 
 

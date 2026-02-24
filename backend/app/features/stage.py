@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional, Sequence
+from datetime import date
+from typing import Any, Optional, Sequence
 
 from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
@@ -28,28 +29,39 @@ logger = logging.getLogger(__name__)
 
 class FeatureComputationStage:
     """Stage 4: Feature Computation.
-    
+
     Takes Evaluations from Stage 3 and computes all features needed
     for pillar scoring in Stage 5.
     """
 
     def __init__(
         self,
-        polygon_client: PolygonClient,
-        orchestrator: PipelineOrchestrator,
+        polygon_client: Optional[PolygonClient] = None,
+        orchestrator: Optional[PipelineOrchestrator] = None,
         config: Optional[FeatureConfig] = None,
+        data_provider: Optional[Any] = None,
+        as_of_date: Optional[date] = None,
     ) -> None:
         """Initialize the feature computation stage.
-        
+
         Args:
-            polygon_client: Polygon API client for market data
+            polygon_client: Polygon API client for market data (live mode)
             orchestrator: Pipeline orchestrator for event tracking
             config: Feature computation configuration
+            data_provider: Optional DataProvider for unified data access (backtest mode)
+            as_of_date: Target date for backtesting (defaults to today)
         """
         self._polygon = polygon_client
-        self._orchestrator = orchestrator
+        self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = config or FeatureConfig()
-        self._computer = FeatureComputer(polygon_client, config=config)
+        self._data_provider = data_provider
+        self._as_of_date = as_of_date
+        self._computer = FeatureComputer(
+            polygon_client=polygon_client,
+            config=config,
+            data_provider=data_provider,
+            as_of_date=as_of_date,
+        )
 
     async def execute(
         self,
@@ -59,13 +71,13 @@ class FeatureComputationStage:
         persist_features: bool = True,
     ) -> list[FeatureSet]:
         """Execute feature computation stage.
-        
+
         Args:
             run_id: Pipeline run ID for tracking
             evaluations: Evaluations from Stage 3
             opportunities: Opportunities (for linking and scanner triggers)
             persist_features: If True, save FeatureValues to DynamoDB
-            
+
         Returns:
             List of computed FeatureSets
         """
@@ -135,12 +147,20 @@ class FeatureComputationStage:
         if not tickers:
             return {}
 
+        effective_date = self._as_of_date or date.today()
+
         async def fetch_one(ticker: str) -> tuple[str, list[IVHistory]]:
             try:
-                history = await IVHistoryTable.list_by_ticker(
-                    ticker=ticker,
-                    limit=self._config.iv_percentile_lookback_days,
-                )
+                if self._data_provider:
+                    history = await self._data_provider.get_iv_history(
+                        ticker, as_of=effective_date,
+                        lookback_days=self._config.iv_percentile_lookback_days,
+                    )
+                else:
+                    history = await IVHistoryTable.list_by_ticker(
+                        ticker=ticker,
+                        limit=self._config.iv_percentile_lookback_days,
+                    )
                 return ticker, history or []
             except Exception as e:
                 logger.warning(f"Error fetching IV history for {ticker}: {e}")
@@ -167,12 +187,19 @@ class FeatureComputationStage:
         if not option_tickers:
             return {}
 
+        effective_date = self._as_of_date or date.today()
+
         async def fetch_one(option_ticker: str) -> tuple[str, list[OIHistory]]:
             try:
-                history = await OIHistoryTable.list_by_contract(
-                    option_ticker=option_ticker,
-                    limit=10,  # Need 5 days for 5-day change
-                )
+                if self._data_provider:
+                    history = await self._data_provider.get_oi_history(
+                        option_ticker, as_of=effective_date, lookback_days=5,
+                    )
+                else:
+                    history = await OIHistoryTable.list_by_contract(
+                        option_ticker=option_ticker,
+                        limit=10,  # Need 5 days for 5-day change
+                    )
                 return option_ticker, history or []
             except Exception as e:
                 logger.warning(f"Error fetching OI history for {option_ticker}: {e}")
@@ -188,7 +215,7 @@ class FeatureComputationStage:
 
     async def _persist_features(self, feature_sets: list[FeatureSet]) -> None:
         """Persist feature values to DynamoDB.
-        
+
         Args:
             feature_sets: List of computed FeatureSets
         """
@@ -204,22 +231,26 @@ async def run_feature_computation(
     run_id: str,
     evaluations: Sequence[Evaluation],
     opportunities: Sequence[Opportunity],
-    polygon_client: PolygonClient,
-    orchestrator: PipelineOrchestrator,
+    polygon_client: Optional[PolygonClient] = None,
+    orchestrator: Optional[PipelineOrchestrator] = None,
     config: Optional[FeatureConfig] = None,
     persist_features: bool = True,
+    data_provider: Optional[Any] = None,
+    as_of_date: Optional[date] = None,
 ) -> list[FeatureSet]:
     """Convenience function to run feature computation stage.
-    
+
     Args:
         run_id: Pipeline run ID
         evaluations: Evaluations from Stage 3
         opportunities: Opportunities for linking
-        polygon_client: Polygon API client
+        polygon_client: Polygon API client (live mode)
         orchestrator: Pipeline orchestrator
         config: Feature configuration
         persist_features: Whether to save to DynamoDB
-        
+        data_provider: Optional DataProvider for unified data access (backtest mode)
+        as_of_date: Target date for backtesting (defaults to today)
+
     Returns:
         List of computed FeatureSets
     """
@@ -227,6 +258,8 @@ async def run_feature_computation(
         polygon_client=polygon_client,
         orchestrator=orchestrator,
         config=config,
+        data_provider=data_provider,
+        as_of_date=as_of_date,
     )
     return await stage.execute(
         run_id=run_id,

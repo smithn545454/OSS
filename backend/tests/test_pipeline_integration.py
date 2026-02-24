@@ -65,7 +65,15 @@ def mock_polygon_client():
         "c": 189.0,
         "v": 60000000,
     }
-    
+
+    # Batch methods used by LiveDataProvider
+    client.get_daily_bars_batch.return_value = {
+        "AAPL": client.get_daily_bars_parsed.return_value,
+    }
+    client.get_previous_close_batch.return_value = {
+        "AAPL": {"c": 189.0, "v": 60000000},
+    }
+
     # Mock options chain with realistic contract data
     client.get_options_chain.return_value = [
         {

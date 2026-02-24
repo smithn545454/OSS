@@ -603,3 +603,128 @@ export function usePaginatedPositions(params: {
     staleTime: 15000,
   })
 }
+
+// ============================================================================
+// Backtest Hooks
+// ============================================================================
+
+export function useDataStoreStatus() {
+  return useQuery({
+    queryKey: ['backtest', 'data-store-status'] as const,
+    queryFn: api.getDataStoreStatus,
+    staleTime: 60000,
+  })
+}
+
+export function useValidateDataStore() {
+  return useMutation({
+    mutationFn: api.validateDataStore,
+  })
+}
+
+export function useBacktestRuns(status?: string) {
+  return useQuery({
+    queryKey: ['backtest', 'runs', status] as const,
+    queryFn: () => api.listBacktestRuns(status),
+    staleTime: 30000,
+  })
+}
+
+export function useBacktestRun(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'runs', runId] as const,
+    queryFn: () => api.getBacktestRun(runId),
+    enabled: !!runId,
+    staleTime: 10000,
+  })
+}
+
+export function useCreateBacktestRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.createBacktestRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'runs'] })
+    },
+  })
+}
+
+export function useDeleteBacktestRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.deleteBacktestRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'runs'] })
+    },
+  })
+}
+
+export function useBacktestTrades(
+  runId: string,
+  params?: { scanner?: string; verdict?: string; limit?: number }
+) {
+  return useQuery({
+    queryKey: ['backtest', 'trades', runId, params] as const,
+    queryFn: () => api.listBacktestTrades(runId, params),
+    enabled: !!runId,
+    staleTime: 30000,
+  })
+}
+
+// Phase 3: Results hooks
+
+export function useBacktestSummary(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'summary', runId] as const,
+    queryFn: () => api.getBacktestSummary(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestEquityCurve(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'equity-curve', runId] as const,
+    queryFn: () => api.getBacktestEquityCurve(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestMonthlyPnl(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'monthly-pnl', runId] as const,
+    queryFn: () => api.getBacktestMonthlyPnl(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestSegments(runId: string, segmentType: string) {
+  return useQuery({
+    queryKey: ['backtest', 'segments', runId, segmentType] as const,
+    queryFn: () => api.getBacktestSegments(runId, segmentType),
+    enabled: !!runId && !!segmentType,
+    staleTime: 60000,
+  })
+}
+
+// Phase 4: AI Advisor hooks
+
+export function useReadinessAssessment(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'readiness', runId] as const,
+    queryFn: () => api.getReadinessAssessment(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}
+
+export function useBacktestInsights(runId: string) {
+  return useQuery({
+    queryKey: ['backtest', 'insights', runId] as const,
+    queryFn: () => api.getBacktestInsights(runId),
+    enabled: !!runId,
+    staleTime: 60000,
+  })
+}

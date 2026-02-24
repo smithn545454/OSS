@@ -15,13 +15,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.core.schemas import (
     ContractSelectionConfig,
     DTEBucket,
-    Evaluation,
     Opportunity,
     OptionType,
 )
@@ -30,7 +29,6 @@ from app.selection.telemetry import (
     BucketStats,
     SelectedContract,
     SelectionTelemetry,
-    TickerSelectionStats,
 )
 from app.services.polygon import PolygonClient
 
@@ -84,7 +82,7 @@ class SelectionResult:
 
 class ContractSelector:
     """Selects option contracts for evaluation.
-    
+
     Per Section 12.3, for each ticker, for each DTE bucket (A/B/C/D),
     for BOTH sides (CALL and PUT):
     1. Filter by DTE range
@@ -106,15 +104,21 @@ class ContractSelector:
         self,
         config: ContractSelectionConfig,
         polygon_client: Optional[PolygonClient] = None,
+        data_provider: Optional[Any] = None,
+        as_of_date: Optional[date] = None,
     ) -> None:
         """Initialize the contract selector.
-        
+
         Args:
             config: Contract selection configuration from policy
             polygon_client: Optional Polygon client
+            data_provider: Optional DataProvider for unified data access (backtest mode)
+            as_of_date: Target date for backtesting (defaults to today)
         """
         self._config = config
         self._polygon: Optional[PolygonClient] = polygon_client
+        self._data_provider = data_provider
+        self._as_of_date = as_of_date
         self._ranking = RankingCalculator(
             target_delta_call=config.target_delta_call,
             target_delta_put=config.target_delta_put,
@@ -128,20 +132,26 @@ class ContractSelector:
         """Set the Polygon client for data fetching."""
         self._polygon = client
 
+    def set_data_provider(self, provider: Any, as_of_date: Optional[date] = None) -> None:
+        """Set the DataProvider for unified data access."""
+        self._data_provider = provider
+        if as_of_date is not None:
+            self._as_of_date = as_of_date
+
     async def select_contracts(
         self,
         opportunities: list[Opportunity],
     ) -> SelectionResult:
         """Select contracts for all opportunities.
-        
+
         Args:
             opportunities: List of filtered opportunities from Stage 2
-            
+
         Returns:
             SelectionResult with selected candidates and telemetry
         """
-        if not self._polygon:
-            raise RuntimeError("Polygon client not set")
+        if not self._data_provider and not self._polygon:
+            raise RuntimeError("No data source available (set DataProvider or Polygon client)")
 
         self._telemetry = SelectionTelemetry()
         all_candidates: list[ContractCandidate] = []
@@ -149,7 +159,10 @@ class ContractSelector:
 
         # Get unique tickers
         tickers = list(set(opp.underlying_ticker for opp in opportunities))
-        logger.info(f"Selecting contracts for {len(opportunities)} opportunities across {len(tickers)} tickers")
+        logger.info(
+            f"Selecting contracts for {len(opportunities)} opportunities "
+            f"across {len(tickers)} tickers"
+        )
 
         # Calculate date range for options chain fetch
         min_dte = min(
@@ -165,12 +178,22 @@ class ContractSelector:
             120,
         )
 
-        today = datetime.now(timezone.utc).date()
+        effective_date = self._as_of_date or datetime.now(timezone.utc).date()
+        today = effective_date
         exp_gte = (today + timedelta(days=min_dte)).strftime("%Y-%m-%d")
         exp_lte = (today + timedelta(days=max_dte)).strftime("%Y-%m-%d")
 
         # Get previous closes for underlying prices
-        prev_closes = await self._polygon.get_previous_close_batch(tickers)
+        if self._data_provider:
+            snapshots = await self._data_provider.get_stock_snapshots_batch(
+                tickers, as_of=effective_date,
+            )
+            # Convert StockSnapshot to dict format expected by process_ticker
+            prev_closes: dict[str, Any] = {
+                t: {"c": s.close} for t, s in snapshots.items()
+            }
+        else:
+            prev_closes = await self._polygon.get_previous_close_batch(tickers)
 
         # Process tickers in PARALLEL for better performance
         # This changes from O(n * pages) sequential to O(pages) with n concurrent
@@ -178,7 +201,7 @@ class ContractSelector:
             """Process a single ticker - fetch chain and select contracts."""
             ticker_candidates: list[ContractCandidate] = []
             ticker_errors: list[str] = []
-            
+
             try:
                 # Get underlying price
                 prev_close = prev_closes.get(ticker)
@@ -191,12 +214,18 @@ class ContractSelector:
                     ticker_errors.append(f"Invalid price for {ticker}: {underlying_price}")
                     return ticker, ticker_candidates, ticker_errors
 
-                # Fetch options chain (paginated, but now parallel across tickers)
-                chain = await self._polygon.get_options_chain(
-                    ticker,
-                    expiration_date_gte=exp_gte,
-                    expiration_date_lte=exp_lte,
-                )
+                # Fetch options chain: DataProvider or Polygon
+                if self._data_provider:
+                    chain = await self._data_provider.get_options_chain(
+                        ticker, as_of=effective_date,
+                        min_dte=min_dte, max_dte=max_dte,
+                    )
+                else:
+                    chain = await self._polygon.get_options_chain(
+                        ticker,
+                        expiration_date_gte=exp_gte,
+                        expiration_date_lte=exp_lte,
+                    )
 
                 if not chain:
                     ticker_errors.append(f"No options chain for {ticker}")
@@ -253,12 +282,12 @@ class ContractSelector:
         chain: list[dict[str, Any]],
     ) -> list[ContractCandidate]:
         """Select contracts for a single ticker.
-        
+
         Args:
             ticker: Underlying ticker symbol
             underlying_price: Current underlying price
             chain: Options chain data from Polygon
-            
+
         Returns:
             List of selected ContractCandidate objects
         """
@@ -315,10 +344,10 @@ class ContractSelector:
 
     def _get_bucket_range(self, bucket: DTEBucket) -> Optional[tuple[int, int]]:
         """Get the DTE range for a bucket from config.
-        
+
         Args:
             bucket: The DTE bucket
-            
+
         Returns:
             Tuple of (min_dte, max_dte) or None if not configured
         """
@@ -339,14 +368,14 @@ class ContractSelector:
         side: OptionType,
     ) -> list[ContractCandidate]:
         """Select contracts for a specific bucket and side.
-        
+
         Implements the 5-step selection pipeline:
         1. DTE Filter
         2. Delta Band Filter
         3. Liquidity Baseline Filters
         4. Moneyness Filter
         5. Ranking + Top-K Selection
-        
+
         Args:
             ticker: Underlying ticker symbol
             underlying_price: Current underlying price
@@ -355,11 +384,11 @@ class ContractSelector:
             min_dte: Minimum DTE for bucket
             max_dte: Maximum DTE for bucket
             side: Option type (CALL or PUT)
-            
+
         Returns:
             List of selected ContractCandidate objects
         """
-        today = datetime.now(timezone.utc).date()
+        today = self._as_of_date or datetime.now(timezone.utc).date()
         stats = BucketStats(bucket=bucket.value, side=side.value)
 
         # Parse contracts and apply Step 1: DTE Filter
@@ -450,13 +479,13 @@ class ContractSelector:
         today: datetime,
     ) -> Optional[ContractCandidate]:
         """Parse a contract from Polygon chain data.
-        
+
         Args:
             contract_data: Contract data from Polygon
             ticker: Underlying ticker
             underlying_price: Current underlying price
             today: Current date
-            
+
         Returns:
             ContractCandidate or None if invalid/incomplete data
         """
@@ -578,15 +607,15 @@ class ContractSelector:
         side: OptionType,
     ) -> list[ContractCandidate]:
         """Apply delta band filter.
-        
+
         Per Section 12.3:
         CALL: 0.20 <= delta <= 0.75
         PUT: -0.75 <= delta <= -0.20
-        
+
         Args:
             candidates: Contracts to filter
             side: Option type
-            
+
         Returns:
             Filtered list of candidates
         """
@@ -614,16 +643,16 @@ class ContractSelector:
         candidates: list[ContractCandidate],
     ) -> list[ContractCandidate]:
         """Apply liquidity baseline filters.
-        
+
         Per Section 12.3:
         - Min Open Interest: 200
         - Min Daily Volume: 50
         - Max Spread Percent: 10%
         - Min Mid Price: $0.20
-        
+
         Args:
             candidates: Contracts to filter
-            
+
         Returns:
             Filtered list of candidates
         """
@@ -653,20 +682,20 @@ class ContractSelector:
         side: OptionType,
     ) -> list[ContractCandidate]:
         """Apply moneyness filter.
-        
+
         Per Section 12.3:
         CALL: -5% (5% ITM) to +15% OTM
         PUT: -15% (15% ITM) to +5% (5% OTM)
-        
+
         Args:
             candidates: Contracts to filter
             side: Option type
-            
+
         Returns:
             Filtered list of candidates
         """
         if side == OptionType.CALL:
-            # CALL: -5% to +15% 
+            # CALL: -5% to +15%
             # moneyness_pct = (strike - underlying) / underlying * 100
             # Negative = ITM (strike below underlying)
             # Positive = OTM (strike above underlying)
@@ -693,11 +722,11 @@ class ContractSelector:
         side: OptionType,
     ) -> list[ContractCandidate]:
         """Rank candidates and select top K.
-        
+
         Args:
             candidates: Contracts to rank and select from
             side: Option type
-            
+
         Returns:
             Top K candidates by rank score
         """
@@ -732,7 +761,7 @@ class ContractSelector:
 
     def get_telemetry(self) -> SelectionTelemetry:
         """Get the telemetry tracker.
-        
+
         Returns:
             SelectionTelemetry instance
         """

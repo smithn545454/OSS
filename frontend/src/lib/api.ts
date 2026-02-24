@@ -551,5 +551,111 @@ export async function analyzePosition(
   )
 }
 
+// ============================================================================
+// Backtest API
+// ============================================================================
+
+export async function getDataStoreStatus(): Promise<
+  import('./types').DataStoreStatusResponse
+> {
+  return fetchApi('/api/backtest/data-store/status')
+}
+
+export async function validateDataStore(): Promise<
+  import('./types').DataStoreValidationResponse
+> {
+  return fetchApi('/api/backtest/data-store/validate', { method: 'POST' })
+}
+
+export async function listBacktestRuns(
+  status?: string
+): Promise<import('./types').BacktestRunsResponse> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  const query = params.toString()
+  return fetchApi(`/api/backtest/runs${query ? `?${query}` : ''}`)
+}
+
+export async function getBacktestRun(
+  runId: string
+): Promise<import('./types').BacktestRun> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}`)
+}
+
+export async function createBacktestRun(
+  request: import('./types').CreateBacktestRunRequest
+): Promise<import('./types').CreateBacktestRunResponse> {
+  return fetchApi('/api/backtest/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function deleteBacktestRun(
+  runId: string
+): Promise<import('./types').DeleteBacktestRunResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function listBacktestTrades(
+  runId: string,
+  params?: { scanner?: string; verdict?: string; limit?: number }
+): Promise<import('./types').BacktestTradesResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.scanner) searchParams.set('scanner', params.scanner)
+  if (params?.verdict) searchParams.set('verdict', params.verdict)
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  const query = searchParams.toString()
+  return fetchApi(
+    `/api/backtest/runs/${encodeURIComponent(runId)}/trades${query ? `?${query}` : ''}`
+  )
+}
+
+// Phase 3: Results API
+
+export async function getBacktestSummary(
+  runId: string
+): Promise<import('./types').BacktestSummaryResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/summary`)
+}
+
+export async function getBacktestEquityCurve(
+  runId: string
+): Promise<import('./types').EquityCurveResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/equity-curve`)
+}
+
+export async function getBacktestMonthlyPnl(
+  runId: string
+): Promise<import('./types').MonthlyPnlResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/monthly-pnl`)
+}
+
+export async function getBacktestSegments(
+  runId: string,
+  segmentType: string
+): Promise<import('./types').SegmentResponse> {
+  return fetchApi(
+    `/api/backtest/runs/${encodeURIComponent(runId)}/segments/${encodeURIComponent(segmentType)}`
+  )
+}
+
+// Phase 4: AI Advisor API
+
+export async function getReadinessAssessment(
+  runId: string
+): Promise<import('./types').ReadinessResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/readiness`)
+}
+
+export async function getBacktestInsights(
+  runId: string
+): Promise<import('./types').InsightsResponse> {
+  return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/insights`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }

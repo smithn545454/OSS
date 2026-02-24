@@ -1237,3 +1237,263 @@ export interface UpdatePositionsResponse {
   }>
   errors: number
 }
+
+// ============================================================================
+// Backtest Types
+// ============================================================================
+
+export type DatasetStatusLevel = 'complete' | 'partial' | 'missing' | 'error' | 'unknown'
+
+export interface DatasetStatus {
+  name: string
+  prefix: string
+  file_count: number
+  date_count: number
+  earliest_date: string | null
+  latest_date: string | null
+  total_size_mb: number
+  status: DatasetStatusLevel
+}
+
+export interface DataStoreStatusResponse {
+  bucket: string
+  datasets: DatasetStatus[]
+  overall_status: 'ready' | 'incomplete' | 'empty'
+  total_size_mb: number
+  timestamp: string
+}
+
+export interface ValidationCheck {
+  check_name: string
+  passed: boolean
+  message: string
+  details: Record<string, unknown> | null
+}
+
+export interface DataStoreValidationResponse {
+  passed: boolean
+  checks: ValidationCheck[]
+  timestamp: string
+}
+
+export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+
+export interface BacktestRun {
+  run_id: string
+  name: string
+  status: BacktestRunStatus
+  config: Record<string, unknown>
+  progress: {
+    days_completed: number
+    days_total: number
+    trades_found?: number
+  }
+  summary: Record<string, unknown> | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface BacktestRunsResponse {
+  runs: BacktestRun[]
+  count: number
+}
+
+export interface BacktestTrade {
+  trade_id: string
+  run_id: string
+  entry_date: string
+  exit_date: string | null
+  ticker: string
+  option_ticker: string
+  option_type: string
+  strike: number
+  expiration_date: string
+  scanner_type: string
+  verdict: string
+  combined_score: number
+  entry_price: number
+  exit_price: number | null
+  exit_reason: string | null
+  pnl_dollars: number | null
+  pnl_pct: number | null
+  days_held: number | null
+  mfe_pct: number | null
+  mae_pct: number | null
+  peak_price: number | null
+  market_regime: string | null
+}
+
+export interface BacktestTradesResponse {
+  run_id: string
+  trades: BacktestTrade[]
+  count: number
+  total_in_run: number
+}
+
+export interface CreateBacktestRunRequest {
+  name: string
+  start_date: string
+  end_date: string
+  policy_snapshot?: Record<string, unknown>
+  scanners_enabled?: string[]
+  slippage_model?: string
+  slippage_pct?: number
+  exit_rules?: {
+    stop_loss_pct?: number
+    profit_target_pct?: number
+    min_dte_at_exit?: number
+    max_holding_days?: number
+    trailing_stop_pct?: number | null
+  }
+  starting_capital?: number
+}
+
+export interface CreateBacktestRunResponse {
+  status: string
+  run_id: string
+  mode: string
+  trading_days: number
+}
+
+export interface DeleteBacktestRunResponse {
+  status: string
+  run_id: string
+  trades_deleted: number
+}
+
+// Phase 3: Results Types
+
+export interface BacktestSummary {
+  total_trades: number
+  winners: number
+  losers: number
+  breakevens: number
+  win_rate: number
+  net_pnl: number
+  gross_profit: number
+  gross_loss: number
+  total_return_pct: number
+  profit_factor: number | null
+  avg_win_pct: number
+  avg_loss_pct: number
+  avg_pnl_per_trade: number
+  avg_days_held: number
+  trades_per_day: number
+  sharpe_ratio: number | null
+  max_drawdown_pct: number
+  max_drawdown_duration_days: number
+  expectancy: number
+  avg_mfe_pct: number
+  avg_mae_pct: number
+  exit_reasons: Record<string, number>
+  starting_capital: number
+  first_trade_date: string | null
+  last_trade_date: string | null
+}
+
+export interface BacktestSummaryResponse {
+  run_id: string
+  status: string
+  summary: BacktestSummary | null
+  message?: string
+}
+
+export interface EquityCurvePoint {
+  date: string
+  equity: number
+  daily_pnl: number
+  drawdown_pct: number
+  peak_equity: number
+  trades_closed: number
+  return_pct: number
+}
+
+export interface EquityCurveResponse {
+  run_id: string
+  starting_capital: number
+  curve: EquityCurvePoint[]
+  data_points: number
+}
+
+export interface MonthlyPnl {
+  month: string
+  pnl: number
+  trades: number
+  winners: number
+  losers: number
+  win_rate: number
+}
+
+export interface MonthlyPnlResponse {
+  run_id: string
+  months: MonthlyPnl[]
+  total_months: number
+}
+
+export interface SegmentData {
+  segment: string
+  segment_type: string
+  trades: number
+  winners: number
+  losers: number
+  win_rate: number
+  net_pnl: number
+  avg_return_pct: number
+  avg_win_pct: number
+  avg_loss_pct: number
+  profit_factor: number | null
+  sharpe: number | null
+  avg_days_held: number
+}
+
+export interface SegmentResponse {
+  run_id: string
+  segment_type: string
+  segments: SegmentData[]
+  total_segments: number
+}
+
+// Phase 4: AI Advisor Types
+
+export interface ReadinessCheck {
+  criterion: string
+  threshold: string
+  actual: string | number | null
+  passed: boolean
+  severity: 'critical' | 'warning'
+}
+
+export interface ReadinessAssessment {
+  verdict: 'READY' | 'CONDITIONAL' | 'NOT_READY'
+  message: string
+  checks: ReadinessCheck[]
+  passed_count: number
+  total_checks: number
+  criteria_used: Record<string, number>
+}
+
+export interface ReadinessResponse {
+  run_id: string
+  status: string
+  readiness: ReadinessAssessment | null
+  message?: string
+}
+
+export interface BacktestInsight {
+  insight_id: string
+  run_id: string
+  insight_type: string
+  severity: string
+  title: string
+  summary: string
+  recommended_action: string | null
+  confidence: number | null
+  data_evidence: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface InsightsResponse {
+  run_id: string
+  insights: BacktestInsight[]
+  count: number
+}

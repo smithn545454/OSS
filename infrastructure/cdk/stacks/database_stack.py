@@ -12,12 +12,20 @@ Creates DynamoDB tables for all application data:
 - Gate results
 - IV history
 - OI history
+- Backtest runs
+- Backtest trades
+- Backtest insights
+
+Also creates:
+- S3 bucket for backtest historical data
 """
 
 from aws_cdk import (
+    Duration,
     Stack,
     RemovalPolicy,
     aws_dynamodb as dynamodb,
+    aws_s3 as s3,
     CfnOutput,
 )
 from constructs import Construct
@@ -150,7 +158,11 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
-        # 6. Paper positions table (GSI1 for evaluation_id, GSI2 for option_ticker dedup)
+        # 6. Paper positions table
+        # NOTE: GSI1 and GSI2 exist on the live table but were added outside CloudFormation.
+        # Do NOT declare them here — CF would try to re-create them and fail with
+        # "Cannot perform more than one GSI creation or deletion in a single update".
+        # The GSIs are: GSI1 (evaluation_id lookup), GSI2 (option_ticker dedup).
         self.paper_positions_table = dynamodb.Table(
             self,
             "PaperPositionsTable",
@@ -163,24 +175,6 @@ class DatabaseStack(Stack):
             ),
             billing_mode=billing_mode,
             removal_policy=removal_policy,
-        )
-        self.paper_positions_table.add_global_secondary_index(
-            index_name="GSI1",
-            partition_key=dynamodb.Attribute(
-                name="GSI1PK", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="GSI1SK", type=dynamodb.AttributeType.STRING
-            ),
-        )
-        self.paper_positions_table.add_global_secondary_index(
-            index_name="GSI2",
-            partition_key=dynamodb.Attribute(
-                name="GSI2PK", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="GSI2SK", type=dynamodb.AttributeType.STRING
-            ),
         )
 
         # 7. Feature values table
@@ -273,6 +267,105 @@ class DatabaseStack(Stack):
             time_to_live_attribute="ttl",  # Enable TTL for automatic cleanup
         )
 
+        # ============================================================
+        # Backtest S3 Bucket
+        # ============================================================
+        self.backtest_bucket = s3.Bucket(
+            self,
+            "BacktestDataBucket",
+            bucket_name=f"{self.table_prefix}-backtest-{self.account}",
+            removal_policy=removal_policy,
+            auto_delete_objects=env_name != "prod",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    transitions=[
+                        s3.Transition(
+                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
+                            transition_after=Duration.days(90),
+                        )
+                    ]
+                )
+            ],
+        )
+
+        # ============================================================
+        # Backtest DynamoDB Tables
+        # ============================================================
+
+        # 13. Backtest runs table
+        self.backtest_runs_table = dynamodb.Table(
+            self,
+            "BacktestRunsTable",
+            table_name=f"{self.table_prefix}-backtest-runs",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.backtest_runs_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
+        # 14. Backtest trades table
+        self.backtest_trades_table = dynamodb.Table(
+            self,
+            "BacktestTradesTable",
+            table_name=f"{self.table_prefix}-backtest-trades",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.backtest_trades_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+        self.backtest_trades_table.add_global_secondary_index(
+            index_name="GSI2",
+            partition_key=dynamodb.Attribute(
+                name="GSI2PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI2SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
+        # 15. Backtest insights table
+        self.backtest_insights_table = dynamodb.Table(
+            self,
+            "BacktestInsightsTable",
+            table_name=f"{self.table_prefix}-backtest-insights",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+
         # Collect all tables for permissions
         self.all_tables = [
             self.policies_table,
@@ -287,6 +380,9 @@ class DatabaseStack(Stack):
             self.iv_history_table,
             self.oi_history_table,
             self.earnings_cache_table,
+            self.backtest_runs_table,
+            self.backtest_trades_table,
+            self.backtest_insights_table,
         ]
 
         # Outputs
@@ -296,4 +392,12 @@ class DatabaseStack(Stack):
             value=self.table_prefix,
             description="DynamoDB table prefix",
             export_name=f"{project_name}-{env_name}-table-prefix",
+        )
+
+        CfnOutput(
+            self,
+            "BacktestBucketName",
+            value=self.backtest_bucket.bucket_name,
+            description="Backtest data S3 bucket name",
+            export_name=f"{project_name}-{env_name}-backtest-bucket",
         )

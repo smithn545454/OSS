@@ -104,6 +104,23 @@ class BackendStack(Stack):
         self.polygon_secret.grant_read(lambda_role)
         self.finnhub_secret.grant_read(lambda_role)
 
+        # Grant S3 permissions for backtest data bucket
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:ListBucket",
+                    "s3:DeleteObject",
+                ],
+                resources=[
+                    f"arn:aws:s3:::{project_name}-{env_name}-backtest-{self.account}",
+                    f"arn:aws:s3:::{project_name}-{env_name}-backtest-{self.account}/*",
+                ],
+            )
+        )
+
         # Grant Lambda invoke permission (for chunked processing - coordinator invokes workers)
         lambda_role.add_to_policy(
             iam.PolicyStatement(
@@ -151,6 +168,7 @@ class BackendStack(Stack):
                 # Chunked processing configuration
                 "USE_CHUNKED_PROCESSING": "true",
                 "SCANNER_CHUNK_SIZE": "100",  # Process 100 tickers per worker
+                "BACKTEST_S3_BUCKET": f"{project_name}-{env_name}-backtest-{self.account}",
             },
             log_group=log_group,
         )

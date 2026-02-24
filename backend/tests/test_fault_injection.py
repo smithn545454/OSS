@@ -191,7 +191,9 @@ class TestMarketDataFailures:
 
         mock_polygon = AsyncMock()
         mock_polygon.get_daily_bars_parsed.return_value = []
+        mock_polygon.get_daily_bars_batch.return_value = {}
         mock_polygon.get_previous_close.return_value = {"c": 0, "v": 0}
+        mock_polygon.get_previous_close_batch.return_value = {}
         mock_polygon.get_options_chain.return_value = []
         mock_polygon.get_aggregated_options_volume.return_value = MagicMock(
             total_call_volume=0, total_put_volume=0,

@@ -27,8 +27,8 @@ Calculations:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
 
 from app.core.schemas import DirectionHint, IVHistory, ScannerType
 from app.db.tables import IVHistoryTable
@@ -69,12 +69,25 @@ class CheapOptionsScanner(BaseScanner):
             cached_bars = context.cached_data.get("daily_bars", {})
             if ticker in cached_bars:
                 bars = cached_bars[ticker]
-            else:
-                # Fallback: fetch if not in cache
-                fetch_days = 30  # Need 21 closes minimum
+            elif context.data_provider:
+                end = context.as_of_date or date.today()
+                bars = await context.data_provider.get_daily_bars(
+                    ticker, end, lookback_days=30,
+                )
+            elif context.polygon:
+                fetch_days = 30
                 to_date = datetime.now().strftime("%Y-%m-%d")
-                from_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
-                bars = await context.polygon.get_daily_bars_parsed(ticker, from_date, to_date)
+                from_date = (
+                    datetime.now() - timedelta(days=fetch_days)
+                ).strftime("%Y-%m-%d")
+                bars = await context.polygon.get_daily_bars_parsed(
+                    ticker, from_date, to_date,
+                )
+            else:
+                return ScanResult(
+                    ticker=ticker, triggered=False,
+                    error="No data source available",
+                )
 
             if len(bars) < 21:
                 return ScanResult(
@@ -109,13 +122,18 @@ class CheapOptionsScanner(BaseScanner):
             if cached_chain:
                 # Cached chain covers 7-90 DTE; use as-is
                 chain = cached_chain
-            else:
-                # Fallback: use minimal fetch for standalone scanner runs
+            elif context.data_provider:
+                chain = await context.data_provider.get_options_chain_minimal(
+                    ticker, as_of=context.as_of_date or date.today(),
+                )
+            elif context.polygon:
                 chain = await context.polygon.get_options_chain_minimal(
                     ticker,
                     expiration_date_gte=min_exp,
                     expiration_date_lte=max_exp,
                 )
+            else:
+                chain = []
 
             if not chain:
                 return ScanResult(
@@ -138,17 +156,29 @@ class CheapOptionsScanner(BaseScanner):
             iv_rv_ratio = iv_result.iv_proxy / rv20 if rv20 > 0 else float("inf")
 
             # Step 3: Get IV percentile from history
-            iv_percentile = await IVHistoryTable.calculate_percentile(ticker, iv_result.iv_proxy)
+            if context.data_provider:
+                iv_records = await context.data_provider.get_iv_history(
+                    ticker, as_of=context.as_of_date or date.today(),
+                )
+                iv_percentile = _compute_iv_percentile(
+                    iv_records, iv_result.iv_proxy,
+                )
+            else:
+                iv_percentile = await IVHistoryTable.calculate_percentile(
+                    ticker, iv_result.iv_proxy,
+                )
 
             # Store current IV data for future percentile calculations
-            await self._store_iv_history(
-                ticker=ticker,
-                atm_iv=iv_result.iv_proxy,
-                atm_call_iv=iv_result.atm_call_iv,
-                atm_put_iv=iv_result.atm_put_iv,
-                rv20=rv20,
-                iv_rv_ratio=iv_rv_ratio,
-            )
+            # (only in live mode — backtest reads from historical parquet)
+            if context.polygon:
+                await self._store_iv_history(
+                    ticker=ticker,
+                    atm_iv=iv_result.iv_proxy,
+                    atm_call_iv=iv_result.atm_call_iv,
+                    atm_put_iv=iv_result.atm_put_iv,
+                    rv20=rv20,
+                    iv_rv_ratio=iv_rv_ratio,
+                )
 
             # Store metrics (per Section 10.5)
             metrics = {
@@ -263,3 +293,28 @@ class CheapOptionsScanner(BaseScanner):
             Base priority score
         """
         return 50
+
+
+def _compute_iv_percentile(
+    iv_records: list[Any],
+    current_iv: float,
+) -> Optional[float]:
+    """Compute IV percentile from historical records.
+
+    Args:
+        iv_records: List of IVHistoryRecord (or similar with atm_iv attr)
+        current_iv: Current ATM IV to rank
+
+    Returns:
+        Percentile (0-100) or None if insufficient data
+    """
+    if not iv_records:
+        return None
+    historical_ivs = [
+        r.atm_iv for r in iv_records
+        if hasattr(r, "atm_iv") and r.atm_iv and r.atm_iv > 0
+    ]
+    if not historical_ivs:
+        return None
+    below_count = sum(1 for iv in historical_ivs if iv <= current_iv)
+    return round(below_count / len(historical_ivs) * 100, 2)

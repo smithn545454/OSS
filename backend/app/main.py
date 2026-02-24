@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
+from app.api.routes import backtest as backtest_routes
 from app.api.routes import calibration as calibration_routes
 from app.api.routes import evaluations as evaluations_routes
 from app.api.routes import health as health_routes
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_routes.thesis_router, prefix="/api/thesis", tags=["Thesis"])
     app.include_router(observability_routes.router, prefix="/api/observability", tags=["Observability"])
     app.include_router(market_routes.router, prefix="/api/market", tags=["Market"])
+    app.include_router(backtest_routes.router, prefix="/api/backtest", tags=["Backtest"])
 
     return app
 
@@ -116,9 +118,10 @@ async def _run_coordinator_scan() -> dict[str, Any]:
         Summary of dispatched work (does not wait for workers)
     """
     import boto3
-    from app.core.watchlist import WatchlistManager
+
     from app.core.pipeline import PipelineOrchestrator
-    from app.db.tables import PolicyTable, PipelineRunTable
+    from app.core.watchlist import WatchlistManager
+    from app.db.tables import PipelineRunTable, PolicyTable
 
     logger.info("Starting COORDINATOR scan - will distribute to workers")
 
@@ -232,9 +235,9 @@ async def _run_worker_scan(
     Returns:
         Scan result summary for this chunk
     """
-    from app.scanners.orchestrator import ScannerOrchestrator
     from app.core.pipeline import PipelineOrchestrator
     from app.db.tables import PipelineRunTable
+    from app.scanners.orchestrator import ScannerOrchestrator
 
     ticker_count = len(tickers) if tickers else "all"
     logger.info(f"Starting WORKER scan for {ticker_count} tickers, run_id={run_id or 'auto'}")
@@ -544,9 +547,227 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
+async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
+    """Backtest coordinator: create run, generate batches, fan out workers.
+
+    Can be invoked via API endpoint or direct Lambda invocation.
+
+    Args:
+        event: Must contain "config" dict with BacktestRunConfig fields.
+
+    Returns:
+        Summary with run_id and batch count.
+    """
+    from app.backtest.coordinator import (
+        create_backtest_run,
+        mark_run_completed,
+        start_backtest_run,
+    )
+    from app.backtest.worker import process_batch
+    from app.core.historical_data_provider import HistoricalDataProvider
+    from app.core.schemas import BacktestRunConfig
+
+    logger.info("Backtest coordinator starting")
+
+    try:
+        # Parse config from event
+        config_data = event.get("config", {})
+        config = BacktestRunConfig(**config_data)
+
+        # Use existing run_id if provided (created by API endpoint), else create new
+        existing_run_id = event.get("run_id")
+        if existing_run_id:
+            # Load the existing run and update it
+            run = await create_backtest_run(
+                config, persist=True, run_id=existing_run_id
+            )
+        else:
+            run = await create_backtest_run(config, persist=True)
+        run_id = run.run_id
+
+        # Generate batches
+        batches = await start_backtest_run(run, persist=True)
+
+        if not batches:
+            await mark_run_completed(run_id, summary={"trades": 0, "note": "no trading days"})
+            return {
+                "status": "success",
+                "run_id": run_id,
+                "batches": 0,
+                "note": "no trading days in range",
+            }
+
+        total_batches = len(batches)
+        s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+
+        # For now, run inline (sequential). Phase 5 adds Lambda fan-out.
+        if total_batches <= 20 or not s3_bucket:
+            # Small run or no S3 bucket configured — run inline
+            logger.info(
+                f"Backtest {run_id}: running {total_batches} batches inline"
+            )
+
+            def data_provider_factory(as_of_date):
+                return HistoricalDataProvider(
+                    as_of_date=as_of_date,
+                    s3_bucket=s3_bucket,
+                )
+
+            all_trades = []
+            for batch_idx, batch in enumerate(batches):
+                logger.info(
+                    f"Backtest {run_id}: batch {batch_idx + 1}/{total_batches}"
+                )
+                batch_trades = await process_batch(
+                    run_id=run_id,
+                    days=batch,
+                    config=config,
+                    data_provider_factory=data_provider_factory,
+                    persist=True,
+                )
+                all_trades.extend(batch_trades)
+
+            # Compute full metrics and mark complete
+            from app.backtest.metrics import calculate_metrics
+
+            metrics = calculate_metrics(
+                all_trades,
+                starting_capital=config.starting_capital,
+            )
+            metrics["total_days"] = sum(len(b) for b in batches)
+            metrics["total_batches"] = total_batches
+            await mark_run_completed(run_id, summary=metrics)
+
+            return {
+                "status": "success",
+                "run_id": run_id,
+                "mode": "inline",
+                "trades": len(all_trades),
+                "batches_processed": total_batches,
+            }
+
+        else:
+            # Large run — fan out to worker Lambdas
+            import boto3
+
+            function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+            lambda_client = boto3.client("lambda")
+
+            dispatched = 0
+            errors: list[str] = []
+
+            for idx, batch in enumerate(batches):
+                if idx > 0:
+                    time.sleep(1)  # Slight stagger
+
+                payload = {
+                    "source": "oss.scheduler",
+                    "action": "backtest_worker",
+                    "run_id": run_id,
+                    "days": [d.isoformat() for d in batch],
+                    "config": config.model_dump(mode="json"),
+                    "batch_index": idx,
+                    "total_batches": total_batches,
+                    "s3_bucket": s3_bucket,
+                }
+
+                try:
+                    lambda_client.invoke(
+                        FunctionName=function_name,
+                        InvocationType="Event",
+                        Payload=json.dumps(payload),
+                    )
+                    dispatched += 1
+                except Exception as e:
+                    errors.append(f"Failed to dispatch batch {idx}: {e}")
+
+            logger.info(
+                f"Backtest coordinator dispatched {dispatched}/{total_batches} workers "
+                f"for run {run_id}"
+            )
+
+            return {
+                "status": "success" if not errors else "partial_success",
+                "run_id": run_id,
+                "mode": "fan_out",
+                "batches_dispatched": dispatched,
+                "errors": errors if errors else None,
+            }
+
+    except Exception as e:
+        logger.error(f"Backtest coordinator failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
+    """Backtest worker: process a batch of trading days.
+
+    Args:
+        event: Must contain run_id, days, config, s3_bucket.
+
+    Returns:
+        Summary of trades produced.
+    """
+    from app.backtest.worker import process_batch
+    from app.core.historical_data_provider import HistoricalDataProvider
+    from app.core.schemas import BacktestRunConfig
+
+    run_id = event.get("run_id", "")
+    day_strs = event.get("days", [])
+    config_data = event.get("config", {})
+    batch_index = event.get("batch_index", 0)
+    total_batches = event.get("total_batches", 1)
+    s3_bucket = event.get("s3_bucket", os.environ.get("BACKTEST_S3_BUCKET", ""))
+
+    logger.info(
+        f"Backtest worker: run={run_id}, batch {batch_index + 1}/{total_batches}, "
+        f"{len(day_strs)} days"
+    )
+
+    try:
+        from datetime import date as date_type
+        config = BacktestRunConfig(**config_data)
+        days = [date_type.fromisoformat(d) for d in day_strs]
+
+        def data_provider_factory(as_of_date):
+            return HistoricalDataProvider(
+                as_of_date=as_of_date,
+                s3_bucket=s3_bucket,
+            )
+
+        trades = await process_batch(
+            run_id=run_id,
+            days=days,
+            config=config,
+            data_provider_factory=data_provider_factory,
+            persist=True,
+        )
+
+        logger.info(
+            f"Backtest worker batch {batch_index}: {len(trades)} trades from {len(days)} days"
+        )
+
+        return {
+            "status": "success",
+            "run_id": run_id,
+            "batch_index": batch_index,
+            "days_processed": len(days),
+            "trades_produced": len(trades),
+        }
+
+    except Exception as e:
+        logger.error(f"Backtest worker failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "run_id": run_id,
+            "batch_index": batch_index,
+            "error": str(e),
+        }
+
+
 async def _run_scheduled_scan() -> dict[str, Any]:
     """Run a scheduled scan - routes to coordinator or direct worker.
-    
+
     Returns:
         Scan result summary
     """
@@ -563,6 +784,7 @@ async def _run_paper_update() -> dict[str, Any]:
     via async Lambda invocations. Otherwise processes directly.
     """
     import boto3
+
     from app.db.tables import PaperPositionTable
 
     logger.info("Paper update coordinator starting")
@@ -662,28 +884,31 @@ async def _run_paper_update_worker(
 
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
-    
+
     Supported event types:
     1. API Gateway request (via Mangum)
     2. Scheduled scan from EventBridge: {"source": "oss.scheduler", "action": "run_scan"}
-    3. Worker scan (chunk): {"source": "oss.scheduler", "action": "worker_scan", "tickers": [...]}
-    
+    3. Worker scan (chunk): {"source": "oss.scheduler", "action": "worker_scan", ...}
+    4. Paper trading update: {"source": "oss.scheduler", "action": "paper_update"}
+    5. Backtest coordinator: {"source": "oss.scheduler", "action": "backtest_coordinator", ...}
+    6. Backtest worker: {"source": "oss.scheduler", "action": "backtest_worker", ...}
+
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
         context: Lambda context
-        
+
     Returns:
         Response appropriate to the event type
     """
     # Check if this is an OSS scheduler event
     if event.get("source") == "oss.scheduler":
         action = event.get("action")
-        
+
         if action == "run_scan":
             # Coordinator: triggered by EventBridge
             logger.info("Received scheduled scan event from EventBridge")
             return asyncio.run(_run_scheduled_scan())
-        
+
         elif action == "worker_scan":
             # Worker: process specific chunk of tickers
             tickers = event.get("tickers")
@@ -720,10 +945,21 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             logger.info("Received paper_trading_update event from EventBridge")
             return asyncio.run(_run_paper_update())
 
+        elif action == "backtest_coordinator":
+            # Backtest coordinator: create run and fan out workers
+            logger.info("Received backtest_coordinator event")
+            return asyncio.run(_run_backtest_coordinator(event))
+
+        elif action == "backtest_worker":
+            # Backtest worker: process a batch of trading days
+            batch_idx = event.get("batch_index", 0)
+            logger.info(f"Received backtest_worker event (batch {batch_idx})")
+            return asyncio.run(_run_backtest_worker(event))
+
         else:
             logger.warning(f"Unknown scheduler action: {action}")
             return {"status": "error", "error": f"Unknown action: {action}"}
-    
+
     # Ensure an event loop exists for Mangum (Python 3.12+ requires this)
     try:
         asyncio.get_event_loop()

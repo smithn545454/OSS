@@ -24,16 +24,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Sequence
+from datetime import date, datetime, timedelta, timezone
+
+# Stage imports are done lazily in run_scan() to avoid circular imports
+# The following TYPE_CHECKING imports are for type hints only
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
     Decision,
     Evaluation,
     Opportunity,
-    PipelineRun,
     PipelineStage,
     Policy,
     PolicyConfig,
@@ -42,23 +45,20 @@ from app.core.schemas import (
 )
 from app.core.watchlist import WatchlistManager
 from app.db.tables import EvaluationTable, OpportunityTable, PolicyTable
-from app.filters.underlying import UnderlyingFilter, UnderlyingFilterStats
+from app.filters.underlying import UnderlyingFilter
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
 from app.scanners.breakout import BreakoutScanner
 from app.scanners.cheap_options import CheapOptionsScanner
 from app.scanners.compression import CompressionScanner
 from app.scanners.merger import OpportunityMerger
-from app.selection.contract_selector import ContractSelector, SelectionResult
+from app.selection.contract_selector import ContractSelector
 from app.selection.evaluation_builder import EvaluationBuilder
 from app.services.polygon import AggregatedOptionsVolume, PolygonClient
 
-# Stage imports are done lazily in run_scan() to avoid circular imports
-# The following TYPE_CHECKING imports are for type hints only
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.features.models import FeatureSet
-    from app.pillars.models import PillarResult
     from app.gates.models import GateEvaluation
+    from app.pillars.models import PillarResult
 
 logger = logging.getLogger(__name__)
 
@@ -100,15 +100,19 @@ class ScannerOrchestrator:
 
     def __init__(
         self,
+        data_provider: Optional[Any] = None,
         polygon_client: Optional[PolygonClient] = None,
         pipeline_orchestrator: Optional[PipelineOrchestrator] = None,
     ) -> None:
         """Initialize the orchestrator.
 
         Args:
+            data_provider: Optional DataProvider for unified data access.
+                           When provided (backtest mode), PolygonClient is not created.
             polygon_client: Optional Polygon client (creates new if not provided)
             pipeline_orchestrator: Optional pipeline orchestrator for telemetry
         """
+        self._data_provider = data_provider
         self._polygon = polygon_client
         self._pipeline = pipeline_orchestrator or PipelineOrchestrator()
         self._merger = OpportunityMerger()
@@ -126,6 +130,7 @@ class ScannerOrchestrator:
         tickers: Optional[list[str]] = None,
         run_id: Optional[str] = None,
         run_full_pipeline: bool = True,
+        as_of_date: Optional[date] = None,
     ) -> ScanRunResult:
         """Run a complete scan across all scanners and pipeline stages.
 
@@ -139,6 +144,7 @@ class ScannerOrchestrator:
             tickers: Optional ticker list (uses watchlist if not provided)
             run_id: Optional run ID for telemetry (creates new if not provided)
             run_full_pipeline: If True, run all stages; if False, only run scanners
+            as_of_date: Target date for backtesting (defaults to today for live mode)
 
         Returns:
             ScanRunResult with all opportunities, evaluations, and statistics
@@ -166,19 +172,8 @@ class ScannerOrchestrator:
         if not tickers:
             raise ValueError("No tickers to scan")
 
-        # Validate Polygon API key is available before starting
         from app.config import get_settings
         settings = get_settings()
-        if not settings.polygon_api_key:
-            logger.critical(
-                "POLYGON API KEY NOT CONFIGURED. "
-                "All scanners require market data from Polygon.io. "
-                "Set the key via: AWS_REGION=us-west-1 POLYGON_API_KEY=<key> ./scripts/deploy.sh secret"
-            )
-            raise ValueError(
-                "Polygon API key not configured. Cannot fetch market data. "
-                "Set the secret in AWS Secrets Manager."
-            )
 
         logger.info(f"Starting scan of {len(tickers)} tickers with {len(self._scanners)} scanners")
 
@@ -201,8 +196,33 @@ class ScannerOrchestrator:
         # Create scan context with increased concurrency for performance
         # Using 20 concurrent requests as Polygon allows higher limits
         effective_concurrency = max(policy_config.watchlist.max_concurrent_requests, 20)
-        
-        async with PolygonClient(max_concurrent=effective_concurrency) as polygon:
+        effective_date = as_of_date or date.today()
+
+        async with AsyncExitStack() as stack:
+            # Determine data source: DataProvider (backtest) or PolygonClient (live)
+            if self._data_provider:
+                data_provider = self._data_provider
+                polygon = None
+            else:
+                # Live mode: validate Polygon API key and create clients
+                if not settings.polygon_api_key:
+                    logger.critical(
+                        "POLYGON API KEY NOT CONFIGURED. "
+                        "All scanners require market data from Polygon.io. "
+                        "Set the key via: "
+                        "AWS_REGION=us-west-1 POLYGON_API_KEY=<key> "
+                        "./scripts/deploy.sh secret"
+                    )
+                    raise ValueError(
+                        "Polygon API key not configured. Cannot fetch market data. "
+                        "Set the secret in AWS Secrets Manager."
+                    )
+                polygon = await stack.enter_async_context(
+                    PolygonClient(max_concurrent=effective_concurrency)
+                )
+                from app.core.live_data_provider import LiveDataProvider
+                data_provider = LiveDataProvider(polygon)
+
             # ================================================================
             # STAGE 1: Opportunity Discovery (Scanners)
             # Executed in 4 phases for optimal performance:
@@ -211,35 +231,41 @@ class ScannerOrchestrator:
             #   Phase 3: Options scanners (unified chain fetch per ticker)
             #   Phase 4: Results merge
             # ================================================================
-            context = ScanContext.create(polygon, policy_config)
-            
+            context = ScanContext.create(
+                polygon, policy_config,
+                data_provider=data_provider,
+                as_of_date=effective_date,
+            )
+
             # Initialize cache structures for options data
             context.cached_data["options_chains"] = {}
             context.cached_data["options_volume"] = {}
 
             # ================================================================
             # PHASE 1: Daily Bars Prefetch
-            # Uses Polygon's grouped API: O(days) calls instead of O(tickers)
+            # Uses DataProvider for unified access (Polygon API or S3 parquet)
             # ================================================================
             logger.info(f"Phase 1: Prefetching daily bars for {len(tickers)} tickers...")
             phase1_start = datetime.now(timezone.utc)
-            
-            daily_bars_data = await polygon.get_daily_bars_batch(tickers, days=60)
+
+            daily_bars_data = await data_provider.get_daily_bars_batch(
+                tickers, end_date=effective_date, lookback_days=60
+            )
             context.cached_data["daily_bars"] = daily_bars_data
-            
+
             phase1_duration = int((datetime.now(timezone.utc) - phase1_start).total_seconds() * 1000)
             logger.info(f"Phase 1 complete: {len(daily_bars_data)} tickers in {phase1_duration}ms")
 
             all_results: list[ScanResult] = []
-            
+
             # ================================================================
             # PHASE 2: Fast Scanners (Breakout + Compression)
             # These scanners only need daily bars (already cached)
             # Run them first to identify tickers we can skip in Phase 3
             # ================================================================
-            logger.info(f"Phase 2: Running fast scanners (Breakout, Compression)...")
+            logger.info("Phase 2: Running fast scanners (Breakout, Compression)...")
             phase2_start = datetime.now(timezone.utc)
-            
+
             fast_scanners = [BreakoutScanner(), CompressionScanner()]
             phase2_results, phase2_stats, phase2_errors = await self._run_scanner_phase(
                 scanners=fast_scanners,
@@ -247,14 +273,14 @@ class ScannerOrchestrator:
                 context=context,
                 max_concurrent=effective_concurrency,
             )
-            
+
             all_results.extend(phase2_results)
             scanner_stats.update(phase2_stats)
             errors.extend(phase2_errors)
-            
+
             # Identify tickers that triggered in Phase 2 (skip options fetch for these)
             phase2_triggered = {r.ticker for r in phase2_results if r.triggered}
-            
+
             phase2_duration = int((datetime.now(timezone.utc) - phase2_start).total_seconds() * 1000)
             logger.info(
                 f"Phase 2 complete: {len(phase2_triggered)} triggered, "
@@ -272,11 +298,11 @@ class ScannerOrchestrator:
             #   5. Early exit on first trigger
             # ================================================================
             remaining_tickers = [t for t in tickers if t not in phase2_triggered]
-            
+
             if remaining_tickers:
                 logger.info(f"Phase 3: Running options scanners on {len(remaining_tickers)} tickers...")
                 phase3_start = datetime.now(timezone.utc)
-                
+
                 options_scanners = [CheapOptionsScanner()]
                 phase3_results, phase3_stats, phase3_errors = await self._run_options_scanner_phase(
                     scanners=options_scanners,
@@ -285,11 +311,11 @@ class ScannerOrchestrator:
                     polygon=polygon,
                     max_concurrent=5,  # Low concurrency to avoid Polygon rate limits
                 )
-                
+
                 all_results.extend(phase3_results)
                 scanner_stats.update(phase3_stats)
                 errors.extend(phase3_errors)
-                
+
                 phase3_duration = int((datetime.now(timezone.utc) - phase3_start).total_seconds() * 1000)
                 phase3_triggered = sum(1 for r in phase3_results if r.triggered)
                 logger.info(
@@ -331,8 +357,8 @@ class ScannerOrchestrator:
                     earnings_cache = None
                     if policy_config.underlying_filter.exclude_earnings_within_days > 0:
                         try:
-                            from app.services.finnhub import FinnhubClient
                             from app.services.earnings_cache import EarningsCacheService
+                            from app.services.finnhub import FinnhubClient
                             if not settings.finnhub_api_key:
                                 logger.warning(
                                     "Finnhub API key not configured, earnings filter disabled"
@@ -346,8 +372,11 @@ class ScannerOrchestrator:
                     underlying_filter = UnderlyingFilter(
                         policy_config.underlying_filter,
                         earnings_cache=earnings_cache,
+                        data_provider=data_provider,
+                        as_of_date=effective_date,
                     )
-                    underlying_filter.set_polygon_client(polygon)
+                    if polygon:
+                        underlying_filter.set_polygon_client(polygon)
 
                     filtered_opportunities, filter_result = await underlying_filter.filter_opportunities(
                         opportunities
@@ -390,8 +419,13 @@ class ScannerOrchestrator:
                             run_id, PipelineStage.CONTRACT_SELECTION
                         )
 
-                        contract_selector = ContractSelector(policy_config.contract_selection)
-                        contract_selector.set_polygon_client(polygon)
+                        contract_selector = ContractSelector(
+                            policy_config.contract_selection,
+                            data_provider=data_provider,
+                            as_of_date=effective_date,
+                        )
+                        if polygon:
+                            contract_selector.set_polygon_client(polygon)
 
                         selection_result = await contract_selector.select_contracts(
                             filtered_opportunities
@@ -447,14 +481,11 @@ class ScannerOrchestrator:
                 # STAGE 4: Feature Computation
                 # ================================================================
                 # Lazy imports to avoid circular import issues
-                from app.features.stage import run_feature_computation
-                from app.features.models import FeatureSet
-                from app.pillars.stage import run_pillar_scoring
-                from app.pillars.models import PillarResult
-                from app.gates.stage import run_hard_gates
-                from app.gates.models import GateEvaluation
                 from app.decision.stage import run_decision_logic
+                from app.features.stage import run_feature_computation
+                from app.gates.stage import run_hard_gates
                 from app.paper_trading.stage import run_paper_trading
+                from app.pillars.stage import run_pillar_scoring
 
                 feature_sets: list[FeatureSet] = []
                 if evaluations:
@@ -467,6 +498,8 @@ class ScannerOrchestrator:
                             orchestrator=self._pipeline,
                             config=policy_config.features,
                             persist_features=True,
+                            data_provider=data_provider,
+                            as_of_date=effective_date,
                         )
 
                         logger.info(
@@ -821,7 +854,7 @@ class ScannerOrchestrator:
         """
         # Calculate drop reasons (tickers that didn't trigger any scanner)
         drop_reasons: dict[str, int] = {}
-        
+
         # Count triggers per scanner for drop analysis
         for scanner_type, stats in scanner_stats.items():
             no_trigger_count = stats.get("total_scanned", 0) - stats.get("triggered", 0)
@@ -965,10 +998,10 @@ class ScannerOrchestrator:
                 scanner_start = datetime.now(timezone.utc)
                 results = await scanner.scan_batch(tickers, context, max_concurrent)
                 duration_ms = int((datetime.now(timezone.utc) - scanner_start).total_seconds() * 1000)
-                
+
                 scanner_stats = scanner.log_scan_stats(results)
                 scanner_stats["duration_ms"] = duration_ms
-                
+
                 return results, scanner_stats, None
             except Exception as e:
                 error_msg = f"Scanner {scanner.scanner_type} failed: {e}"
@@ -992,8 +1025,8 @@ class ScannerOrchestrator:
         scanners: list[BaseScanner],
         tickers: list[str],
         context: ScanContext,
-        polygon: PolygonClient,
-        max_concurrent: int,
+        polygon: Optional[PolygonClient] = None,
+        max_concurrent: int = 5,
     ) -> tuple[list[ScanResult], dict[str, dict[str, int]], list[str]]:
         """Run options scanners with MINIMAL data fetching.
 
@@ -1004,11 +1037,13 @@ class ScannerOrchestrator:
 
         This reduces API calls from ~24 per ticker to exactly 1 per ticker.
 
+        In backtest mode (polygon=None), uses context.data_provider instead.
+
         Args:
             scanners: List of options scanners (Cheap Options, Unusual Volume)
             tickers: Tickers to scan
             context: Scan context with cached data
-            polygon: Polygon client for API calls
+            polygon: Polygon client for API calls (None in backtest mode)
             max_concurrent: Max concurrent ticker processing
 
         Returns:
@@ -1016,18 +1051,23 @@ class ScannerOrchestrator:
         """
         all_results: list[ScanResult] = []
         errors: list[str] = []
-        
+
         # Initialize per-scanner stats tracking
         scanner_stats: dict[str, dict[str, int]] = {
             s.scanner_type.value: {"total_scanned": 0, "triggered": 0, "errors": 0, "duration_ms": 0}
             for s in scanners
         }
-        
+
         # DTE range: broad fetch (7-90) to capture weekly + monthly expirations.
         # Scanners filter to their specific DTE range programmatically.
-        min_exp_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-        max_exp_date = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
-        
+        effective_date = context.as_of_date or date.today()
+        min_exp_date = (
+            datetime.combine(effective_date, datetime.min.time()) + timedelta(days=7)
+        ).strftime("%Y-%m-%d")
+        max_exp_date = (
+            datetime.combine(effective_date, datetime.min.time()) + timedelta(days=90)
+        ).strftime("%Y-%m-%d")
+
         # Semaphore for concurrent ticker processing
         semaphore = asyncio.Semaphore(max_concurrent)
         phase_start = datetime.now(timezone.utc)
@@ -1036,7 +1076,7 @@ class ScannerOrchestrator:
             """Process a single ticker through all options scanners."""
             async with semaphore:
                 ticker_results: list[ScanResult] = []
-                
+
                 try:
                     # Verify daily bars exist (scanners need them for RV calculation)
                     daily_bars = context.cached_data.get("daily_bars", {}).get(ticker, [])
@@ -1052,17 +1092,30 @@ class ScannerOrchestrator:
                     # BROAD FETCH: Single API call, no pagination
                     # ATM ±10% strike filter required by Polygon Basic tier.
                     # Wider DTE range (7-90) maximizes data for IV proxy.
-                    underlying_price = daily_bars[-1].close if daily_bars else None
-                    strike_gte = underlying_price * 0.9 if underlying_price else None
-                    strike_lte = underlying_price * 1.1 if underlying_price else None
-                    chain = await polygon.get_options_chain_minimal(
-                        ticker,
-                        expiration_date_gte=min_exp_date,
-                        expiration_date_lte=max_exp_date,
-                        strike_price_gte=strike_gte,
-                        strike_price_lte=strike_lte,
-                    )
-                    
+                    if polygon:
+                        # Live mode: use Polygon API with strike filters
+                        underlying_price = daily_bars[-1].close if daily_bars else None
+                        strike_gte = (
+                            underlying_price * 0.9 if underlying_price else None
+                        )
+                        strike_lte = (
+                            underlying_price * 1.1 if underlying_price else None
+                        )
+                        chain = await polygon.get_options_chain_minimal(
+                            ticker,
+                            expiration_date_gte=min_exp_date,
+                            expiration_date_lte=max_exp_date,
+                            strike_price_gte=strike_gte,
+                            strike_price_lte=strike_lte,
+                        )
+                    elif context.data_provider:
+                        # Backtest mode: use DataProvider
+                        chain = await context.data_provider.get_options_chain_minimal(
+                            ticker, as_of=effective_date,
+                        )
+                    else:
+                        chain = []
+
                     if not chain:
                         # No options data - return error results for all scanners
                         for scanner in scanners:
@@ -1076,18 +1129,18 @@ class ScannerOrchestrator:
                     # Cache broad chain for scanners (NOT for Contract Selection)
                     # Contract Selection will fetch its own full chain for triggered tickers
                     context.cached_data["options_chains"][ticker] = chain
-                    
+
                     # Compute aggregated volume from cached chain
                     # Broader than ATM but sufficient for trigger detection
                     vol_data = self._compute_volume_from_chain(chain, ticker)
                     context.cached_data["options_volume"][ticker] = vol_data
-                    
+
                     # Run each scanner on cached data with early exit
                     for scanner in scanners:
                         try:
                             result = await scanner.scan_ticker(ticker, context)
                             ticker_results.append(result)
-                            
+
                             # Early exit: stop processing if triggered
                             if result.triggered:
                                 for remaining_scanner in scanners[scanners.index(scanner) + 1:]:
@@ -1097,7 +1150,7 @@ class ScannerOrchestrator:
                                         metrics={"skipped": "early_exit_triggered"},
                                     ))
                                 break
-                                
+
                         except Exception as e:
                             logger.warning(f"Scanner {scanner.scanner_type} failed for {ticker}: {e}")
                             ticker_results.append(ScanResult(
@@ -1105,7 +1158,7 @@ class ScannerOrchestrator:
                                 triggered=False,
                                 error=str(e),
                             ))
-                            
+
                 except Exception as e:
                     logger.error(f"Failed to process ticker {ticker}: {e}")
                     for scanner in scanners:
@@ -1114,20 +1167,20 @@ class ScannerOrchestrator:
                             triggered=False,
                             error=str(e),
                         ))
-                
+
                 return ticker_results
 
         # Process all tickers concurrently
         tasks = [process_ticker(t) for t in tickers]
         ticker_outputs = await asyncio.gather(*tasks)
-        
+
         # Flatten results and update stats
         # Results are returned in scanner order (one result per scanner per ticker)
         scanner_keys = [s.scanner_type.value for s in scanners]
         for ticker_results in ticker_outputs:
             for idx, result in enumerate(ticker_results):
                 all_results.append(result)
-                
+
                 # Map result to scanner by index position
                 if idx < len(scanner_keys):
                     scanner_key = scanner_keys[idx]
@@ -1137,7 +1190,7 @@ class ScannerOrchestrator:
                             scanner_stats[scanner_key]["triggered"] += 1
                         if result.error:
                             scanner_stats[scanner_key]["errors"] += 1
-        
+
         # Record duration for all scanners
         phase_duration = int((datetime.now(timezone.utc) - phase_start).total_seconds() * 1000)
         for stats in scanner_stats.values():
@@ -1165,29 +1218,29 @@ class ScannerOrchestrator:
         total_put_volume = 0
         total_call_oi = 0
         total_put_oi = 0
-        
+
         for contract in chain:
             day_data = contract.get("day", {})
             details = contract.get("details", {})
-            
+
             volume = day_data.get("volume", 0) or 0
             oi = day_data.get("open_interest", 0) or 0
             contract_type = details.get("contract_type", "").upper()
-            
+
             if contract_type == "CALL":
                 total_call_volume += volume
                 total_call_oi += oi
             elif contract_type == "PUT":
                 total_put_volume += volume
                 total_put_oi += oi
-        
+
         # Calculate call/put volume ratio (call volume / put volume)
         # Cap at 999.0 to avoid float("inf") which breaks JSON/DynamoDB serialization
         if total_put_volume > 0:
             call_put_ratio = min(total_call_volume / total_put_volume, 999.0)
         else:
             call_put_ratio = 999.0 if total_call_volume > 0 else 0.0
-        
+
         return AggregatedOptionsVolume(
             ticker=ticker,
             total_call_volume=total_call_volume,
@@ -1240,15 +1293,23 @@ class ScannerOrchestrator:
             tickers = watchlist.tickers
 
         # Run scanner
-        async with PolygonClient(
-            max_concurrent=policy_config.watchlist.max_concurrent_requests
-        ) as polygon:
-            context = ScanContext.create(polygon, policy_config)
+        if self._data_provider:
+            context = ScanContext.create(
+                None, policy_config, data_provider=self._data_provider,
+            )
             results = await scanner.scan_batch(
-                tickers,
-                context,
+                tickers, context,
                 max_concurrent=policy_config.watchlist.max_concurrent_requests,
             )
+        else:
+            async with PolygonClient(
+                max_concurrent=policy_config.watchlist.max_concurrent_requests
+            ) as polygon:
+                context = ScanContext.create(polygon, policy_config)
+                results = await scanner.scan_batch(
+                    tickers, context,
+                    max_concurrent=policy_config.watchlist.max_concurrent_requests,
+                )
 
         return results
 

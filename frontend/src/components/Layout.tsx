@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Settings, BarChart3, Scan, Target, Crosshair, TrendingUp } from 'lucide-react'
+import { Activity, Settings, BarChart3, Scan, Target, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { path: '/pipeline', label: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', icon: TrendingUp },
   { path: '/calibration', label: 'Calibration', icon: Target },
+  { path: '/backtesting', label: 'Backtesting', icon: FlaskConical },
   { path: '/config', label: 'Policy', icon: Settings },
 ]
 
