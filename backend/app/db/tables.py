@@ -258,6 +258,41 @@ class EvaluationTable:
         return items
 
     @staticmethod
+    async def expire_stale_pending(cutoff_iso: str) -> int:
+        """Mark PENDING evaluations older than cutoff as EXPIRED.
+
+        Args:
+            cutoff_iso: ISO datetime string; evaluations older than this are expired
+
+        Returns:
+            Number of evaluations expired
+        """
+        db = get_dynamodb()
+        # Query with raw keys (don't strip PK/SK since we need them for update)
+        items = await db.query(
+            EvaluationTable.TABLE,
+            "VERDICT#PENDING",
+            limit=200,
+            scan_forward=True,  # Oldest first
+            index_name="GSI1",
+        )
+
+        expired = 0
+        for item in items:
+            evaluated_at = item.get("evaluated_at", "") or item.get("GSI1SK", "")
+            if evaluated_at < cutoff_iso:
+                pk = item.get("PK", "")
+                sk = item.get("SK", "")
+                if pk and sk:
+                    await db.update_item(
+                        EvaluationTable.TABLE, pk, sk,
+                        {"GSI1PK": "VERDICT#EXPIRED"},
+                    )
+                    expired += 1
+
+        return expired
+
+    @staticmethod
     async def list_by_date(
         date: str, limit: int = 100
     ) -> list[dict[str, Any]]:

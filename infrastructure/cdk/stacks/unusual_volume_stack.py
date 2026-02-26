@@ -260,13 +260,15 @@ class UnusualVolumeStack(Stack):
         self.volume_stats_table.grant_read_data(self.worker_lambda)
         self.candidates_table.grant_read_write_data(self.worker_lambda)
         polygon_secret.grant_read(self.worker_lambda)
-        # Grant access to OI history table (for _get_prior_oi lookups)
+        # Grant access to OI history table (reads for baseline + writes for daily snapshots)
         self.worker_lambda.role.add_to_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "dynamodb:Query",
                     "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:BatchWriteItem",
                 ],
                 resources=[
                     f"arn:aws:dynamodb:{self.region}:{self.account}:table/{table_prefix}-oi-history",

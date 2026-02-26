@@ -199,6 +199,7 @@ class TestWorkerScanMode:
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
              patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
              patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
@@ -209,8 +210,8 @@ class TestWorkerScanMode:
         assert result["candidates_found"] == 1
         mock_candidates.put_item.assert_called_once()
 
-    def test_process_ticker_no_baseline(self):
-        """Contract with no baseline volume stats is skipped."""
+    def test_process_ticker_no_baseline_no_oi_trigger(self):
+        """Contract with no baseline and no OI trigger produces no candidates."""
         from lambdas.unusual_volume.worker import _process_ticker
 
         exp_date = (date.today() + timedelta(days=30)).isoformat()
@@ -232,10 +233,47 @@ class TestWorkerScanMode:
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
              patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
-             patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=None):
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
+             patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=None), \
+             patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=5000):
             result = _process_ticker("scan-001", "AAPL")
 
+        # No volume baseline (volume_ratio=0) and OI unchanged → no triggers
         assert result["candidates_found"] == 0
+
+    def test_process_ticker_no_baseline_oi_trigger_fires(self):
+        """OI trigger fires even when no volume baseline is available."""
+        from lambdas.unusual_volume.worker import _process_ticker
+
+        exp_date = (date.today() + timedelta(days=30)).isoformat()
+        mock_chain = [
+            {
+                "details": {
+                    "contract_type": "call",
+                    "ticker": "O:AAPL260320C00185000",
+                    "strike_price": 185,
+                    "expiration_date": exp_date,
+                },
+                "day": {"volume": 500},
+                "open_interest": 6000,  # +20% from prior_oi of 5000
+                "underlying_asset": {"ticker": "AAPL", "price": 189.0},
+                "greeks": {},
+                "last_quote": {"bid": 5.0, "ask": 5.4},
+            }
+        ]
+
+        mock_candidates = MagicMock()
+
+        with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
+             patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
+             patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=None), \
+             patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=5000), \
+             patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
+            result = _process_ticker("scan-001", "AAPL")
+
+        # OI increased 20% which exceeds 15% threshold → OI_INCREASE trigger fires
+        assert result["candidates_found"] == 1
 
     def test_process_ticker_below_threshold(self):
         """Contract with volume ratio below threshold is not a candidate."""
@@ -260,6 +298,7 @@ class TestWorkerScanMode:
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
              patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=200.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=5000):
             result = _process_ticker("scan-001", "AAPL")
@@ -293,6 +332,7 @@ class TestWorkerScanMode:
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
              patch("lambdas.unusual_volume.worker._get_previous_close", return_value=189.0), \
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
              patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
@@ -335,6 +375,7 @@ class TestWorkerScanMode:
 
         with patch("lambdas.unusual_volume.worker._fetch_options_chain", return_value=mock_chain), \
              patch("lambdas.unusual_volume.worker._get_previous_close", return_value=255.0), \
+             patch("lambdas.unusual_volume.worker._record_oi_snapshots", return_value=1), \
              patch("lambdas.unusual_volume.worker._get_expected_volume", return_value=100.0), \
              patch("lambdas.unusual_volume.worker._get_prior_oi", return_value=4500), \
              patch("lambdas.unusual_volume.worker.candidates_table", mock_candidates):
@@ -629,241 +670,97 @@ class TestWriteCandidatePricingFixes:
 
 
 # ============================================================================
-# Nightly Stats: _process_ticker_from_histories
+# Nightly Stats: Simplified aggregate reporting
 # ============================================================================
 
 
-class TestNightlyStatsProcessing:
-    """Test nightly stats computation via _process_ticker."""
+class TestNightlyStatsHandler:
+    """Test the simplified nightly stats Lambda handler."""
 
     @pytest.fixture(autouse=True)
     def setup_env(self):
         os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
-        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:test"
         yield
 
-    def _make_history(self, days=20, volume=100, oi=500):
-        """Build a list of history dicts."""
-        today = date.today()
-        return [
-            {
-                "date": (today - timedelta(days=days - i)).isoformat(),
-                "volume": volume + i,
-                "open_interest": oi + i * 10,
-            }
-            for i in range(days)
-        ]
+    def test_handler_returns_200(self):
+        """Handler returns 200 with metrics."""
+        from lambdas.unusual_volume.nightly_stats import lambda_handler
 
-    def test_empty_histories_returns_zero(self):
-        from lambdas.unusual_volume.nightly_stats import _process_ticker
+        with patch("lambdas.unusual_volume.nightly_stats._compute_scan_metrics",
+                   return_value={"total_scans": 5, "completed": 5}), \
+             patch("lambdas.unusual_volume.nightly_stats._compute_candidate_metrics",
+                   return_value={"pending": 10, "processed": 20, "filtered": 5}), \
+             patch("lambdas.unusual_volume.nightly_stats._write_daily_summary"):
+            result = lambda_handler({}, None)
 
-        with patch("lambdas.unusual_volume.nightly_stats._fetch_contract_histories",
-                   return_value={}):
-            contract_count, bucket_count = _process_ticker("AAPL", "2026-01-17", 99999999)
-        assert contract_count == 0
-        assert bucket_count == 0
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert "scan_metrics" in body
+        assert "candidate_metrics" in body
 
-    def test_contract_with_sufficient_history(self):
-        """Contract with >= 5 days produces contract-level stats."""
-        from lambdas.unusual_volume.nightly_stats import _process_ticker
+    def test_handler_handles_errors(self):
+        """Handler catches exceptions and returns 500."""
+        from lambdas.unusual_volume.nightly_stats import lambda_handler
 
-        history = self._make_history(days=20)
-        contract_histories = {"AAPL250320C00185000": history}
+        with patch("lambdas.unusual_volume.nightly_stats._compute_scan_metrics",
+                   side_effect=Exception("boom")):
+            result = lambda_handler({}, None)
 
-        with patch("lambdas.unusual_volume.nightly_stats._fetch_contract_histories",
-                   return_value=contract_histories), \
-             patch("lambdas.unusual_volume.nightly_stats.volume_stats_table") as mock_table:
-            contract_count, bucket_count = _process_ticker("AAPL", "2026-01-17", 99999999)
-
-        assert contract_count == 1
-        mock_table.put_item.assert_called()
-        item = mock_table.put_item.call_args[1]["Item"]
-        assert "avg_volume_20d" in item
-        assert item["underlying_ticker"] == "AAPL"
-
-    def test_contract_with_insufficient_history_goes_to_bucket(self):
-        """Contract with < 5 days goes into bucket aggregation."""
-        from lambdas.unusual_volume.nightly_stats import _process_ticker
-
-        history = self._make_history(days=3)
-        contract_histories = {"AAPL250320C00185000": history}
-
-        with patch("lambdas.unusual_volume.nightly_stats._fetch_contract_histories",
-                   return_value=contract_histories), \
-             patch("lambdas.unusual_volume.nightly_stats.volume_stats_table"):
-            contract_count, bucket_count = _process_ticker("AAPL", "2026-01-17", 99999999)
-
-        assert contract_count == 0
-        assert bucket_count >= 1
-
-    def test_mixed_history_depths(self):
-        """Mix of sufficient and insufficient history contracts."""
-        from lambdas.unusual_volume.nightly_stats import _process_ticker
-
-        contract_histories = {
-            "AAPL250320C00185000": self._make_history(days=20),
-            "AAPL250320C00190000": self._make_history(days=3),
-            "AAPL250320P00180000": self._make_history(days=10),
-        }
-
-        with patch("lambdas.unusual_volume.nightly_stats._fetch_contract_histories",
-                   return_value=contract_histories), \
-             patch("lambdas.unusual_volume.nightly_stats.volume_stats_table"):
-            contract_count, bucket_count = _process_ticker("AAPL", "2026-01-17", 99999999)
-
-        assert contract_count == 2
+        assert result["statusCode"] == 500
 
 
-# ============================================================================
-# Nightly Stats: _write_contract_stats
-# ============================================================================
-
-
-class TestNightlyStatsContractWrite:
-    """Test contract stats writing."""
+class TestNightlyStatsScanMetrics:
+    """Test scan metrics computation."""
 
     @pytest.fixture(autouse=True)
     def setup_env(self):
         os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
-        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:test"
         yield
 
-    def test_write_contract_stats_calculates_averages(self):
-        """Verifies avg_volume_20d and avg_volume_10d computation."""
-        from lambdas.unusual_volume.nightly_stats import _write_contract_stats
+    def test_scan_metrics_computes_counts(self):
+        from lambdas.unusual_volume.nightly_stats import _compute_scan_metrics
 
-        today = date.today()
-        history = [
-            {
-                "date": (today - timedelta(days=20 - i)).isoformat(),
-                "volume": 100 + i * 10,
-                "open_interest": 5000,
-            }
-            for i in range(20)
+        mock_items = [
+            {"status": "COMPLETED", "tickers_processed": 100, "candidates_found": 15},
+            {"status": "COMPLETED", "tickers_processed": 100, "candidates_found": 12},
+            {"status": "FAILED", "tickers_processed": 0, "candidates_found": 0},
         ]
 
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table") as mock_table:
-            _write_contract_stats(
-                "AAPL250320C00185000", "AAPL", history, "2026-01-17", 99999999
-            )
+        with patch("lambdas.unusual_volume.nightly_stats.scan_runs_table") as mock_table:
+            mock_table.query.return_value = {"Items": mock_items}
+            result = _compute_scan_metrics("2026-02-26")
 
-        mock_table.put_item.assert_called_once()
-        item = mock_table.put_item.call_args[1]["Item"]
-        assert float(item["avg_volume_20d"]) > 0
-        assert float(item["avg_volume_10d"]) > 0
-        assert item["volume_history_days"] == 20
+        assert result["total_scans"] == 3
+        assert result["completed"] == 2
+        assert result["failed"] == 1
+        assert result["total_tickers_processed"] == 200
+        assert result["total_candidates_found"] == 27
 
-    def test_write_contract_stats_insufficient_data(self):
-        """Does not write when not enough volume data after filtering."""
-        from lambdas.unusual_volume.nightly_stats import _write_contract_stats
+    def test_scan_metrics_empty(self):
+        from lambdas.unusual_volume.nightly_stats import _compute_scan_metrics
 
-        history = [
-            {"date": "2026-01-15", "volume": None, "open_interest": 5000},
-            {"date": "2026-01-16", "volume": None, "open_interest": 5100},
-            {"date": "2026-01-17", "volume": 100, "open_interest": 5200},
-        ]
+        with patch("lambdas.unusual_volume.nightly_stats.scan_runs_table") as mock_table:
+            mock_table.query.return_value = {"Items": []}
+            result = _compute_scan_metrics("2026-02-26")
 
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table") as mock_table:
-            _write_contract_stats(
-                "AAPL250320C00185000", "AAPL", history, "2026-01-17", 99999999
-            )
-
-        # Only 1 non-None volume < MIN_HISTORY_DAYS (5) → should not write
-        mock_table.put_item.assert_not_called()
-
-    def test_write_contract_stats_invalid_occ_symbol(self):
-        """Does not write for unparseable OCC symbol."""
-        from lambdas.unusual_volume.nightly_stats import _write_contract_stats
-
-        today = date.today()
-        history = [
-            {
-                "date": (today - timedelta(days=10 - i)).isoformat(),
-                "volume": 100,
-                "open_interest": 5000,
-            }
-            for i in range(10)
-        ]
-
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table") as mock_table:
-            _write_contract_stats(
-                "INVALID_TICKER", "AAPL", history, "2026-01-17", 99999999
-            )
-        mock_table.put_item.assert_not_called()
+        assert result["total_scans"] == 0
 
 
-# ============================================================================
-# Nightly Stats: _compute_bucket_stats
-# ============================================================================
-
-
-class TestNightlyStatsBucketComputation:
-    """Test bucket-level stats aggregation."""
+class TestNightlyStatsCandidateMetrics:
+    """Test candidate metrics computation."""
 
     @pytest.fixture(autouse=True)
     def setup_env(self):
         os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
-        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:test"
         yield
 
-    def test_bucket_stats_groups_by_type_and_dte(self):
-        """Contracts grouped by option_type and DTE bucket."""
-        from lambdas.unusual_volume.nightly_stats import _compute_bucket_stats
+    def test_candidate_metrics_queries_all_statuses(self):
+        from lambdas.unusual_volume.nightly_stats import _compute_candidate_metrics
 
-        today = date.today()
-        history_3d = [
-            {
-                "date": (today - timedelta(days=2 - i)).isoformat(),
-                "volume": 100 + i * 10,
-                "open_interest": 5000,
-            }
-            for i in range(3)
-        ]
+        with patch("lambdas.unusual_volume.nightly_stats.candidates_table") as mock_table:
+            mock_table.query.return_value = {"Count": 42}
+            result = _compute_candidate_metrics("2026-02-26")
 
-        insufficient_history = {
-            "AAPL250320C00185000": history_3d,
-            "AAPL250320C00190000": history_3d,
-        }
-
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table"):
-            count = _compute_bucket_stats(
-                "AAPL", insufficient_history, "2026-01-17", 99999999
-            )
-
-        # Both contracts should contribute to the same bucket
-        assert count >= 1
-
-    def test_bucket_stats_empty_input(self):
-        """Empty insufficient_history produces no bucket stats."""
-        from lambdas.unusual_volume.nightly_stats import _compute_bucket_stats
-
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table"):
-            count = _compute_bucket_stats(
-                "AAPL", {}, "2026-01-17", 99999999
-            )
-        assert count == 0
-
-    def test_bucket_stats_skips_leaps(self):
-        """Contracts with DTE bucket X (LEAPS) are skipped."""
-        from lambdas.unusual_volume.nightly_stats import _compute_bucket_stats
-
-        today = date.today()
-        history = [
-            {
-                "date": (today - timedelta(days=2 - i)).isoformat(),
-                "volume": 100,
-                "open_interest": 5000,
-            }
-            for i in range(3)
-        ]
-        # Ticker with far-out expiration to get DTE bucket X
-        insufficient_history = {
-            "AAPL270320C00185000": history,  # Mar 2027 → DTE > 365 → bucket X
-        }
-
-        with patch("lambdas.unusual_volume.nightly_stats.volume_stats_table"):
-            count = _compute_bucket_stats(
-                "AAPL", insufficient_history, "2026-01-17", 99999999
-            )
-        # LEAPS should be skipped, so nothing written
-        assert count == 0
+        assert result["pending"] == 42
+        assert result["processed"] == 42
+        assert result["filtered"] == 42

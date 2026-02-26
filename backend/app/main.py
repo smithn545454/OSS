@@ -376,8 +376,8 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
             logger.info("UV Bridge: No PENDING evaluations found")
             return {"status": "skipped", "reason": "no_pending_evaluations"}
 
-        # 2. Filter to recent evaluations only (last 4 hours)
-        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=4)
+        # 2. Filter to recent evaluations only (last 24 hours)
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=24)
         cutoff_iso = cutoff_dt.isoformat()
 
         fresh_items = []
@@ -391,7 +391,7 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
 
         if stale_count > 0:
             logger.info(
-                f"UV Bridge: Skipped {stale_count} stale PENDING evals (>4h old)"
+                f"UV Bridge: Skipped {stale_count} stale PENDING evals (>24h old)"
             )
 
         if not fresh_items:
@@ -539,6 +539,16 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
             "positions_created": paper_results.get("positions_created", 0),
             "theses_generated": len([t for t in theses if t.status.value == "COMPLETED"]),
         }
+        # Clean up stale PENDINGs (>48h old) to prevent them accumulating
+        try:
+            stale_cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+            expired_count = await EvaluationTable.expire_stale_pending(stale_cutoff)
+            if expired_count > 0:
+                logger.info(f"UV Bridge: Expired {expired_count} stale PENDING evals (>48h)")
+                summary["stale_expired"] = expired_count
+        except Exception as cleanup_err:
+            logger.warning(f"UV Bridge: Stale cleanup failed: {cleanup_err}")
+
         logger.info(f"UV Bridge complete: {summary}")
         return summary
 

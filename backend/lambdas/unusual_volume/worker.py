@@ -39,6 +39,8 @@ from typing import Any, Optional
 import boto3
 import urllib3
 from boto3.dynamodb.conditions import Key
+from statistics import mean
+
 from utils.buckets import build_bucket_key, get_dte_bucket, get_moneyness_bucket, is_scannable_dte
 from utils.scoring import calculate_priority_score, get_trigger_reasons
 
@@ -159,6 +161,13 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
     as_of_date = date.today().isoformat()
     ttl = int((datetime.now(timezone.utc) + timedelta(hours=TTL_HOURS)).timestamp())
 
+    # Record OI snapshots for all scannable contracts (feeds future baseline computation)
+    try:
+        oi_count = _record_oi_snapshots(options_chain, as_of_date)
+        logger.info(f"{ticker}: recorded {oi_count} OI snapshots")
+    except Exception as e:
+        logger.error(f"{ticker}: failed to record OI snapshots: {e}")
+
     candidates_found = 0
     contracts_passed_prefilter = 0
     had_baseline = 0
@@ -172,21 +181,19 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
 
         contracts_passed_prefilter += 1
 
-        # Get expected volume
+        # Volume-based detection (requires baseline)
         expected_volume = _get_expected_volume(contract, ticker, as_of_date, underlying_price)
-
-        if expected_volume is None or expected_volume < 1:
-            no_baseline += 1
-            continue
-
-        had_baseline += 1
-
-        # Calculate metrics
         today_volume = contract.get("day", {}).get("volume", 0)
-        volume_ratio = today_volume / expected_volume
-        max_ratio = max(max_ratio, volume_ratio)
 
-        # Get OI change
+        if expected_volume is not None and expected_volume >= 1:
+            had_baseline += 1
+            volume_ratio = today_volume / expected_volume
+            max_ratio = max(max_ratio, volume_ratio)
+        else:
+            no_baseline += 1
+            volume_ratio = 0.0  # VOL_SPIKE won't fire, but OI triggers still can
+
+        # OI-based detection (independent of volume baseline)
         today_oi = contract.get("open_interest", 0)
         prior_oi = _get_prior_oi(contract.get("details", {}).get("ticker", ""))
         oi_change_pct = _calculate_oi_change_pct(today_oi, prior_oi)
@@ -221,7 +228,7 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
         mid = (bid + ask) / 2 if (bid + ask) > 0 else 0
         spread_pct = ((ask - bid) / mid * 100) if mid > 0 else 100
 
-        volume_source = contract.get("_volume_source", "CONTRACT_SPECIFIC")
+        volume_source = contract.get("_volume_source", "CONTRACT_HISTORY")
 
         priority_score = calculate_priority_score(
             volume_ratio=volume_ratio,
@@ -240,7 +247,7 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
             ticker=ticker,
             underlying_price=underlying_price,
             volume_ratio=volume_ratio,
-            expected_volume=expected_volume,
+            expected_volume=expected_volume or 0,
             today_oi=today_oi,
             prior_oi=prior_oi,
             oi_change_pct=oi_change_pct,
@@ -368,9 +375,10 @@ def _passes_prefilter(contract: dict) -> bool:
 def _get_expected_volume(
     contract: dict, underlying: str, as_of_date: str, underlying_price: float = 0
 ) -> Optional[float]:
-    """Look up expected volume from volume-stats table.
+    """Compute expected volume from oi-history (inline baseline).
 
-    Uses contract-specific stats when available, falls back to bucket stats.
+    Primary: query oi-history table directly for this contract's recent volume.
+    Fallback: query volume-stats table for precomputed bucket averages.
 
     Args:
         contract: Polygon option snapshot
@@ -383,58 +391,44 @@ def _get_expected_volume(
     """
     option_ticker = contract.get("details", {}).get("ticker", "").replace("O:", "")
 
-    # Try contract-specific stats first
-    pk = f"CONTRACT#{option_ticker}"
-    try:
-        response = volume_stats_table.query(
-            KeyConditionExpression=(
-                Key("PK").eq(pk) &
-                Key("SK").begins_with("STATS#")
-            ),
-            ScanIndexForward=False,  # Get most recent first
-            Limit=1,
-        )
-    except Exception as e:
-        logger.error(f"DynamoDB query failed for {pk}: {e}")
-        return None
+    # Primary: inline baseline from oi-history (fast point query per contract)
+    inline_avg = _get_expected_volume_from_history(option_ticker)
+    if inline_avg is not None and inline_avg >= 1:
+        contract["_volume_source"] = "CONTRACT_HISTORY"
+        return inline_avg
 
-    items = response.get("Items", [])
-    if items:
-        contract["_volume_source"] = "CONTRACT_SPECIFIC"
-        return float(items[0].get("avg_volume_20d", 0))
-
-    # Fall back to bucket stats
+    # Fallback: bucket stats from volume-stats table
     details = contract.get("details", {})
     option_type = "CALL" if details.get("contract_type") == "call" else "PUT"
-
-    # Calculate moneyness bucket (use passed underlying_price from previous close API)
     strike = details.get("strike_price", 0)
 
     if underlying_price > 0 and strike > 0:
         moneyness_bucket = get_moneyness_bucket(strike, underlying_price, option_type)
     else:
-        moneyness_bucket = "ATM"  # Default
+        moneyness_bucket = "ATM"
 
-    # Calculate DTE bucket
     expiration_str = details.get("expiration_date", "")
     if expiration_str:
         expiration = date.fromisoformat(expiration_str)
         dte = (expiration - date.today()).days
         dte_bucket = get_dte_bucket(dte)
     else:
-        dte_bucket = "C"  # Default
+        dte_bucket = "C"
 
-    # Build bucket key and query
     bucket_key = build_bucket_key(underlying, option_type, moneyness_bucket, dte_bucket)
 
-    response = volume_stats_table.query(
-        KeyConditionExpression=(
-            Key("PK").eq(bucket_key) &
-            Key("SK").begins_with("STATS#")
-        ),
-        ScanIndexForward=False,
-        Limit=1,
-    )
+    try:
+        response = volume_stats_table.query(
+            KeyConditionExpression=(
+                Key("PK").eq(bucket_key) &
+                Key("SK").begins_with("STATS#")
+            ),
+            ScanIndexForward=False,
+            Limit=1,
+        )
+    except Exception as e:
+        logger.error(f"Bucket stats query failed for {bucket_key}: {e}")
+        return None
 
     items = response.get("Items", [])
     if items:
@@ -485,6 +479,111 @@ def _calculate_oi_change_pct(today_oi: int, prior_oi: float) -> float:
         return 0.0
 
     return ((today_oi - prior_oi) / prior_oi) * 100
+
+
+def _record_oi_snapshots(options_chain: list[dict], as_of_date: str) -> int:
+    """Record daily OI snapshots for all scannable contracts.
+
+    Writes today's OI and volume to the oi-history table for every contract
+    within DTE range (1-90 days) that has non-zero open interest. This data
+    feeds baseline computation for future scans.
+
+    Uses batch_writer for efficient DynamoDB writes (auto-batches at 25 items).
+    Repeated calls on the same date are idempotent (last-write-wins on PK/SK).
+
+    Args:
+        options_chain: Full options chain from Polygon snapshot
+        as_of_date: Today's date string (YYYY-MM-DD)
+
+    Returns:
+        Number of OI records written
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    count = 0
+
+    with oi_history_table.batch_writer(overwrite_by_pkeys=["PK", "SK"]) as batch:
+        for contract in options_chain:
+            details = contract.get("details", {})
+            expiration_str = details.get("expiration_date", "")
+            if not expiration_str:
+                continue
+
+            try:
+                expiration = date.fromisoformat(expiration_str)
+                dte = (expiration - date.today()).days
+            except ValueError:
+                continue
+
+            # Only record contracts within scannable DTE range
+            if dte < MIN_DTE or dte > MAX_DTE or not is_scannable_dte(dte):
+                continue
+
+            oi = contract.get("open_interest", 0)
+            if oi < 1:
+                continue
+
+            option_ticker = details.get("ticker", "").replace("O:", "")
+            if not option_ticker:
+                continue
+
+            volume = contract.get("day", {}).get("volume", 0)
+
+            batch.put_item(Item={
+                "PK": f"CONTRACT#{option_ticker}",
+                "SK": f"DATE#{as_of_date}",
+                "option_ticker": option_ticker,
+                "date": as_of_date,
+                "open_interest": oi,
+                "volume": volume or 0,
+                "recorded_at": now_iso,
+            })
+            count += 1
+
+    return count
+
+
+def _get_expected_volume_from_history(option_ticker: str) -> Optional[float]:
+    """Compute expected volume by querying oi-history directly.
+
+    Queries the last 20 days of volume data for this contract and computes
+    the mean. This replaces the broken nightly-stats → volume-stats lookup
+    with an efficient point query on the oi-history table.
+
+    Args:
+        option_ticker: OCC option symbol (without O: prefix)
+
+    Returns:
+        Average daily volume, or None if insufficient history
+    """
+    clean_ticker = option_ticker.replace("O:", "")
+
+    try:
+        response = oi_history_table.query(
+            KeyConditionExpression=(
+                Key("PK").eq(f"CONTRACT#{clean_ticker}") &
+                Key("SK").begins_with("DATE#")
+            ),
+            ScanIndexForward=False,  # Most recent first
+            Limit=20,
+        )
+    except Exception as e:
+        logger.error(f"Error querying oi-history for {clean_ticker}: {e}")
+        return None
+
+    items = response.get("Items", [])
+    if len(items) < 3:
+        return None
+
+    volumes = [
+        float(item.get("volume", 0))
+        for item in items
+        if item.get("volume") is not None and float(item.get("volume", 0)) > 0
+    ]
+
+    if len(volumes) < 3:
+        return None
+
+    return mean(volumes)
 
 
 def _write_candidate(
