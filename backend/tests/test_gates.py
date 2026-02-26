@@ -435,9 +435,9 @@ class TestGateBreakoutVolume:
         assert result.reason_code == "GATE_PASS_BREAKOUT_VOLUME"
     
     def test_fail_with_insufficient_volume(self, breakout_context, default_config):
-        """Should fail when volume_ratio < 1.0."""
+        """Should fail when volume_ratio < 1.5."""
         ctx = GateContext(
-            **{**breakout_context.__dict__, "volume_ratio": 0.8}
+            **{**breakout_context.__dict__, "volume_ratio": 1.2}
         )
         result = check_breakout_volume(ctx, default_config)
         assert result.enabled is True
