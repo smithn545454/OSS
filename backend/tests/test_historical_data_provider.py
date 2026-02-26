@@ -10,9 +10,10 @@ import io
 from datetime import date
 from unittest.mock import MagicMock
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
+
+pa = pytest.importorskip("pyarrow", reason="pyarrow not installed")
+pq = pytest.importorskip("pyarrow.parquet", reason="pyarrow.parquet not installed")
 
 from app.core.data_provider import MarketContextData, StockSnapshot, IVHistoryRecord, OIHistoryRecord
 from app.core.historical_data_provider import HistoricalDataProvider
