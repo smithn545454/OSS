@@ -101,12 +101,12 @@ class LiveDataProvider:
         return StockSnapshot(
             ticker=ticker,
             date=as_of.isoformat(),
-            close=prev.get("close", 0.0),
-            volume=prev.get("volume", 0),
-            vwap=prev.get("vwap"),
-            open=prev.get("open"),
-            high=prev.get("high"),
-            low=prev.get("low"),
+            close=prev.get("c", 0.0),
+            volume=prev.get("v", 0),
+            vwap=prev.get("vw"),
+            open=prev.get("o"),
+            high=prev.get("h"),
+            low=prev.get("l"),
         )
 
     async def get_stock_snapshots_batch(
@@ -120,12 +120,12 @@ class LiveDataProvider:
             result[t] = StockSnapshot(
                 ticker=t,
                 date=as_of.isoformat(),
-                close=data.get("close", 0.0),
-                volume=data.get("volume", 0),
-                vwap=data.get("vwap"),
-                open=data.get("open"),
-                high=data.get("high"),
-                low=data.get("low"),
+                close=data.get("c", 0.0),
+                volume=data.get("v", 0),
+                vwap=data.get("vw"),
+                open=data.get("o"),
+                high=data.get("h"),
+                low=data.get("l"),
             )
         return result
 
@@ -241,7 +241,7 @@ class LiveDataProvider:
         # Live mode: fetch SPY/VIX from Polygon
         try:
             prev = await self.polygon.get_previous_close("SPY")
-            spy_close = prev.get("close", 0.0) if prev else 0.0
+            spy_close = prev.get("c", 0.0) if prev else 0.0
             return MarketContextData(
                 date=as_of.isoformat(),
                 spy_close=spy_close,
