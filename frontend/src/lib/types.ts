@@ -254,7 +254,7 @@ export interface SummaryMetricsResponse {
 }
 
 // Equity curve / snapshots / analysis response types
-export interface EquityCurveResponse {
+export interface PaperEquityCurveResponse {
   curve: Array<{ date: string; daily_pnl: number; equity: number }>
   period: string
 }

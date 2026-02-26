@@ -212,7 +212,12 @@ def _make_mock_data_provider(
         bid = price * 0.98
         ask = price * 1.02
         return [{
-            "details": {"ticker": "O:AAPL260320C00185000"},
+            "details": {
+                "ticker": "O:AAPL260320C00185000",
+                "strike_price": 185.0,
+                "expiration_date": "2026-03-20",
+                "contract_type": "call",
+            },
             "day": {"close": price},
             "last_quote": {"bid": bid, "ask": ask},
             "open_interest": 5000,

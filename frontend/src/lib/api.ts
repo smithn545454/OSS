@@ -35,7 +35,7 @@ import type {
   WatchInsightsResponse,
   ContractQuotesResponse,
   // Paper Trading Workstation types
-  EquityCurveResponse,
+  PaperEquityCurveResponse,
   PositionSnapshotsResponse,
   PositionAnalysisResponse,
   PaperTradingSummary,
@@ -528,8 +528,8 @@ export async function closePaperTradingPosition(
   })
 }
 
-export async function getEquityCurve(period: string = '30d'): Promise<EquityCurveResponse> {
-  return fetchApi<EquityCurveResponse>(
+export async function getEquityCurve(period: string = '30d'): Promise<PaperEquityCurveResponse> {
+  return fetchApi<PaperEquityCurveResponse>(
     `/api/paper-trading/equity-curve?period=${encodeURIComponent(period)}`
   )
 }
