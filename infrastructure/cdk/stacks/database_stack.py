@@ -213,7 +213,7 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
-        # 9. Gate results table
+        # 9. Gate results table (GSI1 for run_id lookups)
         self.gate_results_table = dynamodb.Table(
             self,
             "GateResultsTable",
@@ -226,6 +226,15 @@ class DatabaseStack(Stack):
             ),
             billing_mode=billing_mode,
             removal_policy=removal_policy,
+        )
+        self.gate_results_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
         )
 
         # 10. IV history table (with TTL for 365-day retention)

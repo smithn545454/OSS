@@ -187,7 +187,7 @@ class TestPolicyConfigDefaults:
         assert cfg.dte_max == 120
         assert cfg.move_sufficiency_max == 1.25
         assert cfg.iv_percentile_max == 85
-        assert cfg.breakout_volume_min == 1.5
+        assert cfg.breakout_volume_min == 1.0
         assert cfg.theta_burden_max == 4.0
         assert cfg.trend_alignment_min == 0.6
         assert cfg.iv_rv_ratio_max == 1.5
@@ -195,9 +195,9 @@ class TestPolicyConfigDefaults:
         assert cfg.delta_min == 0.20
         assert cfg.delta_max == 0.70
         assert cfg.max_premium == 20.0
-        assert cfg.combined_score_min == 75.0
-        assert cfg.pillar_minimum == 60.0
-        assert cfg.pillar_spread_max == 30.0
+        assert cfg.combined_score_min == 60.0
+        assert cfg.pillar_minimum == 45.0
+        assert cfg.pillar_spread_max == 40.0
 
     def test_decision_config_defaults(self):
         cfg = DecisionConfig()

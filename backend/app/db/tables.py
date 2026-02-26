@@ -1029,6 +1029,9 @@ class GateResultTable:
         (GSI1PK=RUN#{run_id}). Gate results written before this GSI was
         populated will not appear.
 
+        Falls back to an empty list if GSI1 does not exist on the table
+        (e.g. production table created before the GSI was added to CDK).
+
         Args:
             run_id: The pipeline run ID
             limit: Maximum results to return
@@ -1037,13 +1040,20 @@ class GateResultTable:
             List of GateResult objects from evaluations in this run
         """
         db = get_dynamodb()
-        items = await db.query(
-            GateResultTable.TABLE,
-            f"RUN#{run_id}",
-            index_name="GSI1",
-            limit=limit,
-            scan_forward=True,
-        )
+        try:
+            items = await db.query(
+                GateResultTable.TABLE,
+                f"RUN#{run_id}",
+                index_name="GSI1",
+                limit=limit,
+                scan_forward=True,
+            )
+        except Exception as e:
+            # GSI1 may not exist on older tables — degrade gracefully
+            logger.warning(
+                f"Failed to query gate results by run_id (GSI1 may not exist): {e}"
+            )
+            return []
         results = []
         for item in items:
             item.pop("PK", None)

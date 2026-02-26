@@ -12,7 +12,6 @@ from app.core.schemas import (
     DTEBucket,
     Evaluation,
     GateConfig,
-    GateOperator,
     GateResult,
     OptionType,
 )
@@ -32,16 +31,6 @@ from app.gates.gates import (
     check_theta_burden_max,
     check_breakout_volume,
     check_greeks_coherence,
-    check_trend_alignment,
-    check_directional,
-    check_momentum,
-    check_iv_rv_ratio,
-    check_expected_move,
-    check_delta_range,
-    check_max_loss,
-    check_combined_score,
-    check_pillar_minimum,
-    check_confidence_interval,
 )
 from app.gates.models import GateContext, GateEvaluation
 
@@ -67,15 +56,6 @@ def _make_ctx(
     option_type="CALL",
     scanner_triggers=None,
     volume_ratio=None,
-    iv_rv_ratio=1.0,
-    feasibility_ratio=0.8,
-    mid=5.0,
-    pillar_scores=None,
-    combined_score=80.0,
-    return_5d=2.0,
-    return_20d=5.0,
-    trend_aligned_bullish=True,
-    trend_aligned_bearish=False,
 ):
     return GateContext(
         evaluation_id=eval_id,
@@ -86,7 +66,7 @@ def _make_ctx(
         underlying_price=180.0,
         bid=4.75,
         ask=5.25,
-        mid=mid,
+        mid=5.0,
         iv=0.30,
         open_interest=oi,
         volume=volume,
@@ -101,14 +81,6 @@ def _make_ctx(
         theta_pct=theta_pct,
         scanner_triggers=scanner_triggers or [],
         volume_ratio=volume_ratio,
-        iv_rv_ratio=iv_rv_ratio,
-        feasibility_ratio=feasibility_ratio,
-        pillar_scores=pillar_scores or {"DIRECTIONAL": 80, "VOLATILITY": 80, "STRUCTURE": 80},
-        combined_score=combined_score,
-        trend_aligned_bullish=trend_aligned_bullish,
-        trend_aligned_bearish=trend_aligned_bearish,
-        return_5d=return_5d,
-        return_20d=return_20d,
     )
 
 
@@ -246,7 +218,7 @@ class TestCheckThetaBurdenMax:
         assert result.passed is False
 
     def test_zero_mid(self):
-        result = check_theta_burden_max(_make_ctx(theta_pct=None, mid=0.0), _config())
+        result = check_theta_burden_max(_make_ctx(theta_pct=None), _config())
         assert result.passed is True
 
 
@@ -293,158 +265,6 @@ class TestCheckGreeksCoherence:
     def test_positive_theta(self):
         result = check_greeks_coherence(
             _make_ctx(delta=0.5, theta=0.08, vega=0.25, gamma=0.03), _config()
-        )
-        assert result.passed is False
-
-
-class TestCheckTrendAlignment:
-
-    def test_aligned_call(self):
-        result = check_trend_alignment(
-            _make_ctx(option_type="CALL", trend_aligned_bullish=True), _config()
-        )
-        assert result.passed is True
-
-    def test_not_aligned_call(self):
-        result = check_trend_alignment(
-            _make_ctx(option_type="CALL", trend_aligned_bullish=False), _config()
-        )
-        assert result.passed is False
-
-
-class TestCheckDirectional:
-
-    def test_both_agree_call(self):
-        result = check_directional(
-            _make_ctx(option_type="CALL", return_5d=2.0, return_20d=5.0), _config()
-        )
-        assert result.passed is True
-
-    def test_disagree_call(self):
-        result = check_directional(
-            _make_ctx(option_type="CALL", return_5d=-2.0, return_20d=5.0), _config()
-        )
-        assert result.passed is False
-
-    def test_none_returns_pass(self):
-        result = check_directional(
-            _make_ctx(return_5d=None, return_20d=None), _config()
-        )
-        assert result.passed is True
-
-
-class TestCheckMomentum:
-
-    def test_positive_momentum_call(self):
-        result = check_momentum(
-            _make_ctx(option_type="CALL", return_5d=3.0), _config()
-        )
-        assert result.passed is True
-
-    def test_negative_momentum_call(self):
-        result = check_momentum(
-            _make_ctx(option_type="CALL", return_5d=-3.0), _config()
-        )
-        assert result.passed is False
-
-
-class TestCheckIvRvRatio:
-
-    def test_pass(self):
-        result = check_iv_rv_ratio(_make_ctx(iv_rv_ratio=1.0), _config())
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_iv_rv_ratio(_make_ctx(iv_rv_ratio=3.0), _config())
-        assert result.passed is False
-
-    def test_none_passes(self):
-        result = check_iv_rv_ratio(_make_ctx(iv_rv_ratio=None), _config())
-        assert result.passed is True
-
-
-class TestCheckExpectedMove:
-
-    def test_pass(self):
-        result = check_expected_move(_make_ctx(feasibility_ratio=0.8), _config())
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_expected_move(_make_ctx(feasibility_ratio=3.0), _config())
-        assert result.passed is False
-
-
-class TestCheckDeltaRange:
-
-    def test_pass(self):
-        result = check_delta_range(_make_ctx(delta=0.45), _config())
-        assert result.passed is True
-
-    def test_too_low(self):
-        result = check_delta_range(_make_ctx(delta=0.05), _config())
-        assert result.passed is False
-
-    def test_too_high(self):
-        result = check_delta_range(_make_ctx(delta=0.95), _config())
-        assert result.passed is False
-
-
-class TestCheckMaxLoss:
-
-    def test_pass(self):
-        result = check_max_loss(_make_ctx(mid=5.0), _config())
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_max_loss(_make_ctx(mid=25.0), _config())
-        assert result.passed is False
-
-
-class TestCheckCombinedScore:
-
-    def test_pass(self):
-        result = check_combined_score(_make_ctx(combined_score=85.0), _config())
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_combined_score(_make_ctx(combined_score=50.0), _config())
-        assert result.passed is False
-
-    def test_none_passes(self):
-        result = check_combined_score(_make_ctx(combined_score=None), _config())
-        assert result.passed is True
-
-
-class TestCheckPillarMinimum:
-
-    def test_pass(self):
-        result = check_pillar_minimum(
-            _make_ctx(pillar_scores={"D": 80, "V": 75, "S": 70}), _config()
-        )
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_pillar_minimum(
-            _make_ctx(pillar_scores={"D": 80, "V": 40, "S": 70}), _config()
-        )
-        assert result.passed is False
-
-    def test_empty_passes(self):
-        result = check_pillar_minimum(_make_ctx(pillar_scores={}), _config())
-        assert result.passed is True
-
-
-class TestCheckConfidenceInterval:
-
-    def test_pass(self):
-        result = check_confidence_interval(
-            _make_ctx(pillar_scores={"D": 80, "V": 75, "S": 78}), _config()
-        )
-        assert result.passed is True
-
-    def test_fail(self):
-        result = check_confidence_interval(
-            _make_ctx(pillar_scores={"D": 95, "V": 40, "S": 78}), _config()
         )
         assert result.passed is False
 

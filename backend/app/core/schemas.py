@@ -559,7 +559,7 @@ class GateConfig(OSSBaseModel):
     dte_max: int = 120
     move_sufficiency_max: float = 1.25
     iv_percentile_max: int = 85
-    breakout_volume_min: float = 1.5
+    breakout_volume_min: float = 1.0
     theta_burden_max: float = 4.0
 
     # Directional confidence thresholds
@@ -575,9 +575,9 @@ class GateConfig(OSSBaseModel):
     max_premium: float = 20.0
 
     # Composite threshold gate thresholds
-    combined_score_min: float = 75.0
-    pillar_minimum: float = 60.0
-    pillar_spread_max: float = 30.0
+    combined_score_min: float = 60.0
+    pillar_minimum: float = 45.0
+    pillar_spread_max: float = 40.0
 
 
 class PillarWeights(OSSBaseModel):
