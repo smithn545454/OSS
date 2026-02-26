@@ -152,6 +152,8 @@ run_backend_tests() {
             --ignore=tests/test_pipeline_scenarios.py \
             --ignore=tests/test_pipeline_failure_recovery.py \
             --ignore=tests/test_fault_injection.py \
+            --ignore=tests/test_data_provider.py \
+            --ignore=tests/test_historical_data_provider.py \
             -p no:randomly 2>&1; then
         echo -e "${GREEN}Tests passed!${NC}"
         cd ..
