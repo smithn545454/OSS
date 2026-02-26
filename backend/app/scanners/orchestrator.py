@@ -643,7 +643,7 @@ class ScannerOrchestrator:
                             features=features_map,
                             persist_decisions=True,
                             check_concentration=True,
-                            generate_theses=False,
+                            generate_theses=True,
                         )
 
                         # Count verdicts
