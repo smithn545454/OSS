@@ -364,7 +364,9 @@ class ScannerOrchestrator:
                                     "Finnhub API key not configured, earnings filter disabled"
                                 )
                             else:
-                                finnhub = FinnhubClient(api_key=settings.finnhub_api_key)
+                                finnhub = await stack.enter_async_context(
+                                    FinnhubClient(api_key=settings.finnhub_api_key)
+                                )
                                 earnings_cache = EarningsCacheService(finnhub_client=finnhub)
                         except Exception as e:
                             logger.warning(f"Could not initialize earnings cache: {e}")
