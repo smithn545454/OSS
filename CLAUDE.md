@@ -261,7 +261,28 @@ Tell the user exactly what you found:
 - What the Pipeline Monitor stages look like
 - Whether the deploy is confirmed working or needs attention
 
-### Step 5: If Something Goes Wrong
+### Step 5: Merge to Main (REQUIRED — do NOT skip)
+
+After a successful deploy and verification, merge the working branch to `main` so production code and `main` stay in sync. This ensures future sessions start with all deployed code.
+
+```bash
+# From the main repo (not worktree), or using git commands:
+git checkout main
+git pull origin main
+git merge origin/<branch-name> --no-edit    # Merge the deployed branch
+git push origin main
+```
+
+After merging, delete the branch to keep the repo clean:
+```bash
+git push origin --delete <branch-name>
+```
+
+**Why this matters:** The deploy script uploads code to Lambda directly from the current branch — it does NOT merge to `main`. If you skip this step, future Claude Code sessions will start from `main` and be missing the deployed code. This has caused lost work in the past.
+
+**If there are merge conflicts:** Resolve them carefully, keeping changes from both sides. Test after resolving to make sure nothing broke.
+
+### Step 6: If Something Goes Wrong
 
 If verification fails, take these steps in order:
 
@@ -298,6 +319,8 @@ After any rollback, tell the user:
 6. **If unsure, ask** — it's better to pause and ask the user than to deploy broken code
 7. **Tag milestones** — when the pipeline is working well after a significant change, suggest tagging: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
 8. **No shortcuts for "simple" changes** — follow every step regardless of how minor the change appears. Frontend-only changes still require CloudWatch and Pipeline Monitor checks.
+9. **Always merge to main after deploy** — a deploy without merging leaves `main` out of sync. Future sessions start from `main`, so unmerged code is effectively invisible to them. Step 5 is mandatory.
+10. **Clean up branches** — after merging, delete the remote branch. One active branch at a time keeps things simple.
 
 ### Pipeline Run ID Flow (Critical Context)
 - **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
