@@ -10,6 +10,13 @@ import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
 import PaperTrading from './pages/PaperTrading'
 import Backtesting from './pages/Backtesting'
+import Opps from './pages/Opps'
+import { useIsMobile } from './hooks/useIsMobile'
+
+function ResponsiveOpportunities() {
+  const isMobile = useIsMobile()
+  return isMobile ? <Opps /> : <Opportunities />
+}
 
 class EvaluationErrorBoundary extends Component<
   { children: ReactNode },
@@ -55,7 +62,8 @@ function App() {
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="opportunities" element={<Opportunities />} />
+        <Route path="opportunities" element={<ResponsiveOpportunities />} />
+        <Route path="opps" element={<Navigate to="/opportunities" replace />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
         <Route path="paper-trading" element={<PaperTrading />} />
