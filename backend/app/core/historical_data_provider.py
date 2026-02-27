@@ -31,7 +31,11 @@ class HistoricalDataProvider:
     """DataProvider backed by S3 parquet files for backtesting."""
 
     def __init__(
-        self, s3_bucket: str, s3_client: Any = None, as_of_date: Any = None
+        self,
+        s3_bucket: str,
+        s3_client: Any = None,
+        as_of_date: Any = None,
+        shared_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.s3_bucket = s3_bucket
         self.as_of_date = as_of_date  # Contextual: callers track which date is being processed
@@ -41,7 +45,8 @@ class HistoricalDataProvider:
             s3_client = boto3.client("s3")
         self.s3 = s3_client
         # In-memory caches: {dataset/date -> pyarrow.Table}
-        self._cache: dict[str, Any] = {}
+        # If shared_cache provided, reuse it (pre-populated by prefetch)
+        self._cache: dict[str, Any] = shared_cache if shared_cache is not None else {}
         self._market_context_cache: Optional[Any] = None
 
     # ------------------------------------------------------------------

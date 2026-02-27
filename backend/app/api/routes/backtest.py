@@ -419,10 +419,11 @@ async def _run_backtest_inline(
 
         s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
 
-        def data_provider_factory(as_of_date):
+        def data_provider_factory(as_of_date, shared_cache=None):
             return HistoricalDataProvider(
                 as_of_date=as_of_date,
                 s3_bucket=s3_bucket,
+                shared_cache=shared_cache,
             )
 
         all_trades = []

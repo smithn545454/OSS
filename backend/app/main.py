@@ -701,10 +701,20 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
         config = BacktestRunConfig(**config_data)
         days = [date_type.fromisoformat(d) for d in day_strs]
 
-        def data_provider_factory(as_of_date):
+        # Pre-materialize all S3 data for this batch (parallel download)
+        from app.backtest.prefetch import prefetch_batch_data
+
+        logger.info(f"Prefetching S3 data for {len(days)} days...")
+        shared_cache = prefetch_batch_data(
+            s3_bucket=s3_bucket,
+            batch_days=days,
+        )
+
+        def data_provider_factory(as_of_date, shared_cache=None):
             return HistoricalDataProvider(
                 as_of_date=as_of_date,
                 s3_bucket=s3_bucket,
+                shared_cache=shared_cache,
             )
 
         trades = await process_batch(
@@ -713,6 +723,7 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             config=config,
             data_provider_factory=data_provider_factory,
             persist=True,
+            shared_cache=shared_cache,
         )
 
         logger.info(

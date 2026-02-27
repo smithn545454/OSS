@@ -157,7 +157,7 @@ class BackendStack(Stack):
             ),
             role=lambda_role,
             timeout=Duration.minutes(10),  # 10 minutes for scanning all tickers
-            memory_size=1024,  # More memory = more CPU for faster execution
+            memory_size=2048,  # 2 GB: supports backtest prefetch cache + pipeline
             environment={
                 "APP_NAME": "OSS",
                 "APP_VERSION": "0.1.0",
