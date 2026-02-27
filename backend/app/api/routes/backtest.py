@@ -376,6 +376,7 @@ class CreateRunRequest(BaseModel):
     name: str
     start_date: str  # YYYY-MM-DD
     end_date: str  # YYYY-MM-DD
+    tickers: list[str] = Field(default_factory=list)
     policy_snapshot: Optional[dict[str, Any]] = None
     scanners_enabled: list[str] = Field(
         default_factory=lambda: [
@@ -489,11 +490,21 @@ async def create_backtest_run_endpoint(
                 status_code=400, detail="No trading days in the specified range"
             )
 
-        # Build policy snapshot — use provided or defaults
+        # Build policy snapshot — use provided or defaults, inject tickers
         if request.policy_snapshot:
-            policy_snapshot = PolicyConfig(**request.policy_snapshot)
+            snapshot_data = dict(request.policy_snapshot)
         else:
-            policy_snapshot = PolicyConfig()
+            snapshot_data = {}
+
+        if request.tickers:
+            watchlist_data = snapshot_data.get("watchlist", {})
+            if isinstance(watchlist_data, dict):
+                watchlist_data["tickers"] = request.tickers
+            else:
+                watchlist_data = {"tickers": request.tickers}
+            snapshot_data["watchlist"] = watchlist_data
+
+        policy_snapshot = PolicyConfig(**snapshot_data)
 
         # Build run config
         config_kwargs: dict[str, Any] = {
