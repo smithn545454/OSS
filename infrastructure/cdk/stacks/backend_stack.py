@@ -157,7 +157,7 @@ class BackendStack(Stack):
             ),
             role=lambda_role,
             timeout=Duration.minutes(10),  # 10 minutes for scanning all tickers
-            memory_size=2048,  # 2 GB: supports backtest prefetch cache + pipeline
+            memory_size=3008,  # Max Lambda memory for backtest exit resolution (~21 parquet files)
             environment={
                 "APP_NAME": "OSS",
                 "APP_VERSION": "0.1.0",

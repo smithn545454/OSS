@@ -88,6 +88,8 @@ async def create_backtest_run(
     end = date.fromisoformat(config.end_date)
     trading_days = generate_trading_days(start, end)
 
+    batches = batch_days(trading_days)
+
     run = BacktestRun(
         run_id=run_id,
         config=config,
@@ -96,6 +98,8 @@ async def create_backtest_run(
             "days_completed": 0,
             "days_total": len(trading_days),
             "trades_found": 0,
+            "total_batches": len(batches),
+            "batches_completed": 0,
         },
         created_at=now,
     )

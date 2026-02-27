@@ -223,7 +223,16 @@ def _make_mock_data_provider(
             "open_interest": 5000,
         }]
 
+    async def mock_contract_price(ticker, strike, expiration_date, option_type, as_of):
+        price = prices_by_date.get(as_of)
+        if price is None:
+            return None
+        bid = price * 0.98
+        ask = price * 1.02
+        return (bid + ask) / 2
+
     provider.get_options_chain = AsyncMock(side_effect=mock_chain)
+    provider.get_contract_price = AsyncMock(side_effect=mock_contract_price)
     return provider
 
 
