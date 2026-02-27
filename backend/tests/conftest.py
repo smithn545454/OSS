@@ -487,7 +487,17 @@ def moto_dynamodb():
         # Backtest insights: simple PK/SK
         db.create_table(TableName=f"{table_prefix}-backtest-insights", **pk_sk_schema)
 
+        # Reset DynamoDBClient singleton so it creates fresh boto3 clients
+        # within this mock_aws context. Without this, tests that go through
+        # get_dynamodb() (e.g., backtest tests) get stale clients from a
+        # previous mock context, causing "invalid security token" errors.
+        from app.db.dynamodb import DynamoDBClient
+
+        DynamoDBClient._instance = None
+
         yield db
+
+        DynamoDBClient._instance = None
 
 
 # ============================================================================
