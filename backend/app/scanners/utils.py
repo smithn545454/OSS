@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional, Sequence
 
 from app.services.polygon import DailyBar
@@ -334,6 +335,7 @@ def calculate_iv_proxy(
     underlying_price: float,
     min_dte: int = 7,
     max_dte: int = 90,
+    as_of_date: Optional[date] = None,
 ) -> Optional[IVProxyResult]:
     """Calculate IV proxy from ATM options in a DTE range.
 
@@ -347,13 +349,15 @@ def calculate_iv_proxy(
         underlying_price: Current underlying price
         min_dte: Minimum DTE for contracts (default 7)
         max_dte: Maximum DTE for contracts (default 90)
+        as_of_date: Reference date for DTE calculation (default: today).
+                    Must be set for backtesting to avoid look-ahead bias.
 
     Returns:
         IVProxyResult with iv_proxy, IVs, strikes, and DTE, or None if not found
     """
     from datetime import datetime
 
-    today = datetime.now().date()
+    today = as_of_date or datetime.now().date()
 
     # Filter and organize contracts by type
     calls: list[tuple[float, float, int]] = []  # (strike, iv, dte)

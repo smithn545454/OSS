@@ -103,6 +103,7 @@ class ScannerOrchestrator:
         data_provider: Optional[Any] = None,
         polygon_client: Optional[PolygonClient] = None,
         pipeline_orchestrator: Optional[PipelineOrchestrator] = None,
+        scanners_enabled: Optional[list[str]] = None,
     ) -> None:
         """Initialize the orchestrator.
 
@@ -111,13 +112,18 @@ class ScannerOrchestrator:
                            When provided (backtest mode), PolygonClient is not created.
             polygon_client: Optional Polygon client (creates new if not provided)
             pipeline_orchestrator: Optional pipeline orchestrator for telemetry
+            scanners_enabled: Optional list of scanner names to enable (e.g.
+                              ["breakout", "compression", "cheap_options", "unusual_volume"]).
+                              When None, all scanners run. Used by backtest to control
+                              which scanners are active.
         """
         self._data_provider = data_provider
         self._polygon = polygon_client
         self._pipeline = pipeline_orchestrator or PipelineOrchestrator()
         self._merger = OpportunityMerger()
+        self._scanners_enabled = scanners_enabled
 
-        # Initialize all scanners (UnusualVolumeScanner disabled for performance)
+        # Initialize all scanners (UV handled separately in Phase 4 for backtest)
         self._scanners: list[BaseScanner] = [
             BreakoutScanner(),
             CompressionScanner(),
@@ -161,8 +167,11 @@ class ScannerOrchestrator:
             policy_config = policy.config
             policy_version = policy.version
         else:
-            policy = await PolicyTable.get_active()
-            policy_version = policy.version if policy else "unknown"
+            try:
+                policy = await PolicyTable.get_active()
+                policy_version = policy.version if policy else "unknown"
+            except Exception:
+                policy_version = "unknown"
 
         # Get tickers from watchlist if not provided
         if tickers is None:
@@ -323,6 +332,46 @@ class ScannerOrchestrator:
                 )
             else:
                 logger.info("Phase 3: Skipped (all tickers triggered in Phase 2)")
+
+            # ================================================================
+            # PHASE 4: Unusual Volume Scanner (backtest only)
+            # Runs on ALL tickers — matches live UV Lambda behavior where UV
+            # is a completely independent pipeline scanning every ticker.
+            # Only active in backtest mode (data_provider set, no polygon).
+            # ================================================================
+            uv_enabled = (
+                self._scanners_enabled is None
+                or "unusual_volume" in self._scanners_enabled
+            )
+            if uv_enabled and data_provider and not polygon:
+                from app.scanners.historical_uv import HistoricalUVScanner
+
+                logger.info(
+                    f"Phase 4: Running UV scanner on {len(tickers)} tickers..."
+                )
+                phase4_start = datetime.now(timezone.utc)
+
+                uv_scanners: list[BaseScanner] = [HistoricalUVScanner()]
+                uv_results, uv_stats, uv_errors = await self._run_scanner_phase(
+                    scanners=uv_scanners,
+                    tickers=tickers,  # ALL tickers, not remaining
+                    context=context,
+                    max_concurrent=5,
+                )
+
+                all_results.extend(uv_results)
+                scanner_stats.update(uv_stats)
+                errors.extend(uv_errors)
+
+                phase4_duration = int(
+                    (datetime.now(timezone.utc) - phase4_start).total_seconds()
+                    * 1000
+                )
+                phase4_triggered = sum(1 for r in uv_results if r.triggered)
+                logger.info(
+                    f"Phase 4 complete: {phase4_triggered} UV triggers, "
+                    f"{phase4_duration}ms"
+                )
 
             # Merge results into opportunities
             self._merger.set_timestamp(timestamp)
@@ -661,7 +710,7 @@ class ScannerOrchestrator:
                         logger.info(
                             f"Stage 7 complete: {approve_count} APPROVE, "
                             f"{watch_count} WATCH, {reject_count} REJECT, "
-                            f"{len([t for t in theses if t.status.value == 'COMPLETED'])} theses"
+                            f"{len([t for t in theses if t.status == 'COMPLETED'])} theses"
                         )
 
                     except Exception as e:

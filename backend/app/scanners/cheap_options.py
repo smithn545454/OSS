@@ -143,7 +143,10 @@ class CheapOptionsScanner(BaseScanner):
                 )
 
             # Calculate IV proxy from ATM options across full 7-90 DTE range
-            iv_result = calculate_iv_proxy(chain, underlying_price, min_dte=7, max_dte=90)
+            iv_result = calculate_iv_proxy(
+                chain, underlying_price, min_dte=7, max_dte=90,
+                as_of_date=context.as_of_date,
+            )
 
             if iv_result is None:
                 return ScanResult(

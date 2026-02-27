@@ -537,7 +537,7 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
             "watch": watch_count,
             "reject": reject_count,
             "positions_created": paper_results.get("positions_created", 0),
-            "theses_generated": len([t for t in theses if t.status.value == "COMPLETED"]),
+            "theses_generated": len([t for t in theses if t.status == "COMPLETED"]),
         }
         # Clean up stale PENDINGs (>48h old) to prevent them accumulating
         try:

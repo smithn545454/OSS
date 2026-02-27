@@ -59,6 +59,7 @@ async def process_day(
         orchestrator = ScannerOrchestrator(
             data_provider=data_provider,
             pipeline_orchestrator=pipeline_orchestrator,
+            scanners_enabled=config.scanners_enabled,
         )
 
         # Run the full pipeline (stages 1-7)
