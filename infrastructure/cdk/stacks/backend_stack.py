@@ -157,7 +157,7 @@ class BackendStack(Stack):
             ),
             role=lambda_role,
             timeout=Duration.minutes(10),  # 10 minutes for scanning all tickers
-            memory_size=1024,  # More memory = more CPU for faster execution
+            memory_size=3072,  # 3 GB for backtest exit resolution (loads ~21 parquet files)
             environment={
                 "APP_NAME": "OSS",
                 "APP_VERSION": "0.1.0",

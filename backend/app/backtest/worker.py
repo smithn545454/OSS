@@ -203,9 +203,9 @@ async def process_batch(
                 trade_dicts = [t.model_dump() for t in day_trades]
                 await BacktestTradeTable.put_batch(trade_dicts)
 
-            # Update progress
+            # Update progress (atomic for safe concurrent fan-out)
             if persist:
-                await BacktestRunTable.update_progress(
+                await BacktestRunTable.atomic_increment_progress(
                     run_id,
                     days_increment=1,
                     trades_increment=len(day_trades),

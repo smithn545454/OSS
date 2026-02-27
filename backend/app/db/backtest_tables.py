@@ -104,6 +104,55 @@ class BacktestRunTable:
             )
 
     @staticmethod
+    async def increment_batches_completed(run_id: str) -> int:
+        """Atomically increment batches_completed and return the new value.
+
+        Uses DynamoDB ADD expression for safe concurrent updates from workers.
+        Pattern copied from PipelineRunTable.increment_chunks_completed.
+        """
+        db = get_dynamodb()
+        table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
+        response = table.update_item(
+            Key={"PK": f"RUN#{run_id}", "SK": "META"},
+            UpdateExpression="ADD batches_completed :inc",
+            ExpressionAttributeValues={":inc": 1},
+            ReturnValues="ALL_NEW",
+        )
+        attrs = db.convert_from_dynamodb(response.get("Attributes", {}))
+        return int(attrs.get("batches_completed", 0))
+
+    @staticmethod
+    async def atomic_increment_progress(
+        run_id: str,
+        days_increment: int = 0,
+        trades_increment: int = 0,
+    ) -> None:
+        """Atomically increment progress counters using DynamoDB ADD.
+
+        Safe for concurrent fan-out workers (unlike fetch-then-update).
+        """
+        db = get_dynamodb()
+        table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
+
+        parts = []
+        values: dict[str, Any] = {}
+        if days_increment:
+            parts.append("progress.days_completed :days_inc")
+            values[":days_inc"] = days_increment
+        if trades_increment:
+            parts.append("progress.trades_found :trades_inc")
+            values[":trades_inc"] = trades_increment
+
+        if not parts:
+            return
+
+        table.update_item(
+            Key={"PK": f"RUN#{run_id}", "SK": "META"},
+            UpdateExpression="ADD " + ", ".join(parts),
+            ExpressionAttributeValues=values,
+        )
+
+    @staticmethod
     async def list_runs(
         status: Optional[str] = None, limit: int = 50
     ) -> list[dict[str, Any]]:

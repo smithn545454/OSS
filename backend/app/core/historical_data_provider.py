@@ -43,6 +43,8 @@ class HistoricalDataProvider:
         # In-memory caches: {dataset/date -> pyarrow.Table}
         self._cache: dict[str, Any] = {}
         self._market_context_cache: Optional[Any] = None
+        # Lightweight cache for exit resolution (column-filtered options reads)
+        self._price_cache: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Internal S3 helpers
@@ -69,6 +71,37 @@ class HistoricalDataProvider:
 
     def _read_options_chain(self, trade_date: str) -> Optional[Any]:
         return self._read_parquet(f"options-chains/date={trade_date}/data.parquet")
+
+    # Columns needed for contract price lookups (exit resolution)
+    _PRICE_COLUMNS = ["ticker", "strike", "expiry_date", "option_type", "bid", "ask", "last_price"]
+
+    def _read_options_chain_lite(self, trade_date: str) -> Optional[Any]:
+        """Read only price-relevant columns from options chain parquet.
+
+        Uses a separate cache from _read_options_chain to avoid inflating
+        memory when the full table is not needed (e.g. exit resolution).
+        """
+        s3_key = f"options-chains/date={trade_date}/data.parquet"
+        if s3_key in self._price_cache:
+            return self._price_cache[s3_key]
+        # Also check if the full table is already cached — reuse it
+        if s3_key in self._cache:
+            return self._cache[s3_key]
+        try:
+            obj = self.s3.get_object(Bucket=self.s3_bucket, Key=s3_key)
+            buf = io.BytesIO(obj["Body"].read())
+            pf = pq.ParquetFile(buf)
+            # Only read columns that exist in the file
+            available = set(pf.schema.names)
+            cols = [c for c in self._PRICE_COLUMNS if c in available]
+            table = pf.read(columns=cols)
+            self._price_cache[s3_key] = table
+            return table
+        except Exception as e:
+            if "NoSuchKey" in str(e) or "404" in str(e):
+                return None
+            logger.warning(f"Error reading lite s3://{self.s3_bucket}/{s3_key}: {e}")
+            return None
 
     def _read_iv_history(self, trade_date: str) -> Optional[Any]:
         return self._read_parquet(f"iv-history/date={trade_date}/data.parquet")
@@ -278,6 +311,58 @@ class HistoricalDataProvider:
 
         return chain
 
+    async def get_contract_price(
+        self,
+        ticker: str,
+        strike: float,
+        expiration_date: str,
+        option_type: str,
+        as_of: date,
+    ) -> Optional[float]:
+        """Get a single contract's mid price using column-filtered reads.
+
+        Optimized for exit resolution: reads only price-relevant columns
+        (~33MB vs ~75MB per file), reducing memory during 21-day forward scans.
+        """
+        table = self._read_options_chain_lite(as_of.isoformat())
+        if table is None:
+            return None
+
+        ot_lower = option_type.lower() if option_type else ""
+        target_type = "call" if ot_lower in ("call", "c") else "put"
+
+        tickers_col = table.column("ticker").to_pylist()
+        strikes_col = table.column("strike").to_pylist()
+        expiry_col = table.column("expiry_date").to_pylist()
+        otype_col = table.column("option_type").to_pylist()
+
+        has_bid = "bid" in table.column_names
+        has_ask = "ask" in table.column_names
+        has_last = "last_price" in table.column_names
+
+        for idx, t in enumerate(tickers_col):
+            if t != ticker:
+                continue
+            c_strike = float(strikes_col[idx] or 0)
+            c_expiry = str(expiry_col[idx] or "")
+            c_type = str(otype_col[idx] or "").lower()
+            if c_type in ("c", "call"):
+                c_type = "call"
+            else:
+                c_type = "put"
+
+            strike_match = abs(c_strike - strike) < 0.01
+            if strike_match and c_expiry == expiration_date and c_type == target_type:
+                bid = float(table.column("bid")[idx].as_py() or 0) if has_bid else 0.0
+                ask = float(table.column("ask")[idx].as_py() or 0) if has_ask else 0.0
+                if bid > 0 and ask > 0:
+                    return (bid + ask) / 2
+                last = float(table.column("last_price")[idx].as_py() or 0) if has_last else 0.0
+                if last > 0:
+                    return last
+
+        return None
+
     async def get_aggregated_options_volume(
         self,
         ticker: str,
@@ -479,4 +564,5 @@ class HistoricalDataProvider:
     def clear_cache(self) -> None:
         """Clear all in-memory caches."""
         self._cache.clear()
+        self._price_cache.clear()
         self._market_context_cache = None

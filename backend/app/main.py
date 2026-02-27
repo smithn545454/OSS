@@ -757,16 +757,65 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             f"Backtest worker batch {batch_index}: {len(trades)} trades from {len(days)} days"
         )
 
+        # Atomic completion detection: increment counter, last worker finalizes
+        from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
+
+        completed_count = await BacktestRunTable.increment_batches_completed(run_id)
+        is_last_worker = completed_count >= total_batches
+
+        if is_last_worker:
+            logger.info(
+                f"Backtest worker: last worker for run {run_id} "
+                f"({completed_count}/{total_batches}), computing metrics"
+            )
+            try:
+                from app.backtest.coordinator import mark_run_completed
+                from app.backtest.metrics import calculate_metrics
+                from app.core.schemas import BacktestTrade
+
+                all_trade_dicts = await BacktestTradeTable.list_by_run(
+                    run_id, limit=5000
+                )
+                all_trades = [BacktestTrade(**t) for t in all_trade_dicts]
+                metrics = calculate_metrics(
+                    all_trades,
+                    starting_capital=config.starting_capital,
+                )
+                # Get total days from run progress
+                run_data = await BacktestRunTable.get(run_id)
+                if run_data:
+                    progress = run_data.get("progress", {})
+                    metrics["total_days"] = progress.get("days_total", 0)
+                metrics["total_batches"] = total_batches
+
+                await mark_run_completed(run_id, summary=metrics)
+                logger.info(
+                    f"Backtest run {run_id} completed: "
+                    f"{len(all_trades)} trades, metrics computed"
+                )
+            except Exception as finalize_err:
+                logger.error(
+                    f"Backtest finalization failed for {run_id}: {finalize_err}",
+                    exc_info=True,
+                )
+
         return {
             "status": "success",
             "run_id": run_id,
             "batch_index": batch_index,
             "days_processed": len(days),
             "trades_produced": len(trades),
+            "is_last_worker": is_last_worker,
         }
 
     except Exception as e:
         logger.error(f"Backtest worker failed: {e}", exc_info=True)
+        # Still try to increment batch counter so other workers aren't blocked
+        try:
+            from app.db.backtest_tables import BacktestRunTable
+            await BacktestRunTable.increment_batches_completed(run_id)
+        except Exception:
+            pass
         return {
             "status": "error",
             "run_id": run_id,

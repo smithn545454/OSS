@@ -256,21 +256,30 @@ async def _get_contract_price(
 ) -> Optional[float]:
     """Get contract mid price from historical data.
 
-    Matches contract by underlying ticker + strike + expiry + type.
-    Returns the mid price (bid+ask)/2, or last_price as fallback.
+    Uses the lightweight get_contract_price() path when available (column-filtered
+    parquet reads, ~33MB vs ~75MB per file). Falls back to full get_options_chain()
+    for providers that don't support it.
     """
     try:
+        # Prefer column-filtered reads (HistoricalDataProvider)
+        if hasattr(data_provider, "get_contract_price"):
+            return await data_provider.get_contract_price(
+                ticker=underlying_ticker,
+                strike=strike,
+                expiration_date=expiration_date,
+                option_type=option_type,
+                as_of=as_of,
+            )
+
+        # Fallback: load full options chain
         chain = await data_provider.get_options_chain(
             underlying_ticker, as_of=as_of, min_dte=0, max_dte=365,
         )
-        # Normalize option_type for matching
         ot_lower = option_type.lower() if option_type else ""
         target_type = "call" if ot_lower in ("call", "c") else "put"
 
         for contract in chain:
             details = contract.get("details", {})
-
-            # Match by strike, expiry, and contract type
             c_strike = float(details.get("strike_price", 0) or 0)
             c_expiry = str(details.get("expiration_date", ""))
             c_type = str(details.get("contract_type", "")).lower()
@@ -280,7 +289,6 @@ async def _get_contract_price(
                 and c_expiry == expiration_date
                 and c_type == target_type
             ):
-                # Get mid price from bid/ask
                 quote = contract.get("last_quote", {})
                 if isinstance(quote, dict):
                     bid = float(quote.get("bid", 0) or 0)
@@ -292,7 +300,6 @@ async def _get_contract_price(
                 if bid > 0 and ask > 0:
                     return (bid + ask) / 2
 
-                # Fallback to last_price (day close)
                 day = contract.get("day", {})
                 if isinstance(day, dict):
                     close = float(day.get("close", 0) or 0)
