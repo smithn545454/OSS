@@ -97,6 +97,63 @@ class TestBacktestRunTable:
         result = await BacktestRunTable.get("run-001")
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_atomic_increment_progress(self, moto_dynamodb, sample_run):
+        """Atomic progress increment uses DynamoDB ADD, safe for concurrent workers."""
+        await BacktestRunTable.put(sample_run)
+        result = await BacktestRunTable.atomic_increment_progress("run-001", 3, 5)
+        assert result["days_completed"] == 3
+        assert result["trades_found"] == 5
+        # Increment again
+        result = await BacktestRunTable.atomic_increment_progress("run-001", 2, 10)
+        assert result["days_completed"] == 5
+        assert result["trades_found"] == 15
+
+    @pytest.mark.asyncio
+    async def test_atomic_increment_progress_no_op(self, moto_dynamodb, sample_run):
+        """No-op increment returns current values."""
+        await BacktestRunTable.put(sample_run)
+        result = await BacktestRunTable.atomic_increment_progress("run-001", 0, 0)
+        assert result["days_completed"] == 0
+        assert result["trades_found"] == 0
+
+    @pytest.mark.asyncio
+    async def test_set_total_batches(self, moto_dynamodb, sample_run):
+        await BacktestRunTable.put(sample_run)
+        await BacktestRunTable.set_total_batches("run-001", 10)
+        result = await BacktestRunTable.get("run-001")
+        assert result["total_batches"] == 10
+        assert result["batches_completed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_atomic_increment_batches_completed(self, moto_dynamodb, sample_run):
+        """Atomic batch increment for last-worker detection."""
+        await BacktestRunTable.put(sample_run)
+        await BacktestRunTable.set_total_batches("run-001", 3)
+
+        count = await BacktestRunTable.atomic_increment_batches_completed("run-001")
+        assert count == 1
+        count = await BacktestRunTable.atomic_increment_batches_completed("run-001")
+        assert count == 2
+        count = await BacktestRunTable.atomic_increment_batches_completed("run-001")
+        assert count == 3
+
+        # Verify final state
+        result = await BacktestRunTable.get("run-001")
+        assert result["batches_completed"] == 3
+
+    @pytest.mark.asyncio
+    async def test_update_progress_delegates_to_atomic(self, moto_dynamodb, sample_run):
+        """update_progress with increments should use atomic operations."""
+        await BacktestRunTable.put(sample_run)
+        await BacktestRunTable.update_progress("run-001", days_increment=5, trades_increment=3)
+        await BacktestRunTable.update_progress("run-001", days_increment=2, trades_increment=7)
+        # Verify the atomic result is correct (ADD expressions accumulate)
+        result = await BacktestRunTable.get("run-001")
+        progress = result.get("progress", {})
+        assert int(progress.get("days_completed", 0)) == 7
+        assert int(progress.get("trades_found", 0)) == 10
+
 
 class TestBacktestTradeTable:
     @pytest.mark.asyncio

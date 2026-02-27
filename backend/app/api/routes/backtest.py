@@ -388,10 +388,13 @@ class CreateRunRequest(BaseModel):
     starting_capital: float = 10_000.0
 
 
-async def _run_backtest_inline(config: BacktestRunConfig) -> None:
-    """Run a backtest inline (used as background task).
+async def _run_backtest_inline(
+    config: BacktestRunConfig,
+    run_id: Optional[str] = None,
+) -> None:
+    """Run a backtest inline (used as background task for local dev).
 
-    Creates the run, processes all days, and marks complete/failed.
+    Processes all days sequentially and marks complete/failed.
     """
     from app.backtest.coordinator import (
         create_backtest_run,
@@ -404,7 +407,7 @@ async def _run_backtest_inline(config: BacktestRunConfig) -> None:
 
     run = None
     try:
-        run = await create_backtest_run(config, persist=True)
+        run = await create_backtest_run(config, persist=True, run_id=run_id)
         batches = await start_backtest_run(run, persist=True)
 
         if not batches:
@@ -538,9 +541,9 @@ async def create_backtest_run_endpoint(
             except Exception as e:
                 logger.warning(f"Lambda invocation failed, falling back to inline: {e}")
 
-        # Fallback: create run and process inline via background task
+        # Fallback: create run and process inline via background task (local dev)
         run = await create_backtest_run(config, persist=True)
-        background_tasks.add_task(_run_backtest_inline, config)
+        background_tasks.add_task(_run_backtest_inline, config, run.run_id)
 
         return {
             "status": "started",
