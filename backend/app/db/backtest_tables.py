@@ -75,7 +75,7 @@ class BacktestRunTable:
         """Update run progress counters.
 
         If progress dict is provided, overwrites the entire progress field.
-        If increments are provided, fetches current state and increments.
+        If increments are provided, uses atomic_increment_progress.
         """
         db = get_dynamodb()
         updates: dict[str, Any] = {}
@@ -83,17 +83,15 @@ class BacktestRunTable:
         if progress is not None:
             updates["progress"] = progress
         elif days_increment or trades_increment:
-            # Fetch current progress and increment
-            current = await BacktestRunTable.get(run_id)
-            if current:
-                current_progress = current.get("progress", {})
-                current_progress["days_completed"] = (
-                    int(current_progress.get("days_completed", 0)) + days_increment
+            await BacktestRunTable.atomic_increment_progress(
+                run_id, days_increment, trades_increment
+            )
+            if summary is not None:
+                await db.update_item(
+                    BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META",
+                    {"summary": summary},
                 )
-                current_progress["trades_found"] = (
-                    int(current_progress.get("trades_found", 0)) + trades_increment
-                )
-                updates["progress"] = current_progress
+            return
 
         if summary is not None:
             updates["summary"] = summary
@@ -102,6 +100,80 @@ class BacktestRunTable:
             await db.update_item(
                 BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META", updates
             )
+
+    @staticmethod
+    async def atomic_increment_progress(
+        run_id: str,
+        days_increment: int = 0,
+        trades_increment: int = 0,
+    ) -> dict[str, int]:
+        """Atomically increment progress counters. Safe for concurrent workers.
+
+        Uses DynamoDB ADD expression to avoid read-then-write race conditions.
+        Returns the new values after increment.
+        """
+        db = get_dynamodb()
+        table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
+
+        # Build ADD expression for each non-zero increment
+        add_parts = []
+        expr_values: dict[str, Any] = {}
+        if days_increment:
+            add_parts.append("progress.days_completed :days_inc")
+            expr_values[":days_inc"] = days_increment
+        if trades_increment:
+            add_parts.append("progress.trades_found :trades_inc")
+            expr_values[":trades_inc"] = trades_increment
+
+        if not add_parts:
+            current = await BacktestRunTable.get(run_id)
+            progress = (current or {}).get("progress", {})
+            return {
+                "days_completed": int(progress.get("days_completed", 0)),
+                "trades_found": int(progress.get("trades_found", 0)),
+            }
+
+        response = table.update_item(
+            Key={"PK": f"RUN#{run_id}", "SK": "META"},
+            UpdateExpression="ADD " + ", ".join(add_parts),
+            ExpressionAttributeValues=expr_values,
+            ReturnValues="ALL_NEW",
+        )
+
+        attrs = response.get("Attributes", {})
+        progress = attrs.get("progress", {})
+        if isinstance(progress, dict):
+            return {
+                "days_completed": int(progress.get("days_completed", 0)),
+                "trades_found": int(progress.get("trades_found", 0)),
+            }
+        return {"days_completed": 0, "trades_found": 0}
+
+    @staticmethod
+    async def set_total_batches(run_id: str, total_batches: int) -> None:
+        """Store the total number of batches on the run record."""
+        db = get_dynamodb()
+        await db.update_item(
+            BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META",
+            {"total_batches": total_batches, "batches_completed": 0},
+        )
+
+    @staticmethod
+    async def atomic_increment_batches_completed(run_id: str) -> int:
+        """Atomically increment batches_completed and return the new value.
+
+        Uses DynamoDB ADD expression for safe concurrent updates from workers.
+        """
+        db = get_dynamodb()
+        table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
+        response = table.update_item(
+            Key={"PK": f"RUN#{run_id}", "SK": "META"},
+            UpdateExpression="ADD batches_completed :inc",
+            ExpressionAttributeValues={":inc": 1},
+            ReturnValues="ALL_NEW",
+        )
+        attrs = response.get("Attributes", {})
+        return int(attrs.get("batches_completed", 0))
 
     @staticmethod
     async def list_runs(

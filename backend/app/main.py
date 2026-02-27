@@ -571,11 +571,11 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
     from app.backtest.coordinator import (
         create_backtest_run,
         mark_run_completed,
+        mark_run_failed,
         start_backtest_run,
     )
-    from app.backtest.worker import process_batch
-    from app.core.historical_data_provider import HistoricalDataProvider
     from app.core.schemas import BacktestRunConfig
+    from app.db.backtest_tables import BacktestRunTable
 
     logger.info("Backtest coordinator starting")
 
@@ -610,99 +610,56 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
         total_batches = len(batches)
         s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
 
-        # For now, run inline (sequential). Phase 5 adds Lambda fan-out.
-        if total_batches <= 20 or not s3_bucket:
-            # Small run or no S3 bucket configured — run inline
-            logger.info(
-                f"Backtest {run_id}: running {total_batches} batches inline"
-            )
+        # Store total_batches on run record so workers can detect completion
+        await BacktestRunTable.set_total_batches(run_id, total_batches)
 
-            def data_provider_factory(as_of_date):
-                return HistoricalDataProvider(
-                    as_of_date=as_of_date,
-                    s3_bucket=s3_bucket,
-                )
+        # Always fan out to parallel worker Lambdas
+        import boto3
 
-            all_trades = []
-            for batch_idx, batch in enumerate(batches):
-                logger.info(
-                    f"Backtest {run_id}: batch {batch_idx + 1}/{total_batches}"
-                )
-                batch_trades = await process_batch(
-                    run_id=run_id,
-                    days=batch,
-                    config=config,
-                    data_provider_factory=data_provider_factory,
-                    persist=True,
-                )
-                all_trades.extend(batch_trades)
+        function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+        lambda_client = boto3.client("lambda")
 
-            # Compute full metrics and mark complete
-            from app.backtest.metrics import calculate_metrics
+        dispatched = 0
+        errors: list[str] = []
 
-            metrics = calculate_metrics(
-                all_trades,
-                starting_capital=config.starting_capital,
-            )
-            metrics["total_days"] = sum(len(b) for b in batches)
-            metrics["total_batches"] = total_batches
-            await mark_run_completed(run_id, summary=metrics)
-
-            return {
-                "status": "success",
+        for idx, batch in enumerate(batches):
+            payload = {
+                "source": "oss.scheduler",
+                "action": "backtest_worker",
                 "run_id": run_id,
-                "mode": "inline",
-                "trades": len(all_trades),
-                "batches_processed": total_batches,
+                "days": [d.isoformat() for d in batch],
+                "config": config.model_dump(mode="json"),
+                "batch_index": idx,
+                "total_batches": total_batches,
+                "s3_bucket": s3_bucket,
             }
 
-        else:
-            # Large run — fan out to worker Lambdas
-            import boto3
+            try:
+                lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+                dispatched += 1
+            except Exception as e:
+                errors.append(f"Failed to dispatch batch {idx}: {e}")
 
-            function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
-            lambda_client = boto3.client("lambda")
+        logger.info(
+            f"Backtest coordinator dispatched {dispatched}/{total_batches} workers "
+            f"for run {run_id}"
+        )
 
-            dispatched = 0
-            errors: list[str] = []
+        if dispatched == 0:
+            await mark_run_failed(run_id, error="Failed to dispatch any worker Lambdas")
 
-            for idx, batch in enumerate(batches):
-                if idx > 0:
-                    time.sleep(1)  # Slight stagger
-
-                payload = {
-                    "source": "oss.scheduler",
-                    "action": "backtest_worker",
-                    "run_id": run_id,
-                    "days": [d.isoformat() for d in batch],
-                    "config": config.model_dump(mode="json"),
-                    "batch_index": idx,
-                    "total_batches": total_batches,
-                    "s3_bucket": s3_bucket,
-                }
-
-                try:
-                    lambda_client.invoke(
-                        FunctionName=function_name,
-                        InvocationType="Event",
-                        Payload=json.dumps(payload),
-                    )
-                    dispatched += 1
-                except Exception as e:
-                    errors.append(f"Failed to dispatch batch {idx}: {e}")
-
-            logger.info(
-                f"Backtest coordinator dispatched {dispatched}/{total_batches} workers "
-                f"for run {run_id}"
-            )
-
-            return {
-                "status": "success" if not errors else "partial_success",
-                "run_id": run_id,
-                "mode": "fan_out",
-                "batches_dispatched": dispatched,
-                "errors": errors if errors else None,
-            }
+        return {
+            "status": "success" if dispatched == total_batches else "partial_success",
+            "run_id": run_id,
+            "mode": "fan_out",
+            "batches_dispatched": dispatched,
+            "total_batches": total_batches,
+            "errors": errors if errors else None,
+        }
 
     except Exception as e:
         logger.error(f"Backtest coordinator failed: {e}", exc_info=True)
@@ -710,10 +667,14 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
-    """Backtest worker: process a batch of trading days.
+    """Backtest worker: process a batch of trading days, then self-report completion.
+
+    After processing, atomically increments batches_completed. If this worker
+    is the last to finish (batches_completed == total_batches), it loads all
+    trades, computes final metrics, and marks the run COMPLETED.
 
     Args:
-        event: Must contain run_id, days, config, s3_bucket.
+        event: Must contain run_id, days, config, s3_bucket, total_batches.
 
     Returns:
         Summary of trades produced.
@@ -721,6 +682,7 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
     from app.backtest.worker import process_batch
     from app.core.historical_data_provider import HistoricalDataProvider
     from app.core.schemas import BacktestRunConfig
+    from app.db.backtest_tables import BacktestRunTable
 
     run_id = event.get("run_id", "")
     day_strs = event.get("days", [])
@@ -739,10 +701,20 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
         config = BacktestRunConfig(**config_data)
         days = [date_type.fromisoformat(d) for d in day_strs]
 
-        def data_provider_factory(as_of_date):
+        # Pre-materialize all S3 data for this batch (parallel download)
+        from app.backtest.prefetch import prefetch_batch_data
+
+        logger.info(f"Prefetching S3 data for {len(days)} days...")
+        shared_cache = prefetch_batch_data(
+            s3_bucket=s3_bucket,
+            batch_days=days,
+        )
+
+        def data_provider_factory(as_of_date, shared_cache=None):
             return HistoricalDataProvider(
                 as_of_date=as_of_date,
                 s3_bucket=s3_bucket,
+                shared_cache=shared_cache,
             )
 
         trades = await process_batch(
@@ -751,11 +723,26 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             config=config,
             data_provider_factory=data_provider_factory,
             persist=True,
+            shared_cache=shared_cache,
         )
 
         logger.info(
             f"Backtest worker batch {batch_index}: {len(trades)} trades from {len(days)} days"
         )
+
+        # Self-report completion: atomically increment batches_completed
+        batches_completed = await BacktestRunTable.atomic_increment_batches_completed(run_id)
+        logger.info(
+            f"Backtest worker batch {batch_index} done: "
+            f"{batches_completed}/{total_batches} batches completed for run {run_id}"
+        )
+
+        if batches_completed >= total_batches:
+            # Last worker — compute final metrics and mark run COMPLETED
+            logger.info(
+                f"Last backtest worker finished for run {run_id}, computing metrics"
+            )
+            await _finalize_backtest_run(run_id, config)
 
         return {
             "status": "success",
@@ -763,6 +750,7 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             "batch_index": batch_index,
             "days_processed": len(days),
             "trades_produced": len(trades),
+            "is_last_worker": batches_completed >= total_batches,
         }
 
     except Exception as e:
@@ -773,6 +761,48 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             "batch_index": batch_index,
             "error": str(e),
         }
+
+
+async def _finalize_backtest_run(run_id: str, config: Any) -> None:
+    """Load all trades for a run, compute metrics, and mark COMPLETED.
+
+    Called by the last worker to finish processing.
+    """
+    from app.backtest.coordinator import mark_run_completed, mark_run_failed
+    from app.backtest.metrics import calculate_metrics
+    from app.core.schemas import BacktestTrade
+    from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
+
+    try:
+        # Load all trades from DynamoDB
+        trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+        trades = []
+        for td in trade_dicts:
+            try:
+                trades.append(BacktestTrade(**td))
+            except Exception:
+                logger.warning(f"Skipping malformed trade in run {run_id}: {td.get('trade_id')}")
+
+        # Compute metrics
+        starting_capital = getattr(config, "starting_capital", 10_000.0)
+        metrics = calculate_metrics(trades, starting_capital=starting_capital)
+
+        # Get total days from run record
+        run_data = await BacktestRunTable.get(run_id)
+        if run_data:
+            progress = run_data.get("progress", {})
+            metrics["total_days"] = int(progress.get("days_completed", 0))
+            metrics["total_batches"] = int(run_data.get("total_batches", 0))
+
+        await mark_run_completed(run_id, summary=metrics)
+        logger.info(
+            f"Backtest run {run_id} finalized: {len(trades)} trades, "
+            f"win_rate={metrics.get('win_rate', 0):.1f}%"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to finalize backtest run {run_id}: {e}", exc_info=True)
+        await mark_run_failed(run_id, error=f"Finalization failed: {e}")
 
 
 async def _run_scheduled_scan() -> dict[str, Any]:

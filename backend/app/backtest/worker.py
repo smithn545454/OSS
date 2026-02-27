@@ -169,6 +169,7 @@ async def process_batch(
     config: BacktestRunConfig,
     data_provider_factory: Any,
     persist: bool = True,
+    shared_cache: dict | None = None,
 ) -> list[BacktestTrade]:
     """Process a batch of trading days.
 
@@ -176,18 +177,34 @@ async def process_batch(
         run_id: Backtest run ID
         days: List of trading dates to process
         config: Run configuration
-        data_provider_factory: Callable(as_of_date) -> DataProvider
+        data_provider_factory: Callable(as_of_date, shared_cache=None) -> DataProvider
         persist: Whether to persist results
+        shared_cache: Optional pre-populated S3 cache dict. If None and
+                      BACKTEST_S3_BUCKET is set, prefetch is called automatically.
 
     Returns:
         All trades from this batch.
     """
+    import os
+
+    # Pre-materialize all S3 data for this batch if no cache provided
+    if shared_cache is None:
+        s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+        if s3_bucket and days:
+            from app.backtest.prefetch import prefetch_batch_data
+
+            logger.info(f"Prefetching S3 data for {len(days)} days...")
+            shared_cache = prefetch_batch_data(
+                s3_bucket=s3_bucket,
+                batch_days=days,
+            )
+
     all_trades: list[BacktestTrade] = []
 
     for day in days:
         try:
-            # Create a DataProvider for this specific date
-            provider = data_provider_factory(day)
+            # Create a DataProvider for this date, sharing the prefetched cache
+            provider = data_provider_factory(day, shared_cache=shared_cache)
 
             day_trades = await process_day(
                 run_id=run_id,

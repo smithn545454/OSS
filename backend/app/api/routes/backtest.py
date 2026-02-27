@@ -376,6 +376,7 @@ class CreateRunRequest(BaseModel):
     name: str
     start_date: str  # YYYY-MM-DD
     end_date: str  # YYYY-MM-DD
+    tickers: list[str] = Field(default_factory=list)
     policy_snapshot: Optional[dict[str, Any]] = None
     scanners_enabled: list[str] = Field(
         default_factory=lambda: [
@@ -388,10 +389,13 @@ class CreateRunRequest(BaseModel):
     starting_capital: float = 10_000.0
 
 
-async def _run_backtest_inline(config: BacktestRunConfig) -> None:
-    """Run a backtest inline (used as background task).
+async def _run_backtest_inline(
+    config: BacktestRunConfig,
+    run_id: Optional[str] = None,
+) -> None:
+    """Run a backtest inline (used as background task for local dev).
 
-    Creates the run, processes all days, and marks complete/failed.
+    Processes all days sequentially and marks complete/failed.
     """
     from app.backtest.coordinator import (
         create_backtest_run,
@@ -404,7 +408,7 @@ async def _run_backtest_inline(config: BacktestRunConfig) -> None:
 
     run = None
     try:
-        run = await create_backtest_run(config, persist=True)
+        run = await create_backtest_run(config, persist=True, run_id=run_id)
         batches = await start_backtest_run(run, persist=True)
 
         if not batches:
@@ -415,10 +419,11 @@ async def _run_backtest_inline(config: BacktestRunConfig) -> None:
 
         s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
 
-        def data_provider_factory(as_of_date):
+        def data_provider_factory(as_of_date, shared_cache=None):
             return HistoricalDataProvider(
                 as_of_date=as_of_date,
                 s3_bucket=s3_bucket,
+                shared_cache=shared_cache,
             )
 
         all_trades = []
@@ -486,11 +491,21 @@ async def create_backtest_run_endpoint(
                 status_code=400, detail="No trading days in the specified range"
             )
 
-        # Build policy snapshot — use provided or defaults
+        # Build policy snapshot — use provided or defaults, inject tickers
         if request.policy_snapshot:
-            policy_snapshot = PolicyConfig(**request.policy_snapshot)
+            snapshot_data = dict(request.policy_snapshot)
         else:
-            policy_snapshot = PolicyConfig()
+            snapshot_data = {}
+
+        if request.tickers:
+            watchlist_data = snapshot_data.get("watchlist", {})
+            if isinstance(watchlist_data, dict):
+                watchlist_data["tickers"] = request.tickers
+            else:
+                watchlist_data = {"tickers": request.tickers}
+            snapshot_data["watchlist"] = watchlist_data
+
+        policy_snapshot = PolicyConfig(**snapshot_data)
 
         # Build run config
         config_kwargs: dict[str, Any] = {
@@ -538,9 +553,9 @@ async def create_backtest_run_endpoint(
             except Exception as e:
                 logger.warning(f"Lambda invocation failed, falling back to inline: {e}")
 
-        # Fallback: create run and process inline via background task
+        # Fallback: create run and process inline via background task (local dev)
         run = await create_backtest_run(config, persist=True)
-        background_tasks.add_task(_run_backtest_inline, config)
+        background_tasks.add_task(_run_backtest_inline, config, run.run_id)
 
         return {
             "status": "started",
