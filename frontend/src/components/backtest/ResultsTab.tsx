@@ -33,6 +33,7 @@ import type {
   MonthlyPnl,
   SegmentData,
 } from '@/lib/types'
+import { formatRunDateRange } from '@/lib/backtest'
 
 // ============================================================================
 // Metric Card
@@ -445,9 +446,7 @@ function RunSelector({
           <option value="">Choose a run...</option>
           {completedRuns.map((run: BacktestRun) => (
             <option key={run.run_id} value={run.run_id}>
-              {run.config && typeof run.config === 'object' && 'name' in run.config
-                ? String(run.config.name)
-                : run.run_id.slice(0, 8)}{' '}
+              {formatRunDateRange(run)}{' '}
               ({run.summary
                 ? `${(run.summary as Record<string, number>).total_trades || 0} trades`
                 : 'no summary'})
