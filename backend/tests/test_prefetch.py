@@ -69,7 +69,7 @@ class TestComputeDateRanges:
     def test_basic_ranges(self):
         batch = [date(2024, 6, 10), date(2024, 6, 14)]  # Mon-Fri
         ohlcv, iv, options = _compute_date_ranges(
-            batch, ohlcv_lookback=7, iv_lookback=14, exit_forward=7,
+            batch, ohlcv_lookback=7, iv_lookback=14,
         )
 
         # OHLCV starts 7 cal days before Jun 10, ends Jun 14
@@ -79,9 +79,8 @@ class TestComputeDateRanges:
         # IV starts further back
         assert iv[0] < ohlcv[0]
 
-        # Options: Jun 10 through Jun 14 + 7 = Jun 21
-        assert options[0] == date(2024, 6, 10)
-        assert options[-1] == date(2024, 6, 21)
+        # Options: only batch days (no forward scan — exit resolver reads on-demand)
+        assert options == batch
 
     def test_only_weekdays(self):
         batch = [date(2024, 1, 8)]
@@ -172,7 +171,6 @@ class TestPrefetchBatchData:
             s3_client=mock_s3,
             ohlcv_lookback=3,
             iv_lookback=5,
-            exit_forward=3,
             max_workers=2,
         )
 
@@ -189,7 +187,6 @@ class TestPrefetchBatchData:
             s3_client=mock_s3,
             ohlcv_lookback=3,
             iv_lookback=5,
-            exit_forward=3,
             max_workers=2,
         )
 
@@ -208,7 +205,6 @@ class TestPrefetchBatchData:
             s3_client=mock_s3,
             ohlcv_lookback=1,
             iv_lookback=1,
-            exit_forward=1,
             max_workers=1,
         )
 
