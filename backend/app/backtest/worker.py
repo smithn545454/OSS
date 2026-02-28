@@ -205,42 +205,41 @@ async def process_batch(
                 batch_days=days,
             )
 
-    async def _process_day_and_persist(day: date) -> list[BacktestTrade]:
-        """Process a single day and persist results. Runs concurrently within batch."""
-        provider = data_provider_factory(day, shared_cache=shared_cache)
-        day_trades = await process_day(
-            run_id=run_id,
-            as_of_date=day,
-            config=config,
-            data_provider=provider,
-            persist=persist,
-        )
+    # Process days sequentially within batch (batches already fan out to
+    # separate Lambda invocations, so days are parallelized at infra level).
+    # Exit resolution within each day is concurrent (asyncio.gather in process_day).
+    all_trades: list[BacktestTrade] = []
 
-        if persist and day_trades:
-            trade_dicts = [t.model_dump() for t in day_trades]
-            await BacktestTradeTable.put_batch(trade_dicts)
+    for day in days:
+        try:
+            provider = data_provider_factory(day, shared_cache=shared_cache)
 
-        if persist:
-            await BacktestRunTable.atomic_increment_progress(
-                run_id,
-                days_increment=1,
-                trades_increment=len(day_trades),
+            day_trades = await process_day(
+                run_id=run_id,
+                as_of_date=day,
+                config=config,
+                data_provider=provider,
+                persist=persist,
             )
 
-        return day_trades
+            all_trades.extend(day_trades)
 
-    # Process all days in this batch concurrently
-    results = await asyncio.gather(
-        *[_process_day_and_persist(day) for day in days],
-        return_exceptions=True,
-    )
+            # Persist trades
+            if persist and day_trades:
+                trade_dicts = [t.model_dump() for t in day_trades]
+                await BacktestTradeTable.put_batch(trade_dicts)
 
-    all_trades: list[BacktestTrade] = []
-    for i, r in enumerate(results):
-        if isinstance(r, Exception):
-            logger.error(f"Failed to process {days[i]} in batch: {r}")
-        else:
-            all_trades.extend(r)
+            # Update progress per-day (atomic for safe concurrent fan-out)
+            if persist:
+                await BacktestRunTable.atomic_increment_progress(
+                    run_id,
+                    days_increment=1,
+                    trades_increment=len(day_trades),
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to process {day} in batch: {e}")
+            continue
 
     logger.info(
         f"Batch complete: {len(days)} days, {len(all_trades)} trades"
