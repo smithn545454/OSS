@@ -1,10 +1,9 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Settings, BarChart3, Scan, Target, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
+import { Activity, Settings, Scan, Target, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
-  { path: '/dashboard', label: 'Dashboard', shortLabel: 'Dash', icon: BarChart3 },
-  { path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
+{ path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
   { path: '/pipeline', label: 'Pipeline', shortLabel: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', shortLabel: 'Paper', icon: TrendingUp },
   { path: '/calibration', label: 'Calibration', shortLabel: 'Cal', icon: Target },
@@ -22,7 +21,7 @@ export default function Layout() {
         <div className="mx-auto max-w-7xl px-3 sm:px-4 lg:px-8">
           <div className="flex h-12 sm:h-14 lg:h-16 items-center justify-between">
             {/* Logo */}
-            <Link to="/dashboard" className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <Link to="/opportunities" className="flex items-center gap-2 sm:gap-3 shrink-0">
               <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg bg-oss-accent/10 text-oss-accent">
                 <Scan className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>

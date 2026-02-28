@@ -2,7 +2,6 @@ import { Component, type ReactNode } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { XCircle, ArrowLeft } from 'lucide-react'
 import Layout from './components/Layout'
-import Dashboard from './pages/Dashboard'
 import Opportunities from './pages/Opportunities'
 import PolicyConfig from './pages/PolicyConfig'
 import PipelineMonitor from './pages/PipelineMonitor'
@@ -60,8 +59,8 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
+        <Route index element={<Navigate to="/opportunities" replace />} />
+        <Route path="dashboard" element={<Navigate to="/opportunities" replace />} />
         <Route path="opportunities" element={<ResponsiveOpportunities />} />
         <Route path="opps" element={<Navigate to="/opportunities" replace />} />
         <Route path="pipeline" element={<PipelineMonitor />} />

@@ -6,12 +6,11 @@ import Layout from '../components/Layout'
 describe('Layout', () => {
   it('renders navigation links', () => {
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/opportunities']}>
         <Layout />
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
     expect(screen.getByText('Opportunities')).toBeInTheDocument()
     expect(screen.getByText('Pipeline')).toBeInTheDocument()
     expect(screen.getByText('Calibration')).toBeInTheDocument()
@@ -20,7 +19,7 @@ describe('Layout', () => {
 
   it('renders the OSS branding', () => {
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/opportunities']}>
         <Layout />
       </MemoryRouter>
     )
@@ -40,9 +39,9 @@ describe('Layout', () => {
     expect(pipelineLink?.className).toContain('text-oss-accent')
   })
 
-  it('renders all 5 navigation items', () => {
+  it('renders all navigation items', () => {
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/opportunities']}>
         <Layout />
       </MemoryRouter>
     )
