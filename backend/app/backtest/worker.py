@@ -68,9 +68,14 @@ async def process_day(
         # - No SlackClient configured → no Slack notifications
         # - No LLM provider → no thesis generation
         # - Paper trading positions not created by scanner
+        #
+        # Pass tickers or None: empty list would bypass WatchlistManager
+        # fallback in run_scan(). Passing None lets WatchlistManager resolve
+        # tickers from config → DEFAULT_WATCHLIST.
+        tickers = config.policy_snapshot.watchlist.tickers or None
         result = await orchestrator.run_scan(
             policy_config=config.policy_snapshot,
-            tickers=config.policy_snapshot.watchlist.tickers,
+            tickers=tickers,
             run_full_pipeline=True,
             as_of_date=as_of_date,
         )

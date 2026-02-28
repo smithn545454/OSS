@@ -505,6 +505,31 @@ async def create_backtest_run_endpoint(
                 watchlist_data = {"tickers": request.tickers}
             snapshot_data["watchlist"] = watchlist_data
 
+        # If no tickers in the config, resolve from active watchlist or defaults.
+        # This mirrors the live pipeline's WatchlistManager fallback chain:
+        # 1. Policy override → 2. S&P 500 from DynamoDB → 3. DEFAULT_WATCHLIST
+        # Must inject into snapshot_data BEFORE building the frozen PolicyConfig.
+        watchlist_data = snapshot_data.get("watchlist", {})
+        has_tickers = (
+            isinstance(watchlist_data, dict) and watchlist_data.get("tickers")
+        )
+        if not has_tickers:
+            from app.core.watchlist import WatchlistManager
+
+            # Build temporary PolicyConfig to resolve tickers via WatchlistManager
+            temp_policy = PolicyConfig(**snapshot_data)
+            wm = await WatchlistManager.from_policy_async(temp_policy)
+            resolved_tickers = wm.tickers
+            logger.info(
+                f"No tickers in request; resolved {len(resolved_tickers)} "
+                f"tickers from active watchlist"
+            )
+            if isinstance(watchlist_data, dict):
+                watchlist_data["tickers"] = resolved_tickers
+            else:
+                watchlist_data = {"tickers": resolved_tickers}
+            snapshot_data["watchlist"] = watchlist_data
+
         policy_snapshot = PolicyConfig(**snapshot_data)
 
         # Build run config
