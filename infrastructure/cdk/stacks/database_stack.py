@@ -375,6 +375,21 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
+        # 16. Calibration reports table
+        self.calibration_reports_table = dynamodb.Table(
+            self,
+            "CalibrationReportsTable",
+            table_name=f"{self.table_prefix}-calibration-reports",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+
         # Collect all tables for permissions
         self.all_tables = [
             self.policies_table,
@@ -392,6 +407,7 @@ class DatabaseStack(Stack):
             self.backtest_runs_table,
             self.backtest_trades_table,
             self.backtest_insights_table,
+            self.calibration_reports_table,
         ]
 
         # Outputs
