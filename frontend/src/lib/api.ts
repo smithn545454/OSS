@@ -84,7 +84,7 @@ async function fetchApi<T>(
   const url = `${API_BASE}${endpoint}`
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 15000)
+  const timeoutId = setTimeout(() => controller.abort(), 30000)
 
   try {
     const response = await fetch(url, {
@@ -104,7 +104,7 @@ async function fetchApi<T>(
     return response.json()
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new ApiError(408, 'Request Timeout', { message: 'Request timed out after 15s' })
+      throw new ApiError(408, 'Request Timeout', { message: 'Request timed out after 30s' })
     }
     throw err
   } finally {
