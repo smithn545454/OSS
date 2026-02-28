@@ -487,6 +487,14 @@ def moto_dynamodb():
         # Backtest insights: simple PK/SK
         db.create_table(TableName=f"{table_prefix}-backtest-insights", **pk_sk_schema)
 
+        # Earnings cache: ticker-keyed (no PK/SK pattern)
+        db.create_table(
+            TableName=f"{table_prefix}-earnings-cache",
+            KeySchema=[{"AttributeName": "ticker", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "ticker", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
         # Reset DynamoDBClient singleton so it creates fresh boto3 clients
         # within this mock_aws context. Without this, tests that go through
         # get_dynamodb() (e.g., backtest tests) get stale clients from a

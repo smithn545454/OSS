@@ -261,6 +261,31 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for daily earnings cache refresh
+        # Runs once daily at 7:00 AM ET (12:00 UTC) before market open on weekdays
+        self.earnings_refresh_rule = events.Rule(
+            self,
+            "EarningsRefreshRule",
+            rule_name=f"{project_name}-{env_name}-earnings-refresh",
+            description="Refresh earnings cache from Finnhub daily before market open",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="12",
+                week_day="MON-FRI",
+            ),
+            enabled=True,
+        )
+
+        self.earnings_refresh_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "earnings_refresh",
+                }),
+            )
+        )
+
         # Outputs
         CfnOutput(
             self,

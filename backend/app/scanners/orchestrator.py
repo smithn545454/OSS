@@ -208,6 +208,15 @@ class ScannerOrchestrator:
         effective_date = as_of_date or date.today()
 
         async with AsyncExitStack() as stack:
+            # Initialize read-only earnings cache (populated by daily earnings_refresh)
+            earnings_cache = None
+            if policy_config.underlying_filter.exclude_earnings_within_days > 0:
+                try:
+                    from app.services.earnings_cache import EarningsCacheService
+                    earnings_cache = EarningsCacheService()
+                except Exception as e:
+                    logger.warning(f"Could not initialize earnings cache: {e}")
+
             # Determine data source: DataProvider (backtest) or PolygonClient (live)
             if self._data_provider:
                 data_provider = self._data_provider
@@ -230,7 +239,7 @@ class ScannerOrchestrator:
                     PolygonClient(max_concurrent=effective_concurrency)
                 )
                 from app.core.live_data_provider import LiveDataProvider
-                data_provider = LiveDataProvider(polygon)
+                data_provider = LiveDataProvider(polygon, earnings_cache=earnings_cache)
 
             # ================================================================
             # STAGE 1: Opportunity Discovery (Scanners)
@@ -402,24 +411,8 @@ class ScannerOrchestrator:
                         run_id, PipelineStage.UNDERLYING_FILTERS
                     )
 
-                    # Initialize earnings cache for earnings window filter
-                    earnings_cache = None
-                    if policy_config.underlying_filter.exclude_earnings_within_days > 0:
-                        try:
-                            from app.services.earnings_cache import EarningsCacheService
-                            from app.services.finnhub import FinnhubClient
-                            if not settings.finnhub_api_key:
-                                logger.warning(
-                                    "Finnhub API key not configured, earnings filter disabled"
-                                )
-                            else:
-                                finnhub = await stack.enter_async_context(
-                                    FinnhubClient(api_key=settings.finnhub_api_key)
-                                )
-                                earnings_cache = EarningsCacheService(finnhub_client=finnhub)
-                        except Exception as e:
-                            logger.warning(f"Could not initialize earnings cache: {e}")
-
+                    # earnings_cache was created earlier with LiveDataProvider
+                    # (read-only from DynamoDB, populated by daily earnings_refresh)
                     underlying_filter = UnderlyingFilter(
                         policy_config.underlying_filter,
                         earnings_cache=earnings_cache,

@@ -922,6 +922,29 @@ async def _run_paper_update_worker(
     }
 
 
+async def _run_earnings_refresh() -> dict[str, Any]:
+    """Run daily bulk earnings refresh from Finnhub.
+
+    Makes one API call to get all upcoming earnings in the next 10 days
+    and caches them in DynamoDB. Pipeline runs then read from cache only.
+    """
+    from app.services.earnings_cache import EarningsCacheService
+    from app.services.finnhub import FinnhubClient
+
+    settings = get_settings()
+
+    if not settings.finnhub_api_key:
+        logger.warning("Finnhub API key not configured, skipping earnings refresh")
+        return {"status": "skipped", "reason": "no_finnhub_api_key"}
+
+    async with FinnhubClient(api_key=settings.finnhub_api_key) as finnhub:
+        earnings_cache = EarningsCacheService(finnhub_client=finnhub)
+        result = await earnings_cache.refresh_all(lookforward_days=10)
+
+    logger.info(f"Earnings refresh result: {result}")
+    return {"status": "success", **result}
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
 
@@ -932,6 +955,7 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     4. Paper trading update: {"source": "oss.scheduler", "action": "paper_update"}
     5. Backtest coordinator: {"source": "oss.scheduler", "action": "backtest_coordinator", ...}
     6. Backtest worker: {"source": "oss.scheduler", "action": "backtest_worker", ...}
+    7. Earnings refresh: {"source": "oss.scheduler", "action": "earnings_refresh"}
 
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
@@ -995,6 +1019,11 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             batch_idx = event.get("batch_index", 0)
             logger.info(f"Received backtest_worker event (batch {batch_idx})")
             return asyncio.run(_run_backtest_worker(event))
+
+        elif action == "earnings_refresh":
+            # Daily earnings cache refresh from Finnhub
+            logger.info("Received earnings_refresh event from EventBridge")
+            return asyncio.run(_run_earnings_refresh())
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

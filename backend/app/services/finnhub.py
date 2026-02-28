@@ -113,22 +113,25 @@ class FinnhubClient:
 
     async def get_earnings_calendar(
         self,
-        symbol: str,
+        symbol: Optional[str] = None,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
     ) -> list[dict[str, Any]]:
-        """Get earnings calendar for a symbol.
+        """Get earnings calendar, optionally filtered by symbol.
 
         Args:
-            symbol: Stock ticker symbol (e.g., "AAPL")
+            symbol: Stock ticker symbol (e.g., "AAPL"). If None, returns
+                    all earnings in the date range.
             from_date: Start date for calendar range
             to_date: End date for calendar range
 
         Returns:
             List of earnings events
         """
-        params: dict[str, Any] = {"symbol": symbol}
+        params: dict[str, Any] = {}
 
+        if symbol:
+            params["symbol"] = symbol
         if from_date:
             params["from"] = from_date.isoformat()
         if to_date:
@@ -139,6 +142,27 @@ class FinnhubClient:
         if data and "earningsCalendar" in data:
             return data["earningsCalendar"]
         return []
+
+    async def get_all_upcoming_earnings(
+        self,
+        from_date: date,
+        to_date: date,
+    ) -> list[dict[str, Any]]:
+        """Get all earnings announcements in a date range (bulk fetch).
+
+        One API call returns ALL companies reporting in the range.
+        No symbol filter — much more efficient than per-ticker queries.
+
+        Args:
+            from_date: Start of date range
+            to_date: End of date range
+
+        Returns:
+            List of earnings events with 'symbol', 'date', 'hour' fields
+        """
+        return await self.get_earnings_calendar(
+            symbol=None, from_date=from_date, to_date=to_date,
+        )
 
     async def get_next_earnings_date(
         self,
