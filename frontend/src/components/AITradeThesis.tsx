@@ -271,13 +271,13 @@ interface AITradeThesisProps {
 }
 
 export default function AITradeThesis({ thesis, onGenerate, isGenerating, generateError }: AITradeThesisProps) {
-  // No thesis available
-  if (!thesis) {
+  // Show loading/placeholder when no thesis, generating, or thesis failed (allows retry)
+  if (!thesis || isGenerating || thesis.status === 'FAILED' || thesis.status === 'PENDING') {
     return <ThesisPlaceholder onGenerate={onGenerate} isGenerating={isGenerating} generateError={generateError} />
   }
 
-  // Thesis failed or rate limited
-  if (thesis.status !== 'COMPLETED') {
+  // Rate limited — show specific message
+  if (thesis.status === 'RATE_LIMITED') {
     return <ThesisError status={thesis.status} errorMessage={thesis.error_message} />
   }
 

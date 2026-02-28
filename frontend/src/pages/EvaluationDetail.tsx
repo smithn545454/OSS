@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { 
   ArrowLeft, 
@@ -850,6 +851,24 @@ export default function EvaluationDetail() {
   )
 
   const generateThesis = useGenerateThesis()
+  const hasTriggeredThesis = useRef(false)
+
+  // Auto-generate thesis on page load for APPROVE evaluations
+  useEffect(() => {
+    const verdict = data?.evaluation?.decision?.verdict
+    const thesisStatus = data?.thesis?.status
+    if (
+      data &&
+      evaluationId &&
+      verdict === 'APPROVE' &&
+      thesisStatus !== 'COMPLETED' &&
+      !generateThesis.isPending &&
+      !hasTriggeredThesis.current
+    ) {
+      hasTriggeredThesis.current = true
+      generateThesis.mutate(evaluationId)
+    }
+  }, [data, evaluationId, generateThesis.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (
@@ -897,6 +916,8 @@ export default function EvaluationDetail() {
 
   const { evaluation, pillar_scores, gate_results, position, scanner_triggers, thesis, summary } = data
   const decision = evaluation.decision
+  // Use mutation result if available (shows immediately after generation)
+  const effectiveThesis = (generateThesis.data as TradeThesis | undefined) ?? thesis
 
   return (
     <div className="space-y-8">
@@ -942,7 +963,7 @@ export default function EvaluationDetail() {
       {/* AI Trade Thesis */}
       {decision?.verdict === 'APPROVE' && (
         <AITradeThesis
-          thesis={thesis as TradeThesis | null}
+          thesis={effectiveThesis as TradeThesis | null}
           onGenerate={() => evaluationId && generateThesis.mutate(evaluationId)}
           isGenerating={generateThesis.isPending}
           generateError={generateThesis.error as Error | null}

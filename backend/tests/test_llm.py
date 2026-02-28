@@ -706,7 +706,7 @@ class TestSchemaModels:
         assert config.enabled is True
         assert config.max_daily_calls == 50
         assert config.output_token_limit == 1000
-        assert config.preferred_provider == LLMProvider.OPENAI
+        assert config.preferred_provider == LLMProvider.ANTHROPIC
         assert config.fallback_enabled is True
 
     def test_llm_usage_creation(self):

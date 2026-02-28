@@ -267,7 +267,7 @@ class TestPolicyConfigDefaults:
         assert cfg.enabled is True
         assert cfg.max_daily_calls == 50
         assert cfg.output_token_limit == 1000
-        assert cfg.preferred_provider == LLMProvider.OPENAI
+        assert cfg.preferred_provider == LLMProvider.ANTHROPIC
         assert cfg.fallback_enabled is True
 
     def test_feature_config_defaults(self):

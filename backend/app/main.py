@@ -497,7 +497,7 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
                 thesis_config=policy_config.thesis,
                 persist_decisions=True,
                 check_concentration=True,
-                generate_theses=True,
+                generate_theses=False,
             )
 
             approve_count = sum(1 for d in decisions.values() if d.verdict == Verdict.APPROVE)
