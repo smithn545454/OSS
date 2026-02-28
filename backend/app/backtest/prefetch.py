@@ -36,7 +36,6 @@ def _compute_date_ranges(
     batch_days: list[date],
     ohlcv_lookback: int = 70,
     iv_lookback: int = 260,
-    exit_forward: int = 130,
 ) -> tuple[list[date], list[date], list[date]]:
     """Compute the date ranges needed for OHLCV, IV, and options data.
 
@@ -46,11 +45,13 @@ def _compute_date_ranges(
                         (60 trading days ~ 84 calendar days, use 70 buffer).
         iv_lookback: Calendar days before earliest batch day for IV history
                      (252 trading days ~ 353 calendar days, use 260 buffer).
-        exit_forward: Calendar days after latest batch day for exit resolution
-                      (max_dte=120, use 130 buffer).
 
     Returns:
         Tuple of (ohlcv_dates, iv_dates, options_dates).
+        Options dates cover only the batch days (for pipeline stages 1-7).
+        Exit resolution reads forward options data on-demand via
+        HistoricalDataProvider._read_options_chain_lite() (column-filtered,
+        ~5 MB vs ~13 MB per file).
     """
     earliest = min(batch_days)
     latest = max(batch_days)
@@ -61,8 +62,13 @@ def _compute_date_ranges(
     iv_start = earliest - timedelta(days=iv_lookback)
     iv_dates = _generate_weekdays(iv_start, latest)
 
-    options_end = latest + timedelta(days=exit_forward)
-    options_dates = _generate_weekdays(earliest, options_end)
+    # Only prefetch options for batch days (pipeline stages 1-7).
+    # Exit resolution forward-scans 60-130 days of options data per trade,
+    # reading on-demand via _read_options_chain_lite() which column-filters
+    # to ~5 MB/file and caches per provider instance.
+    # Prefetching 99+ full options files (~13 MB each = ~1.3 GB) caused OOM
+    # on the 3 GB Lambda.
+    options_dates = list(batch_days)
 
     return ohlcv_dates, iv_dates, options_dates
 
@@ -126,7 +132,6 @@ def prefetch_batch_data(
     s3_client: Any = None,
     ohlcv_lookback: int = 70,
     iv_lookback: int = 260,
-    exit_forward: int = 130,
     max_workers: int = 20,
 ) -> dict[str, Any]:
     """Pre-download all parquet files needed for a batch into a shared cache.
@@ -134,13 +139,16 @@ def prefetch_batch_data(
     Uses ThreadPoolExecutor for parallel S3 downloads. The returned dict
     should be passed as ``shared_cache`` to HistoricalDataProvider instances.
 
+    Only prefetches data needed for pipeline stages 1-7 (OHLCV lookback,
+    IV lookback, options for batch days). Exit resolution forward options
+    data is read on-demand by HistoricalDataProvider._read_options_chain_lite().
+
     Args:
         s3_bucket: S3 bucket name.
         batch_days: List of trading dates in this batch.
         s3_client: Optional boto3 S3 client (created if None).
         ohlcv_lookback: Calendar days lookback for stock OHLCV.
         iv_lookback: Calendar days lookback for IV history.
-        exit_forward: Calendar days forward for exit resolution options.
         max_workers: Max parallel S3 download threads.
 
     Returns:
@@ -155,7 +163,6 @@ def prefetch_batch_data(
         batch_days,
         ohlcv_lookback=ohlcv_lookback,
         iv_lookback=iv_lookback,
-        exit_forward=exit_forward,
     )
 
     keys = _generate_s3_keys(ohlcv_dates, iv_dates, options_dates)
