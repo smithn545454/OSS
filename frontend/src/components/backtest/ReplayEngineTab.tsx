@@ -9,6 +9,7 @@ import {
   useBacktestTrades,
 } from '@/hooks/useApi'
 import type { BacktestRun, CreateBacktestRunRequest } from '@/lib/types'
+import { formatRunDateRange } from '@/lib/backtest'
 
 // ============================================================================
 // Run Config Form
@@ -20,7 +21,6 @@ function RunConfigForm({ onSubmit, isLoading }: {
   onSubmit: (req: CreateBacktestRunRequest) => void
   isLoading: boolean
 }) {
-  const [name, setName] = useState('')
   const [startDate, setStartDate] = useState('2024-01-02')
   const [endDate, setEndDate] = useState('2026-01-31')
   const [scanners, setScanners] = useState<string[]>(DEFAULT_SCANNERS)
@@ -34,7 +34,7 @@ function RunConfigForm({ onSubmit, isLoading }: {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onSubmit({
-      name: name || `Backtest ${new Date().toISOString().split('T')[0]}`,
+      name: `Backtest ${startDate} to ${endDate}`,
       start_date: startDate,
       end_date: endDate,
       scanners_enabled: scanners,
@@ -56,18 +56,6 @@ function RunConfigForm({ onSubmit, isLoading }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Name */}
-      <div>
-        <label className="block text-xs font-medium text-oss-muted mb-1">Run Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g., Full Range Q1 2024 - Q1 2026"
-          className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text placeholder:text-oss-muted/50 focus:border-oss-accent focus:outline-none"
-        />
-      </div>
-
       {/* Date Range */}
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -282,7 +270,7 @@ function RunsTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-oss-border text-left">
-            <th className="px-4 py-3 text-xs font-medium text-oss-muted">Name</th>
+            <th className="px-4 py-3 text-xs font-medium text-oss-muted">Date Range</th>
             <th className="px-4 py-3 text-xs font-medium text-oss-muted">Status</th>
             <th className="px-4 py-3 text-xs font-medium text-oss-muted">Progress</th>
             <th className="px-4 py-3 text-xs font-medium text-oss-muted">Trades</th>
@@ -303,7 +291,7 @@ function RunsTable({
               )}
             >
               <td className="px-4 py-3 font-medium text-oss-text">
-                {run.name || run.run_id.slice(0, 8)}
+                {formatRunDateRange(run)}
               </td>
               <td className="px-4 py-3">
                 <StatusBadge status={run.status} />
