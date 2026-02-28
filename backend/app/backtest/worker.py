@@ -10,6 +10,7 @@ Processes a batch of trading days for a backtest run:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 from typing import Any
@@ -83,9 +84,9 @@ async def process_day(
                     st.value if hasattr(st, "value") else str(st)
                 )
 
-        # Process each evaluation that received APPROVE or WATCH
+        # Collect exit resolution tasks for parallel execution
+        exit_tasks: list[Any] = []
         for evaluation in result.evaluations:
-            # Look up the decision for this evaluation
             decision = result.decisions.get(evaluation.evaluation_id)
             if not decision:
                 continue
@@ -93,7 +94,6 @@ async def process_day(
             if verdict not in (Verdict.APPROVE, Verdict.WATCH):
                 continue
 
-            # Extract trade entry data from the Evaluation object
             option_ticker = evaluation.option_ticker
             underlying_ticker = evaluation.underlying_ticker
             ot = evaluation.option_type
@@ -106,7 +106,6 @@ async def process_day(
             )
             combined_score = decision.final_score
 
-            # Get entry price with slippage
             ask = evaluation.ask
             mid = evaluation.mid
 
@@ -124,30 +123,37 @@ async def process_day(
             if entry_price <= 0:
                 continue
 
-            # Determine market regime (placeholder — Phase 3 will add regime detection)
             market_regime = None
 
-            # Resolve exit by forward-scanning historical data
-            trade = await resolve_exit(
-                data_provider=data_provider,
-                entry_date=as_of_date,
-                entry_price=entry_price,
-                option_ticker=option_ticker,
-                underlying_ticker=underlying_ticker,
-                option_type=option_type,
-                strike=strike,
-                expiration_date=expiration_date,
-                exit_config=config.exit_rules,
-                scanner_type=scanner_type,
-                verdict=verdict.value if hasattr(verdict, "value") else str(verdict),
-                combined_score=combined_score,
-                run_id=run_id,
-                slippage_model=config.slippage_model,
-                slippage_pct=config.slippage_pct,
-                market_regime=market_regime,
+            exit_tasks.append(
+                resolve_exit(
+                    data_provider=data_provider,
+                    entry_date=as_of_date,
+                    entry_price=entry_price,
+                    option_ticker=option_ticker,
+                    underlying_ticker=underlying_ticker,
+                    option_type=option_type,
+                    strike=strike,
+                    expiration_date=expiration_date,
+                    exit_config=config.exit_rules,
+                    scanner_type=scanner_type,
+                    verdict=verdict.value if hasattr(verdict, "value") else str(verdict),
+                    combined_score=combined_score,
+                    run_id=run_id,
+                    slippage_model=config.slippage_model,
+                    slippage_pct=config.slippage_pct,
+                    market_regime=market_regime,
+                )
             )
 
-            trades.append(trade)
+        # Resolve all exits concurrently
+        if exit_tasks:
+            resolved = await asyncio.gather(*exit_tasks, return_exceptions=True)
+            for r in resolved:
+                if isinstance(r, Exception):
+                    logger.error(f"Exit resolution failed: {r}")
+                else:
+                    trades.append(r)
 
         logger.info(
             f"Day {as_of_date}: {len(result.evaluations)} evaluations, "
@@ -199,39 +205,42 @@ async def process_batch(
                 batch_days=days,
             )
 
-    all_trades: list[BacktestTrade] = []
+    async def _process_day_and_persist(day: date) -> list[BacktestTrade]:
+        """Process a single day and persist results. Runs concurrently within batch."""
+        provider = data_provider_factory(day, shared_cache=shared_cache)
+        day_trades = await process_day(
+            run_id=run_id,
+            as_of_date=day,
+            config=config,
+            data_provider=provider,
+            persist=persist,
+        )
 
-    for day in days:
-        try:
-            # Create a DataProvider for this date, sharing the prefetched cache
-            provider = data_provider_factory(day, shared_cache=shared_cache)
+        if persist and day_trades:
+            trade_dicts = [t.model_dump() for t in day_trades]
+            await BacktestTradeTable.put_batch(trade_dicts)
 
-            day_trades = await process_day(
-                run_id=run_id,
-                as_of_date=day,
-                config=config,
-                data_provider=provider,
-                persist=persist,
+        if persist:
+            await BacktestRunTable.atomic_increment_progress(
+                run_id,
+                days_increment=1,
+                trades_increment=len(day_trades),
             )
 
-            all_trades.extend(day_trades)
+        return day_trades
 
-            # Persist trades
-            if persist and day_trades:
-                trade_dicts = [t.model_dump() for t in day_trades]
-                await BacktestTradeTable.put_batch(trade_dicts)
+    # Process all days in this batch concurrently
+    results = await asyncio.gather(
+        *[_process_day_and_persist(day) for day in days],
+        return_exceptions=True,
+    )
 
-            # Update progress (atomic for safe concurrent fan-out)
-            if persist:
-                await BacktestRunTable.atomic_increment_progress(
-                    run_id,
-                    days_increment=1,
-                    trades_increment=len(day_trades),
-                )
-
-        except Exception as e:
-            logger.error(f"Failed to process {day} in batch: {e}")
-            continue
+    all_trades: list[BacktestTrade] = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.error(f"Failed to process {days[i]} in batch: {r}")
+        else:
+            all_trades.extend(r)
 
     logger.info(
         f"Batch complete: {len(days)} days, {len(all_trades)} trades"
