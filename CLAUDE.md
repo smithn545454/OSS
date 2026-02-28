@@ -46,8 +46,11 @@ gh pr create --title "title" --body ""  # Create a pull request
 ```bash
 source .venv/bin/activate
 cdk synth            # Synthesize CloudFormation templates
-cdk deploy --all     # Deploy all stacks
+cdk deploy oss-dev-database   # Deploy database changes only (SAFE)
+cdk deploy oss-dev-frontend   # Deploy frontend infra only (SAFE)
 ```
+
+**WARNING: NEVER run `cdk deploy oss-dev-backend` or `cdk deploy --all`.** CDK backend deploy replaces the Lambda code with a raw package from the worktree that lacks bundled dependencies (fastapi, etc.), breaking the backend. Always use `./scripts/deploy.sh backend` for backend deployments — it properly packages dependencies. For database-only changes (new tables, GSIs), deploy only the DatabaseStack. The Lambda's IAM policy uses wildcard `dynamodb:*` on `oss-dev-*` tables, so new tables are accessible without redeploying the backend.
 
 ### Deployment
 ```bash
@@ -321,6 +324,7 @@ After any rollback, tell the user:
 8. **No shortcuts for "simple" changes** — follow every step regardless of how minor the change appears. Frontend-only changes still require CloudWatch and Pipeline Monitor checks.
 9. **Always merge to main after deploy** — a deploy without merging leaves `main` out of sync. Future sessions start from `main`, so unmerged code is effectively invisible to them. Step 5 is mandatory.
 10. **Clean up branches** — after merging, delete the remote branch. One active branch at a time keeps things simple.
+11. **Never `cdk deploy` the backend stack** — `cdk deploy oss-dev-backend` replaces Lambda code with an unpackaged bundle that lacks dependencies, immediately breaking the backend. Use `cdk deploy oss-dev-database` for database changes, `./scripts/deploy.sh backend` for backend code. If you accidentally run `cdk deploy` on the backend, immediately rollback: `./scripts/deploy.sh rollback`.
 
 ### Pipeline Run ID Flow (Critical Context)
 - **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
