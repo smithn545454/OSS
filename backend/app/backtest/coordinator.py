@@ -24,9 +24,13 @@ from app.db.backtest_tables import BacktestRunTable
 logger = logging.getLogger(__name__)
 
 # Worker batch size — number of trading days per worker invocation.
-# Each day's pipeline (~120s) + exit resolution (~45s) ≈ 165s.
-# At 2 days/batch, worst case ≈ 330s, well within 10-min Lambda timeout.
-DAYS_PER_BATCH = 2
+# With ticker chunking, each worker handles 1 day × ~100 tickers.
+# Pipeline (~60-90s for 100 tickers) + exit resolution (~30s) ≈ 120s max.
+DAYS_PER_BATCH = 1
+
+# Ticker chunk size per worker. The live pipeline uses SCANNER_CHUNK_SIZE=100.
+# Matches that to keep each worker within 2-3 min execution time.
+TICKERS_PER_CHUNK = 100
 
 
 def generate_trading_days(start_date: date, end_date: date) -> list[date]:

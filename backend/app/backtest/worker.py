@@ -40,6 +40,7 @@ async def process_day(
     config: BacktestRunConfig,
     data_provider: Any,
     persist: bool = True,
+    tickers: list[str] | None = None,
 ) -> list[BacktestTrade]:
     """Process a single trading day through the full pipeline + exit resolution.
 
@@ -49,6 +50,7 @@ async def process_day(
         config: Run configuration
         data_provider: HistoricalDataProvider for this date
         persist: Whether to persist results to DynamoDB
+        tickers: Optional ticker subset to process (None = all from config)
 
     Returns:
         List of BacktestTrade records generated for this day.
@@ -56,7 +58,11 @@ async def process_day(
     from app.core.pipeline import PipelineOrchestrator
     from app.scanners.orchestrator import ScannerOrchestrator
 
-    logger.info(f"Processing day {as_of_date} for run {run_id}")
+    ticker_list = tickers or config.policy_snapshot.watchlist.tickers or None
+    logger.info(
+        f"Processing day {as_of_date} for run {run_id} "
+        f"({len(ticker_list) if ticker_list else 'all'} tickers)"
+    )
 
     trades: list[BacktestTrade] = []
 
@@ -72,10 +78,9 @@ async def process_day(
         )
 
         # Run the full pipeline (stages 1-7)
-        tickers = config.policy_snapshot.watchlist.tickers or None
         result = await orchestrator.run_scan(
             policy_config=config.policy_snapshot,
-            tickers=tickers,
+            tickers=ticker_list,
             run_full_pipeline=True,
             as_of_date=as_of_date,
         )
@@ -194,6 +199,7 @@ async def process_batch(
     data_provider_factory: Any,
     persist: bool = True,
     shared_cache: dict | None = None,
+    tickers: list[str] | None = None,
 ) -> list[BacktestTrade]:
     """Process a batch of trading days.
 
@@ -205,6 +211,7 @@ async def process_batch(
         persist: Whether to persist results
         shared_cache: Optional pre-populated S3 cache dict. If None and
                       BACKTEST_S3_BUCKET is set, prefetch is called automatically.
+        tickers: Optional ticker subset to process (None = all from config)
 
     Returns:
         All trades from this batch.
@@ -235,6 +242,7 @@ async def process_batch(
                 config=config,
                 data_provider=provider,
                 persist=persist,
+                tickers=tickers,
             )
 
             all_trades.extend(day_trades)

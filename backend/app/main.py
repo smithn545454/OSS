@@ -569,6 +569,7 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
         Summary with run_id and batch count.
     """
     from app.backtest.coordinator import (
+        TICKERS_PER_CHUNK,
         create_backtest_run,
         mark_run_completed,
         mark_run_failed,
@@ -604,11 +605,13 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
             run = await create_backtest_run(config, persist=True)
         run_id = run.run_id
 
-        # Generate batches
-        batches = await start_backtest_run(run, persist=True)
+        # Generate day batches
+        day_batches = await start_backtest_run(run, persist=True)
 
-        if not batches:
-            await mark_run_completed(run_id, summary={"trades": 0, "note": "no trading days"})
+        if not day_batches:
+            await mark_run_completed(
+                run_id, summary={"trades": 0, "note": "no trading days"}
+            )
             return {
                 "status": "success",
                 "run_id": run_id,
@@ -616,13 +619,43 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
                 "note": "no trading days in range",
             }
 
-        total_batches = len(batches)
+        # Resolve tickers for chunking
+        # API route already resolves tickers into policy_snapshot.watchlist.tickers
+        all_tickers = config.policy_snapshot.watchlist.tickers or []
+
+        # Split tickers into chunks for parallel processing
+        ticker_chunks: list[list[str]] = []
+        for i in range(0, len(all_tickers), TICKERS_PER_CHUNK):
+            ticker_chunks.append(all_tickers[i:i + TICKERS_PER_CHUNK])
+        if not ticker_chunks:
+            ticker_chunks = [[]]  # fallback: one empty chunk = process all
+
+        # Build (day_batch, ticker_chunk) worker payloads
+        # Each worker gets 1 day × ~100 tickers (~2-3 min execution)
+        total_batches = len(day_batches) * max(len(ticker_chunks), 1)
         s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
 
-        # Store total_batches on run record so workers can detect completion
+        # Update progress: days_total = total_batches for accurate progress bar
+        # (each "unit" of progress is one worker completing, not one calendar day)
         await BacktestRunTable.set_total_batches(run_id, total_batches)
+        await BacktestRunTable.update_progress(
+            run_id,
+            progress={
+                "days_completed": 0,
+                "days_total": total_batches,
+                "trades_found": 0,
+                "total_batches": total_batches,
+                "batches_completed": 0,
+            },
+        )
 
-        # Always fan out to parallel worker Lambdas
+        logger.info(
+            f"Backtest run {run_id}: {len(day_batches)} day-batches × "
+            f"{len(ticker_chunks)} ticker-chunks = {total_batches} workers "
+            f"({len(all_tickers)} tickers, {TICKERS_PER_CHUNK}/chunk)"
+        )
+
+        # Fan out to parallel worker Lambdas
         import boto3
 
         function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
@@ -630,28 +663,32 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
 
         dispatched = 0
         errors: list[str] = []
+        idx = 0
 
-        for idx, batch in enumerate(batches):
-            payload = {
-                "source": "oss.scheduler",
-                "action": "backtest_worker",
-                "run_id": run_id,
-                "days": [d.isoformat() for d in batch],
-                "config": config.model_dump(mode="json"),
-                "batch_index": idx,
-                "total_batches": total_batches,
-                "s3_bucket": s3_bucket,
-            }
+        for day_batch in day_batches:
+            for chunk in ticker_chunks:
+                payload = {
+                    "source": "oss.scheduler",
+                    "action": "backtest_worker",
+                    "run_id": run_id,
+                    "days": [d.isoformat() for d in day_batch],
+                    "tickers": chunk,
+                    "config": config.model_dump(mode="json"),
+                    "batch_index": idx,
+                    "total_batches": total_batches,
+                    "s3_bucket": s3_bucket,
+                }
 
-            try:
-                lambda_client.invoke(
-                    FunctionName=function_name,
-                    InvocationType="Event",
-                    Payload=json.dumps(payload),
-                )
-                dispatched += 1
-            except Exception as e:
-                errors.append(f"Failed to dispatch batch {idx}: {e}")
+                try:
+                    lambda_client.invoke(
+                        FunctionName=function_name,
+                        InvocationType="Event",
+                        Payload=json.dumps(payload),
+                    )
+                    dispatched += 1
+                except Exception as e:
+                    errors.append(f"Failed to dispatch batch {idx}: {e}")
+                idx += 1
 
         logger.info(
             f"Backtest coordinator dispatched {dispatched}/{total_batches} workers "
@@ -699,10 +736,11 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
     batch_index = event.get("batch_index", 0)
     total_batches = event.get("total_batches", 1)
     s3_bucket = event.get("s3_bucket", os.environ.get("BACKTEST_S3_BUCKET", ""))
+    ticker_chunk = event.get("tickers")  # None = all tickers (backwards compat)
 
     logger.info(
         f"Backtest worker: run={run_id}, batch {batch_index + 1}/{total_batches}, "
-        f"{len(day_strs)} days"
+        f"{len(day_strs)} days, {len(ticker_chunk) if ticker_chunk else 'all'} tickers"
     )
 
     try:
@@ -733,6 +771,7 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             data_provider_factory=data_provider_factory,
             persist=True,
             shared_cache=shared_cache,
+            tickers=ticker_chunk,
         )
 
         logger.info(
