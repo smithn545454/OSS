@@ -748,13 +748,18 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
         config = BacktestRunConfig(**config_data)
         days = [date_type.fromisoformat(d) for d in day_strs]
 
-        # Pre-materialize all S3 data for this batch (parallel download)
+        # Pre-materialize only options-chains for batch days (lightweight).
+        # IV history (188 files) and OHLCV (52 files) caused OOM on 3 GB Lambda
+        # when prefetched in full. HistoricalDataProvider reads them on-demand
+        # with per-instance caching, which is slower but memory-safe.
         from app.backtest.prefetch import prefetch_batch_data
 
-        logger.info(f"Prefetching S3 data for {len(days)} days...")
+        logger.info(f"Prefetching S3 data for {len(days)} days (options only)...")
         shared_cache = prefetch_batch_data(
             s3_bucket=s3_bucket,
             batch_days=days,
+            ohlcv_lookback=0,
+            iv_lookback=0,
         )
 
         def data_provider_factory(as_of_date, shared_cache=None):
