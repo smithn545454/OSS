@@ -153,11 +153,11 @@ def process_local(input_dir: Path, output_dir: Optional[Path], dry_run: bool) ->
 
 
 def process_s3(bucket: str, dry_run: bool) -> int:
-    """Process S3 parquet files."""
+    """Process S3 parquet files with parallel workers."""
     import boto3
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     s3 = boto3.client("s3")
-    dates_processed = 0
 
     # List date partitions
     paginator = s3.get_paginator("list_objects_v2")
@@ -168,43 +168,55 @@ def process_s3(bucket: str, dry_run: bool) -> int:
             if part.startswith("date="):
                 dates.add(part.split("=")[1])
 
-    for trade_date in sorted(dates):
+    sorted_dates = sorted(dates)
+    logger.info(f"  Found {len(sorted_dates)} dates to process")
+
+    def process_one_date(trade_date: str) -> tuple[str, int]:
         s3_key = f"options-chains/date={trade_date}/data.parquet"
-        try:
-            obj = s3.get_object(Bucket=bucket, Key=s3_key)
-            buf = io.BytesIO(obj["Body"].read())
-            table = pq.ParquetFile(buf).read()
-            records = compute_atm_iv_for_date(table, trade_date)
+        # Each thread needs its own S3 client
+        thread_s3 = boto3.client("s3")
+        obj = thread_s3.get_object(Bucket=bucket, Key=s3_key)
+        buf = io.BytesIO(obj["Body"].read())
+        table = pq.ParquetFile(buf).read()
+        records = compute_atm_iv_for_date(table, trade_date)
 
-            if dry_run:
-                logger.info(f"  {trade_date}: {len(records)} tickers")
+        if not dry_run and records:
+            out_table = pa.table(
+                {
+                    "ticker": pa.array([r["ticker"] for r in records], type=pa.string()),
+                    "date": pa.array([r["date"] for r in records], type=pa.string()),
+                    "atm_iv": pa.array([r["atm_iv"] for r in records], type=pa.float64()),
+                },
+                schema=IV_HISTORY_SCHEMA,
+            )
+            out_buf = io.BytesIO()
+            pq.write_table(out_table, out_buf, compression="snappy")
+            thread_s3.put_object(
+                Bucket=bucket,
+                Key=f"iv-history/date={trade_date}/data.parquet",
+                Body=out_buf.getvalue(),
+            )
+
+        return trade_date, len(records)
+
+    dates_processed = 0
+    start = time.time()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(process_one_date, d): d for d in sorted_dates}
+        for future in as_completed(futures):
+            try:
+                td, count = future.result()
                 dates_processed += 1
-                continue
-
-            if records:
-                out_table = pa.table(
-                    {
-                        "ticker": pa.array([r["ticker"] for r in records], type=pa.string()),
-                        "date": pa.array([r["date"] for r in records], type=pa.string()),
-                        "atm_iv": pa.array([r["atm_iv"] for r in records], type=pa.float64()),
-                    },
-                    schema=IV_HISTORY_SCHEMA,
-                )
-                out_buf = io.BytesIO()
-                pq.write_table(out_table, out_buf, compression="snappy")
-                out_buf.seek(0)
-                s3.put_object(
-                    Bucket=bucket,
-                    Key=f"iv-history/date={trade_date}/data.parquet",
-                    Body=out_buf.getvalue(),
-                )
-
-            dates_processed += 1
-            if dates_processed % 50 == 0:
-                logger.info(f"  Processed {dates_processed} dates...")
-
-        except Exception as e:
-            logger.warning(f"Error processing {trade_date}: {e}")
+                if dates_processed % 50 == 0 or dates_processed == len(sorted_dates):
+                    elapsed = time.time() - start
+                    logger.info(
+                        f"  [{dates_processed}/{len(sorted_dates)}] "
+                        f"{elapsed:.0f}s elapsed"
+                    )
+            except Exception as e:
+                td = futures[future]
+                logger.warning(f"Error processing {td}: {e}")
 
     return dates_processed
 
