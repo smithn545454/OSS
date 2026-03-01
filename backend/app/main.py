@@ -16,7 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -945,6 +945,26 @@ async def _run_earnings_refresh() -> dict[str, Any]:
     return {"status": "success", **result}
 
 
+async def _run_daily_data_capture(
+    capture_date: Optional[str] = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Run daily market data capture for backtesting.
+
+    Captures stock OHLCV, options chains, IV history, and market context
+    for a single trading day.
+    """
+    from app.data_capture.daily_capture import run_daily_capture
+
+    try:
+        result = await run_daily_capture(capture_date=capture_date, force=force)
+        logger.info(f"Daily data capture result: {result}")
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"Daily data capture failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
 
@@ -956,6 +976,7 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     5. Backtest coordinator: {"source": "oss.scheduler", "action": "backtest_coordinator", ...}
     6. Backtest worker: {"source": "oss.scheduler", "action": "backtest_worker", ...}
     7. Earnings refresh: {"source": "oss.scheduler", "action": "earnings_refresh"}
+    8. Daily data capture: {"source": "oss.scheduler", "action": "daily_data_capture"}
 
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
@@ -1024,6 +1045,16 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             # Daily earnings cache refresh from Finnhub
             logger.info("Received earnings_refresh event from EventBridge")
             return asyncio.run(_run_earnings_refresh())
+
+        elif action == "daily_data_capture":
+            # Daily market data capture for backtesting
+            capture_date = event.get("capture_date")
+            force = event.get("force", False)
+            logger.info(
+                f"Received daily_data_capture event "
+                f"(date={capture_date or 'auto'}, force={force})"
+            )
+            return asyncio.run(_run_daily_data_capture(capture_date, force))
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

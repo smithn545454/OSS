@@ -286,6 +286,32 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for daily market data capture for backtesting
+        # Runs once daily at 5:00 PM ET (22:00 UTC) after market close on weekdays
+        # Captures stock OHLCV, options chains, IV history, and market context to S3
+        self.data_capture_rule = events.Rule(
+            self,
+            "DailyDataCaptureRule",
+            rule_name=f"{project_name}-{env_name}-daily-data-capture",
+            description="Capture daily market data for backtesting after market close",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="22",
+                week_day="MON-FRI",
+            ),
+            enabled=True,
+        )
+
+        self.data_capture_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "daily_data_capture",
+                }),
+            )
+        )
+
         # Outputs
         CfnOutput(
             self,

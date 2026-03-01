@@ -91,12 +91,21 @@ def extract_ticker(filepath: Path) -> str:
 
 
 def discover_quarter_dirs(input_dir: Path) -> list[tuple[str, Path]]:
-    quarters = []
+    raw: dict[str, list[Path]] = {}
     for entry in input_dir.iterdir():
         if entry.is_dir():
             match = re.match(r"^(\d{4}_q\d)_option_chain", entry.name)
             if match:
-                quarters.append((match.group(1), entry))
+                label = match.group(1)
+                raw.setdefault(label, []).append(entry)
+    # When multiple dirs share a quarter label, prefer the one with "_updated"
+    quarters = []
+    for label, dirs in raw.items():
+        if len(dirs) == 1:
+            quarters.append((label, dirs[0]))
+        else:
+            updated = [d for d in dirs if "updated" in d.name]
+            quarters.append((label, updated[0] if updated else sorted(dirs)[-1]))
     return sorted(quarters)
 
 
