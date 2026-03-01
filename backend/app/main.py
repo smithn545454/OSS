@@ -587,10 +587,19 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
         # Use existing run_id if provided (created by API endpoint), else create new
         existing_run_id = event.get("run_id")
         if existing_run_id:
-            # Load the existing run and update it
-            run = await create_backtest_run(
-                config, persist=True, run_id=existing_run_id
-            )
+            # Run was already created by the API endpoint — load it, don't re-create
+            # (re-creating overwrites the record with a different created_at timestamp)
+            from app.core.schemas import BacktestRun
+            run_data = await BacktestRunTable.get(existing_run_id)
+            if run_data:
+                run = BacktestRun(**run_data)
+            else:
+                logger.warning(
+                    f"Run {existing_run_id} not found in DB, creating new"
+                )
+                run = await create_backtest_run(
+                    config, persist=True, run_id=existing_run_id
+                )
         else:
             run = await create_backtest_run(config, persist=True)
         run_id = run.run_id

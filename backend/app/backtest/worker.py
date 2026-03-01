@@ -3,22 +3,30 @@
 Processes a batch of trading days for a backtest run:
 1. For each day, instantiate a HistoricalDataProvider
 2. Run pipeline stages 1-7 (suppress side effects)
-3. For each APPROVE/WATCH evaluation, resolve exit via exit_resolver
+3. Batch-resolve exits for all APPROVE/WATCH evaluations using date-ordered
+   forward scan (O(dates) S3 reads, not O(trades * dates))
 4. Write BacktestTrades to DynamoDB
 5. Update run progress
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date
 from typing import Any
 
-from app.backtest.exit_resolver import apply_entry_slippage, resolve_exit
+from app.backtest.exit_resolver import (
+    PendingTrade,
+    _make_trade,
+    _next_trading_day,
+    apply_entry_slippage,
+    create_pending_trade,
+    resolve_exits_batch,
+)
 from app.core.schemas import (
     BacktestRunConfig,
     BacktestTrade,
+    ExitReason,
     Verdict,
 )
 from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
@@ -33,7 +41,7 @@ async def process_day(
     data_provider: Any,
     persist: bool = True,
 ) -> list[BacktestTrade]:
-    """Process a single trading day through the full pipeline.
+    """Process a single trading day through the full pipeline + exit resolution.
 
     Args:
         run_id: Backtest run ID
@@ -64,14 +72,6 @@ async def process_day(
         )
 
         # Run the full pipeline (stages 1-7)
-        # Side effects are naturally suppressed because:
-        # - No SlackClient configured → no Slack notifications
-        # - No LLM provider → no thesis generation
-        # - Paper trading positions not created by scanner
-        #
-        # Pass tickers or None: empty list would bypass WatchlistManager
-        # fallback in run_scan(). Passing None lets WatchlistManager resolve
-        # tickers from config → DEFAULT_WATCHLIST.
         tickers = config.policy_snapshot.watchlist.tickers or None
         result = await orchestrator.run_scan(
             policy_config=config.policy_snapshot,
@@ -89,8 +89,9 @@ async def process_day(
                     st.value if hasattr(st, "value") else str(st)
                 )
 
-        # Collect exit resolution tasks for parallel execution
-        exit_tasks: list[Any] = []
+        # Collect pending trades for batch exit resolution
+        pending_trades: list[PendingTrade] = []
+
         for evaluation in result.evaluations:
             decision = result.decisions.get(evaluation.evaluation_id)
             if not decision:
@@ -128,37 +129,49 @@ async def process_day(
             if entry_price <= 0:
                 continue
 
-            market_regime = None
+            verdict_str = verdict.value if hasattr(verdict, "value") else str(verdict)
 
-            exit_tasks.append(
-                resolve_exit(
-                    data_provider=data_provider,
-                    entry_date=as_of_date,
-                    entry_price=entry_price,
-                    option_ticker=option_ticker,
-                    underlying_ticker=underlying_ticker,
-                    option_type=option_type,
-                    strike=strike,
-                    expiration_date=expiration_date,
-                    exit_config=config.exit_rules,
-                    scanner_type=scanner_type,
-                    verdict=verdict.value if hasattr(verdict, "value") else str(verdict),
-                    combined_score=combined_score,
-                    run_id=run_id,
-                    slippage_model=config.slippage_model,
-                    slippage_pct=config.slippage_pct,
-                    market_regime=market_regime,
-                )
+            pt = create_pending_trade(
+                run_id=run_id,
+                entry_date=as_of_date,
+                entry_price=entry_price,
+                underlying_ticker=underlying_ticker,
+                option_ticker=option_ticker,
+                option_type=option_type,
+                strike=strike,
+                expiration_date=expiration_date,
+                exit_config=config.exit_rules,
+                scanner_type=scanner_type,
+                verdict=verdict_str,
+                combined_score=combined_score,
+                slippage_model=config.slippage_model,
+                slippage_pct=config.slippage_pct,
             )
 
-        # Resolve all exits concurrently
-        if exit_tasks:
-            resolved = await asyncio.gather(*exit_tasks, return_exceptions=True)
-            for r in resolved:
-                if isinstance(r, Exception):
-                    logger.error(f"Exit resolution failed: {r}")
-                else:
-                    trades.append(r)
+            if pt is not None:
+                pending_trades.append(pt)
+            else:
+                # Unparseable expiration — immediate exit
+                import uuid
+
+                trades.append(_make_trade(
+                    trade_id=str(uuid.uuid4()), run_id=run_id,
+                    entry_date=as_of_date,
+                    exit_date=_next_trading_day(as_of_date),
+                    ticker=underlying_ticker, option_ticker=option_ticker,
+                    option_type=option_type, strike=strike,
+                    expiration_date=expiration_date,
+                    scanner_type=scanner_type, verdict=verdict_str,
+                    combined_score=combined_score, entry_price=entry_price,
+                    exit_price=0.01,
+                    exit_reason=ExitReason.EXPIRATION.value,
+                    days_held=1,
+                ))
+
+        # Batch-resolve all exits using date-ordered forward scan
+        if pending_trades:
+            resolved = await resolve_exits_batch(data_provider, pending_trades)
+            trades.extend(resolved)
 
         logger.info(
             f"Day {as_of_date}: {len(result.evaluations)} evaluations, "
@@ -210,9 +223,6 @@ async def process_batch(
                 batch_days=days,
             )
 
-    # Process days sequentially within batch (batches already fan out to
-    # separate Lambda invocations, so days are parallelized at infra level).
-    # Exit resolution within each day is concurrent (asyncio.gather in process_day).
     all_trades: list[BacktestTrade] = []
 
     for day in days:

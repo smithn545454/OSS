@@ -4,15 +4,23 @@ Forward-scans through historical options data to determine when and how
 a backtest trade would have been closed. Applies exit rules (stop loss,
 profit target, time exit, max holding, trailing stop) on each trading day
 from entry forward.
+
+Two resolution modes:
+- resolve_exit(): Single-trade resolution (for testing / small runs)
+- resolve_exits_batch(): Date-ordered batch resolution (production path)
+  Loads each forward-date parquet ONCE and resolves ALL open trades per date,
+  reducing S3 reads from O(trades * dates) to O(dates).
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Optional
+
+import pyarrow.compute as pc
 
 from app.core.schemas import (
     BacktestExitConfig,
@@ -25,9 +33,14 @@ from app.paper_trading.exit_checker import check_exit_conditions
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class TradeLifecycle:
-    """Intermediate state tracked during forward-scan exit resolution."""
+    """Intermediate state tracked during single-trade forward-scan."""
 
     entry_date: date
     entry_price: float
@@ -35,7 +48,6 @@ class TradeLifecycle:
     expiration_date: str
     exit_config: BacktestExitConfig
 
-    # Tracking state updated each day
     peak_price: float = 0.0
     trough_price: float = float("inf")
     days_held: int = 0
@@ -43,6 +55,255 @@ class TradeLifecycle:
     def __post_init__(self):
         self.peak_price = self.entry_price
         self.trough_price = self.entry_price
+
+
+@dataclass
+class PendingTrade:
+    """Mutable state for a trade being resolved in batch mode."""
+
+    trade_id: str
+    run_id: str
+    entry_date: date
+    entry_price: float
+    underlying_ticker: str
+    option_ticker: str
+    option_type: str  # normalized: "c" or "p"
+    strike: float
+    expiration_date: str
+    exp_date: date
+    max_scan_date: date
+    exit_config: BacktestExitConfig
+    scanner_type: str
+    verdict: str
+    combined_score: float
+    slippage_model: str
+    slippage_pct: float
+    market_regime: Optional[str]
+    mock_position: PaperPosition = field(repr=False, default=None)  # type: ignore[assignment]
+    peak_price: float = 0.0
+    trough_price: float = float("inf")
+    days_held: int = 0
+
+    def __post_init__(self) -> None:
+        self.peak_price = self.entry_price
+        self.trough_price = self.entry_price
+        if self.mock_position is None:
+            self.mock_position = PaperPosition(
+                position_id=self.trade_id,
+                evaluation_id=self.trade_id,
+                option_ticker=self.option_ticker,
+                underlying_ticker=self.underlying_ticker,
+                entry_price=self.entry_price,
+                entry_date=self.entry_date.isoformat(),
+                status="OPEN",
+                verdict_at_entry=self.verdict,
+                current_price=self.entry_price,
+                current_pnl_pct=0.0,
+            )
+
+
+def create_pending_trade(
+    run_id: str,
+    entry_date: date,
+    entry_price: float,
+    underlying_ticker: str,
+    option_ticker: str,
+    option_type: str,
+    strike: float,
+    expiration_date: str,
+    exit_config: BacktestExitConfig,
+    scanner_type: str,
+    verdict: str,
+    combined_score: float,
+    slippage_model: str = "ask_plus_pct",
+    slippage_pct: float = 0.05,
+    market_regime: Optional[str] = None,
+) -> Optional[PendingTrade]:
+    """Create a PendingTrade for batch resolution.
+
+    Returns None if expiration_date is unparseable.
+    """
+    try:
+        exp_date = date.fromisoformat(expiration_date)
+    except (ValueError, TypeError):
+        return None
+
+    otype = option_type.lower() if option_type else ""
+    otype = "c" if otype in ("call", "c") else "p"
+
+    max_scan_date = min(
+        exp_date, entry_date + timedelta(days=exit_config.max_holding_days + 30)
+    )
+
+    return PendingTrade(
+        trade_id=str(uuid.uuid4()),
+        run_id=run_id,
+        entry_date=entry_date,
+        entry_price=entry_price,
+        underlying_ticker=underlying_ticker,
+        option_ticker=option_ticker,
+        option_type=otype,
+        strike=strike,
+        expiration_date=expiration_date,
+        exp_date=exp_date,
+        max_scan_date=max_scan_date,
+        exit_config=exit_config,
+        scanner_type=scanner_type,
+        verdict=verdict,
+        combined_score=combined_score,
+        slippage_model=slippage_model,
+        slippage_pct=slippage_pct,
+        market_regime=market_regime,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch exit resolution (production path)
+# ---------------------------------------------------------------------------
+
+
+async def resolve_exits_batch(
+    data_provider: Any,
+    pending_trades: list[PendingTrade],
+) -> list[BacktestTrade]:
+    """Resolve exits for all trades using date-ordered forward scan.
+
+    Instead of resolving each trade independently (which loads the same
+    forward-date parquet N times via cache thrashing), this iterates
+    forward dates chronologically and resolves ALL open trades per date.
+
+    Each forward-date parquet is loaded exactly ONCE. A price index is
+    built from the filtered PyArrow table for O(1) per-trade lookups.
+    This reduces S3 reads from O(trades * forward_dates) to O(forward_dates)
+    — typically ~21 reads regardless of trade count.
+
+    Args:
+        data_provider: HistoricalDataProvider with S3 access.
+        pending_trades: Trades to resolve (mutated in place).
+
+    Returns:
+        List of completed BacktestTrade records.
+    """
+    if not pending_trades:
+        return []
+
+    completed: list[BacktestTrade] = []
+
+    # Compute the full forward date window
+    earliest_entry = min(t.entry_date for t in pending_trades)
+    latest_max_scan = max(t.max_scan_date for t in pending_trades)
+
+    forward_dates: list[date] = []
+    current = _next_trading_day(earliest_entry)
+    while current <= latest_max_scan:
+        forward_dates.append(current)
+        current = _next_trading_day(current)
+
+    logger.info(
+        f"Batch exit resolution: {len(pending_trades)} trades, "
+        f"{len(forward_dates)} forward dates to scan"
+    )
+
+    open_trades = list(pending_trades)
+    needed_tickers = {t.underlying_ticker for t in open_trades}
+
+    for fwd_date in forward_dates:
+        if not open_trades:
+            break
+
+        # Load the lite options table for this forward date
+        table = _load_lite_table(data_provider, fwd_date)
+        if table is None:
+            continue
+
+        # Build price index: (ticker, strike_str, expiry, type) -> mid_price
+        price_index = _build_price_index(table, needed_tickers)
+        del table  # Free PyArrow table; index is a plain dict
+
+        still_open: list[PendingTrade] = []
+
+        for trade in open_trades:
+            # Not yet active — this date is before trade's first check day
+            if fwd_date <= trade.entry_date:
+                still_open.append(trade)
+                continue
+
+            # Past max scan date — force exit
+            if fwd_date > trade.max_scan_date:
+                completed.append(_force_exit_trade(trade, data_provider))
+                continue
+
+            trade.days_held += 1
+
+            # Look up price in the pre-built index
+            price = _lookup_price(
+                price_index,
+                trade.underlying_ticker,
+                trade.strike,
+                trade.expiration_date,
+                trade.option_type,
+            )
+
+            if price is None:
+                still_open.append(trade)
+                continue
+
+            # Update MFE/MAE
+            trade.peak_price = max(trade.peak_price, price)
+            trade.trough_price = min(trade.trough_price, price)
+
+            # Check exit conditions
+            current_dte = (trade.exp_date - fwd_date).days
+            exit_reason = check_exit_conditions(
+                position=trade.mock_position,
+                current_price=price,
+                current_dte=current_dte,
+                days_held=trade.days_held,
+                peak_price=trade.peak_price,
+                backtest_exit_config=trade.exit_config,
+            )
+
+            if exit_reason is not None:
+                exit_price = _apply_exit_slippage(
+                    price, trade.slippage_model, trade.slippage_pct,
+                )
+                completed.append(_make_trade(
+                    trade_id=trade.trade_id, run_id=trade.run_id,
+                    entry_date=trade.entry_date, exit_date=fwd_date,
+                    ticker=trade.underlying_ticker,
+                    option_ticker=trade.option_ticker,
+                    option_type=trade.option_type, strike=trade.strike,
+                    expiration_date=trade.expiration_date,
+                    scanner_type=trade.scanner_type, verdict=trade.verdict,
+                    combined_score=trade.combined_score,
+                    entry_price=trade.entry_price, exit_price=exit_price,
+                    exit_reason=exit_reason.value,
+                    days_held=trade.days_held,
+                    peak_price=trade.peak_price,
+                    trough_price=trade.trough_price,
+                    market_regime=trade.market_regime,
+                ))
+            else:
+                still_open.append(trade)
+
+        open_trades = still_open
+        needed_tickers = {t.underlying_ticker for t in open_trades}
+        del price_index
+
+    # Remaining open trades — force exit at their max_scan_date
+    for trade in open_trades:
+        completed.append(_force_exit_trade(trade, data_provider))
+
+    logger.info(
+        f"Batch exit resolution complete: {len(completed)} trades resolved"
+    )
+
+    return completed
+
+
+# ---------------------------------------------------------------------------
+# Single-trade exit resolution (testing / backward compat)
+# ---------------------------------------------------------------------------
 
 
 async def resolve_exit(
@@ -63,40 +324,17 @@ async def resolve_exit(
     slippage_pct: float = 0.05,
     market_regime: Optional[str] = None,
 ) -> BacktestTrade:
-    """Resolve exit for a single backtest trade by forward-scanning historical data.
+    """Resolve exit for a single backtest trade by forward-scanning.
 
-    Starting from entry_date + 1, loads daily options data for the contract
-    and checks exit conditions. Continues until an exit triggers or the
-    contract expires.
-
-    Args:
-        data_provider: DataProvider for historical options data
-        entry_date: Date the trade was entered
-        entry_price: Entry price (post-slippage)
-        option_ticker: The option contract ticker
-        underlying_ticker: Underlying stock ticker
-        option_type: CALL or PUT
-        strike: Strike price
-        expiration_date: Contract expiration (YYYY-MM-DD)
-        exit_config: Exit rule configuration
-        scanner_type: Which scanner generated this opportunity
-        verdict: APPROVE or WATCH
-        combined_score: Pipeline combined score
-        run_id: Backtest run ID
-        slippage_model: How to model exit slippage
-        slippage_pct: Exit slippage percentage
-        market_regime: Optional market regime classification
-
-    Returns:
-        BacktestTrade with complete lifecycle data.
+    For production use, prefer resolve_exits_batch() which is O(dates) instead
+    of O(trades * dates) for S3 reads. This function is kept for testing and
+    small-scale runs.
     """
     trade_id = str(uuid.uuid4())
 
-    # Parse expiration
     try:
         exp_date = date.fromisoformat(expiration_date)
     except (ValueError, TypeError):
-        # Can't resolve without expiration — mark as expired on entry+1
         return _make_trade(
             trade_id=trade_id, run_id=run_id, entry_date=entry_date,
             exit_date=entry_date + timedelta(days=1),
@@ -117,7 +355,6 @@ async def resolve_exit(
         exit_config=exit_config,
     )
 
-    # Build a mock PaperPosition for exit checker compatibility
     mock_position = PaperPosition(
         position_id=trade_id,
         evaluation_id=trade_id,
@@ -131,14 +368,12 @@ async def resolve_exit(
         current_pnl_pct=0.0,
     )
 
-    # Forward-scan from entry_date+1 through expiration
     current = _next_trading_day(entry_date)
     max_scan_date = min(exp_date, entry_date + timedelta(days=exit_config.max_holding_days + 30))
 
     while current <= max_scan_date:
         lifecycle.days_held += 1
 
-        # Get contract price for this day
         current_price = await _get_contract_price(
             data_provider, underlying_ticker, option_ticker, current,
             strike=strike, expiration_date=expiration_date,
@@ -146,18 +381,14 @@ async def resolve_exit(
         )
 
         if current_price is None:
-            # No data for this day — skip (holiday/weekend gap)
             current = _next_trading_day(current)
             continue
 
-        # Update MFE/MAE tracking
         lifecycle.peak_price = max(lifecycle.peak_price, current_price)
         lifecycle.trough_price = min(lifecycle.trough_price, current_price)
 
-        # Calculate DTE
         current_dte = (exp_date - current).days
 
-        # Check exit conditions
         exit_reason = check_exit_conditions(
             position=mock_position,
             current_price=current_price,
@@ -194,7 +425,6 @@ async def resolve_exit(
         option_type=option_type,
     )
     if final_price is None:
-        # Contract expired worthless or no data
         final_price = 0.01
 
     return _make_trade(
@@ -219,17 +449,7 @@ def apply_entry_slippage(
     slippage_model: str,
     slippage_pct: float,
 ) -> float:
-    """Calculate entry price after slippage.
-
-    Args:
-        ask_price: Contract ask price
-        mid_price: Contract mid price
-        slippage_model: "mid" | "ask" | "ask_plus_pct"
-        slippage_pct: Additional slippage percentage
-
-    Returns:
-        Entry price after slippage applied.
-    """
+    """Calculate entry price after slippage."""
     if slippage_model == "mid":
         return mid_price
     elif slippage_model == "ask":
@@ -241,7 +461,7 @@ def apply_entry_slippage(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 
@@ -254,14 +474,8 @@ async def _get_contract_price(
     expiration_date: str = "",
     option_type: str = "",
 ) -> Optional[float]:
-    """Get contract mid price from historical data.
-
-    Uses the lightweight get_contract_price() path when available (column-filtered
-    parquet reads, ~33MB vs ~75MB per file). Falls back to full get_options_chain()
-    for providers that don't support it.
-    """
+    """Get contract mid price from historical data (single-trade path)."""
     try:
-        # Prefer column-filtered reads (HistoricalDataProvider)
         if hasattr(data_provider, "get_contract_price"):
             return await data_provider.get_contract_price(
                 ticker=underlying_ticker,
@@ -271,7 +485,6 @@ async def _get_contract_price(
                 as_of=as_of,
             )
 
-        # Fallback: load full options chain
         chain = await data_provider.get_options_chain(
             underlying_ticker, as_of=as_of, min_dte=0, max_dte=365,
         )
@@ -324,7 +537,6 @@ def _apply_exit_slippage(
     slippage_pct: float,
 ) -> float:
     """Apply exit slippage (selling at bid side)."""
-    # Exit at slightly worse than current price
     return price * (1 - slippage_pct)
 
 
@@ -361,7 +573,6 @@ def _make_trade(
     pnl_dollars = exit_price - entry_price
     pnl_pct = (pnl_dollars / entry_price * 100) if entry_price > 0 else 0.0
 
-    # MFE/MAE as percentage of entry price
     mfe_pct = ((peak_price - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
     mae_pct = ((entry_price - trough_price) / entry_price * 100) if entry_price > 0 else 0.0
 
@@ -388,4 +599,128 @@ def _make_trade(
         mae_pct=round(mae_pct, 2),
         peak_price=round(peak_price, 4),
         market_regime=market_regime,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_lite_table(data_provider: Any, as_of: date) -> Any:
+    """Load column-filtered options chain table for a date.
+
+    Uses the data provider's _read_options_chain_lite() which reads only
+    price-relevant columns (~5 MB vs ~100 MB for full table).
+    """
+    if hasattr(data_provider, "_read_options_chain_lite"):
+        return data_provider._read_options_chain_lite(as_of.isoformat())
+    return None
+
+
+def _build_price_index(
+    table: Any,
+    needed_tickers: set[str],
+) -> dict[tuple[str, str, str, str], float]:
+    """Build (ticker, strike_str, expiry, type) -> mid price lookup dict.
+
+    Filters the PyArrow table to only the tickers we need (reduces 100K+ rows
+    to ~2-3K), then converts to a Python dict for O(1) per-trade lookups.
+    """
+    if table is None or table.num_rows == 0:
+        return {}
+
+    # PyArrow push-down filter to relevant tickers only
+    if needed_tickers and "ticker" in table.column_names:
+        filtered = table.filter(pc.field("ticker").isin(list(needed_tickers)))
+    else:
+        filtered = table
+
+    if filtered.num_rows == 0:
+        return {}
+
+    # Extract columns as Python lists (fast for small filtered result)
+    tickers = filtered.column("ticker").to_pylist()
+    strikes = filtered.column("strike").to_pylist()
+    expiries = filtered.column("expiry_date").to_pylist()
+    types = filtered.column("option_type").to_pylist()
+
+    has_bid = "bid" in filtered.column_names
+    has_ask = "ask" in filtered.column_names
+    has_last = "last_price" in filtered.column_names
+
+    bids = filtered.column("bid").to_pylist() if has_bid else [0.0] * len(tickers)
+    asks = filtered.column("ask").to_pylist() if has_ask else [0.0] * len(tickers)
+    lasts = filtered.column("last_price").to_pylist() if has_last else [0.0] * len(tickers)
+
+    index: dict[tuple[str, str, str, str], float] = {}
+    for i in range(len(tickers)):
+        bid = float(bids[i] or 0)
+        ask = float(asks[i] or 0)
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+        elif float(lasts[i] or 0) > 0:
+            mid = float(lasts[i])
+        else:
+            continue
+
+        strike_str = f"{float(strikes[i] or 0):.2f}"
+        otype = str(types[i] or "").lower()
+        if otype in ("call", "c"):
+            otype = "c"
+        elif otype in ("put", "p"):
+            otype = "p"
+
+        index[(str(tickers[i] or ""), strike_str, str(expiries[i] or ""), otype)] = mid
+
+    return index
+
+
+def _lookup_price(
+    index: dict[tuple[str, str, str, str], float],
+    underlying_ticker: str,
+    strike: float,
+    expiration_date: str,
+    option_type: str,
+) -> Optional[float]:
+    """Look up a contract price in the pre-built index."""
+    strike_str = f"{strike:.2f}"
+    return index.get((underlying_ticker, strike_str, expiration_date, option_type))
+
+
+def _force_exit_trade(
+    trade: PendingTrade,
+    data_provider: Any,
+) -> BacktestTrade:
+    """Create a BacktestTrade for a trade that hit max scan or expiration."""
+    exit_date = trade.max_scan_date
+
+    # Try to get final price on the exit date
+    final_price = None
+    table = _load_lite_table(data_provider, exit_date)
+    if table is not None:
+        idx = _build_price_index(table, {trade.underlying_ticker})
+        final_price = _lookup_price(
+            idx, trade.underlying_ticker, trade.strike,
+            trade.expiration_date, trade.option_type,
+        )
+
+    if final_price is None:
+        final_price = 0.01
+
+    return _make_trade(
+        trade_id=trade.trade_id, run_id=trade.run_id,
+        entry_date=trade.entry_date, exit_date=exit_date,
+        ticker=trade.underlying_ticker,
+        option_ticker=trade.option_ticker,
+        option_type=trade.option_type, strike=trade.strike,
+        expiration_date=trade.expiration_date,
+        scanner_type=trade.scanner_type, verdict=trade.verdict,
+        combined_score=trade.combined_score,
+        entry_price=trade.entry_price, exit_price=final_price,
+        exit_reason=ExitReason.EXPIRATION.value,
+        days_held=trade.days_held,
+        peak_price=trade.peak_price,
+        trough_price=trade.trough_price,
+        market_regime=trade.market_regime,
     )

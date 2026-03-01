@@ -23,8 +23,10 @@ from app.db.backtest_tables import BacktestRunTable
 
 logger = logging.getLogger(__name__)
 
-# Worker batch size — number of trading days per worker invocation
-DAYS_PER_BATCH = 5
+# Worker batch size — number of trading days per worker invocation.
+# Each day's pipeline (~120s) + exit resolution (~45s) ≈ 165s.
+# At 2 days/batch, worst case ≈ 330s, well within 10-min Lambda timeout.
+DAYS_PER_BATCH = 2
 
 
 def generate_trading_days(start_date: date, end_date: date) -> list[date]:
