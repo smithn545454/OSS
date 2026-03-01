@@ -89,6 +89,12 @@ async def process_day(
                     st.value if hasattr(st, "value") else str(st)
                 )
 
+        # Free full options chain table for this day — exit resolution uses
+        # the separate lite _price_cache path, so the full table (~100 MB)
+        # is no longer needed. Prevents OOM during exit resolution.
+        if hasattr(data_provider, "release_options_chain"):
+            data_provider.release_options_chain(as_of_date)
+
         # Collect exit resolution tasks for parallel execution
         exit_tasks: list[Any] = []
         for evaluation in result.evaluations:

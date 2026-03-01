@@ -34,8 +34,11 @@ logger = logging.getLogger(__name__)
 class HistoricalDataProvider:
     """DataProvider backed by S3 parquet files for backtesting."""
 
-    # Max lite tables kept in _price_cache before LRU eviction
-    _PRICE_CACHE_MAX = 15
+    # Max lite tables kept in _price_cache before LRU eviction.
+    # Each lite table is ~73 MB (7 columns x 1.4M rows). Keep low to avoid
+    # OOM during exit resolution. All exit tasks iterate forward dates in
+    # lockstep, so LRU-5 has no thrashing.
+    _PRICE_CACHE_MAX = 5
 
     def __init__(
         self,
@@ -367,11 +370,7 @@ class HistoricalDataProvider:
             & (pc.field("expiry_date") <= max_expiry)
         )
 
-        contracts: list[dict[str, Any]] = []
-        for idx in range(filtered.num_rows):
-            contracts.append(self._row_to_contract(filtered, idx, as_of))
-
-        return contracts
+        return self._table_to_contracts(filtered, as_of)
 
     async def get_options_chain_minimal(
         self,
@@ -496,48 +495,72 @@ class HistoricalDataProvider:
             timestamp=as_of.isoformat(),
         )
 
-    def _row_to_contract(self, table: Any, idx: int, as_of: date) -> dict[str, Any]:
-        """Convert a parquet row to a Polygon-compatible contract dict."""
+    def _table_to_contracts(self, table: Any, as_of: date) -> list[dict[str, Any]]:
+        """Batch-convert a PyArrow table to Polygon-compatible contract dicts.
 
-        def _col(name: str, default: Any = None) -> Any:
-            if name in table.column_names:
-                val = table.column(name)[idx].as_py()
-                return val if val is not None else default
-            return default
+        Uses to_pydict() for a single bulk PyArrow→Python conversion instead
+        of per-element table.column(name)[idx].as_py() calls. ~50x faster
+        for the UV scanner's 280-contract-per-ticker chains.
+        """
+        if table is None or table.num_rows == 0:
+            return []
 
-        strike = _col("strike", 0.0)
-        expiry = str(_col("expiry_date", ""))
-        otype = _col("option_type", "c")
-        bid = _col("bid", 0.0)
-        ask = _col("ask", 0.0)
-        last = _col("last_price", 0.0)
+        cols = table.to_pydict()
+        n = table.num_rows
+        as_of_str = as_of.isoformat()
 
-        return {
-            "details": {
-                "contract_type": "call" if otype in ("c", "C", "call") else "put",
-                "strike_price": strike,
-                "expiration_date": expiry,
-                "ticker": _col("ticker", ""),
-            },
-            "day": {
-                "close": last,
-                "volume": _col("volume", 0),
-                "vwap": (bid + ask) / 2 if (bid + ask) > 0 else last,
-            },
-            "open_interest": _col("open_interest", 0),
-            "implied_volatility": (_col("bid_iv", 0.0) + _col("ask_iv", 0.0)) / 2,
-            "greeks": {
-                "delta": _col("delta", 0.0),
-                "gamma": _col("gamma", 0.0),
-                "theta": _col("theta", 0.0),
-                "vega": _col("vega", 0.0),
-            },
-            "last_quote": {
-                "bid": bid,
-                "ask": ask,
-                "last_updated": as_of.isoformat(),
-            },
-        }
+        # Pre-extract column lists (empty list if column missing)
+        tickers = cols.get("ticker", [None] * n)
+        strikes = cols.get("strike", [0.0] * n)
+        expiries = cols.get("expiry_date", [""] * n)
+        otypes = cols.get("option_type", ["c"] * n)
+        bids = cols.get("bid", [0.0] * n)
+        asks = cols.get("ask", [0.0] * n)
+        lasts = cols.get("last_price", [0.0] * n)
+        volumes = cols.get("volume", [0] * n)
+        ois = cols.get("open_interest", [0] * n)
+        bid_ivs = cols.get("bid_iv", [0.0] * n)
+        ask_ivs = cols.get("ask_iv", [0.0] * n)
+        deltas = cols.get("delta", [0.0] * n)
+        gammas = cols.get("gamma", [0.0] * n)
+        thetas = cols.get("theta", [0.0] * n)
+        vegas = cols.get("vega", [0.0] * n)
+
+        contracts = []
+        for i in range(n):
+            bid = bids[i] or 0.0
+            ask = asks[i] or 0.0
+            last = lasts[i] or 0.0
+            ot = otypes[i] or "c"
+            bid_iv = bid_ivs[i] or 0.0
+            ask_iv = ask_ivs[i] or 0.0
+            contracts.append({
+                "details": {
+                    "contract_type": "call" if ot in ("c", "C", "call") else "put",
+                    "strike_price": strikes[i] or 0.0,
+                    "expiration_date": str(expiries[i] or ""),
+                    "ticker": tickers[i] or "",
+                },
+                "day": {
+                    "close": last,
+                    "volume": volumes[i] or 0,
+                    "vwap": (bid + ask) / 2 if (bid + ask) > 0 else last,
+                },
+                "open_interest": ois[i] or 0,
+                "implied_volatility": (bid_iv + ask_iv) / 2,
+                "greeks": {
+                    "delta": deltas[i] or 0.0,
+                    "gamma": gammas[i] or 0.0,
+                    "theta": thetas[i] or 0.0,
+                    "vega": vegas[i] or 0.0,
+                },
+                "last_quote": {
+                    "bid": bid,
+                    "ask": ask,
+                    "last_updated": as_of_str,
+                },
+            })
+        return contracts
 
     # ------------------------------------------------------------------
     # Volatility / Liquidity history
@@ -697,6 +720,20 @@ class HistoricalDataProvider:
     # ------------------------------------------------------------------
     # Cache management
     # ------------------------------------------------------------------
+
+    def release_options_chain(self, as_of_date: date) -> None:
+        """Free the full options chain table for a specific date from shared cache.
+
+        Called after pipeline phase completes for a day. Exit resolution uses
+        the separate lite _price_cache, so the full table (~100 MB) is no
+        longer needed. This prevents OOM during exit resolution.
+        """
+        key = f"options-chains/date={as_of_date.isoformat()}/data.parquet"
+        idx_key = f"__idx__{key}"
+        if key in self._cache:
+            del self._cache[key]
+        if idx_key in self._cache:
+            del self._cache[idx_key]
 
     def clear_cache(self) -> None:
         """Clear all in-memory caches."""
