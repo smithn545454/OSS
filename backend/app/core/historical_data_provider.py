@@ -3,6 +3,7 @@
 Key design principles:
 - Strict look-ahead bias prevention: ``get_daily_bars()`` uses ``< end_date``
 - In-memory caching of full-day parquet reads (one S3 GET per date per dataset)
+- PyArrow push-down filtering for O(1) ticker lookups in large parquets
 - No earnings/catalyst data (returns None/False)
 """
 
@@ -13,6 +14,7 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from app.core.data_provider import (
@@ -156,26 +158,26 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            tickers = table.column("ticker").to_pylist()
-            for idx, t in enumerate(tickers):
-                if t == ticker:
-                    bars.append(
-                        DailyBar(
-                            ticker=ticker,
-                            date=trade_date,
-                            open=table.column("open")[idx].as_py(),
-                            high=table.column("high")[idx].as_py(),
-                            low=table.column("low")[idx].as_py(),
-                            close=table.column("close")[idx].as_py(),
-                            volume=table.column("volume")[idx].as_py(),
-                            vwap=(
-                                table.column("vwap")[idx].as_py()
-                                if "vwap" in table.column_names
-                                else None
-                            ),
-                        )
+            # PyArrow push-down filter: O(1) vs O(n) Python loop
+            filtered = table.filter(pc.field("ticker") == ticker)
+            if filtered.num_rows > 0:
+                row = filtered.slice(0, 1)
+                bars.append(
+                    DailyBar(
+                        ticker=ticker,
+                        date=trade_date,
+                        open=row.column("open")[0].as_py(),
+                        high=row.column("high")[0].as_py(),
+                        low=row.column("low")[0].as_py(),
+                        close=row.column("close")[0].as_py(),
+                        volume=row.column("volume")[0].as_py(),
+                        vwap=(
+                            row.column("vwap")[0].as_py()
+                            if "vwap" in row.column_names
+                            else None
+                        ),
                     )
-                    break
+                )
 
             if len(bars) >= lookback_days:
                 break
@@ -190,7 +192,6 @@ class HistoricalDataProvider:
     ) -> dict[str, list[DailyBar]]:
         candidate_dates = self._trading_days_before(end_date, lookback_days)
         result: dict[str, list[DailyBar]] = {t: [] for t in tickers}
-        ticker_set = set(tickers)
 
         for trade_date in candidate_dates:
             if trade_date >= end_date.isoformat():
@@ -199,25 +200,30 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            all_tickers = table.column("ticker").to_pylist()
-            for idx, t in enumerate(all_tickers):
-                if t in ticker_set:
-                    result[t].append(
-                        DailyBar(
-                            ticker=t,
-                            date=trade_date,
-                            open=table.column("open")[idx].as_py(),
-                            high=table.column("high")[idx].as_py(),
-                            low=table.column("low")[idx].as_py(),
-                            close=table.column("close")[idx].as_py(),
-                            volume=table.column("volume")[idx].as_py(),
-                            vwap=(
-                                table.column("vwap")[idx].as_py()
-                                if "vwap" in table.column_names
-                                else None
-                            ),
-                        )
+            # PyArrow push-down filter: batch filter for all requested tickers
+            filtered = table.filter(pc.field("ticker").isin(tickers))
+            if filtered.num_rows == 0:
+                continue
+
+            has_vwap = "vwap" in filtered.column_names
+            filtered_tickers = filtered.column("ticker").to_pylist()
+            for idx, t in enumerate(filtered_tickers):
+                result[t].append(
+                    DailyBar(
+                        ticker=t,
+                        date=trade_date,
+                        open=filtered.column("open")[idx].as_py(),
+                        high=filtered.column("high")[idx].as_py(),
+                        low=filtered.column("low")[idx].as_py(),
+                        close=filtered.column("close")[idx].as_py(),
+                        volume=filtered.column("volume")[idx].as_py(),
+                        vwap=(
+                            filtered.column("vwap")[idx].as_py()
+                            if has_vwap
+                            else None
+                        ),
                     )
+                )
 
         return result
 
@@ -283,15 +289,16 @@ class HistoricalDataProvider:
         min_expiry = (as_of + timedelta(days=min_dte)).isoformat()
         max_expiry = (as_of + timedelta(days=max_dte)).isoformat()
 
+        # PyArrow push-down filter: ticker + expiry range
+        filtered = table.filter(
+            (pc.field("ticker") == ticker)
+            & (pc.field("expiry_date") >= min_expiry)
+            & (pc.field("expiry_date") <= max_expiry)
+        )
+
         contracts: list[dict[str, Any]] = []
-        tickers_col = table.column("ticker").to_pylist()
-        for idx, t in enumerate(tickers_col):
-            if t != ticker:
-                continue
-            expiry = str(table.column("expiry_date")[idx].as_py())
-            if expiry < min_expiry or expiry > max_expiry:
-                continue
-            contracts.append(self._row_to_contract(table, idx, as_of))
+        for idx in range(filtered.num_rows):
+            contracts.append(self._row_to_contract(filtered, idx, as_of))
 
         return contracts
 
@@ -328,41 +335,45 @@ class HistoricalDataProvider:
 
         Optimized for exit resolution: reads only price-relevant columns
         (~33MB vs ~75MB per file), reducing memory during 21-day forward scans.
+        Uses PyArrow push-down filters for O(1) lookup in large parquets.
         """
         table = self._read_options_chain_lite(as_of.isoformat())
         if table is None:
             return None
 
         ot_lower = option_type.lower() if option_type else ""
-        target_type = "call" if ot_lower in ("call", "c") else "put"
-
-        tickers_col = table.column("ticker").to_pylist()
-        strikes_col = table.column("strike").to_pylist()
-        expiry_col = table.column("expiry_date").to_pylist()
-        otype_col = table.column("option_type").to_pylist()
+        target_type = "c" if ot_lower in ("call", "c") else "p"
 
         has_bid = "bid" in table.column_names
         has_ask = "ask" in table.column_names
         has_last = "last_price" in table.column_names
 
-        for idx, t in enumerate(tickers_col):
-            if t != ticker:
-                continue
-            c_strike = float(strikes_col[idx] or 0)
-            c_expiry = str(expiry_col[idx] or "")
-            c_type = str(otype_col[idx] or "").lower()
-            if c_type in ("c", "call"):
-                c_type = "call"
-            else:
-                c_type = "put"
+        # PyArrow push-down filter: ticker + expiry + option_type
+        # Strike uses fuzzy match, so filter by ticker first then check strike
+        filtered = table.filter(
+            (pc.field("ticker") == ticker)
+            & (pc.field("expiry_date") == expiration_date)
+            & (
+                (pc.field("option_type") == target_type)
+                | (pc.field("option_type") == ("call" if target_type == "c" else "put"))
+            )
+        )
 
-            strike_match = abs(c_strike - strike) < 0.01
-            if strike_match and c_expiry == expiration_date and c_type == target_type:
-                bid = float(table.column("bid")[idx].as_py() or 0) if has_bid else 0.0
-                ask = float(table.column("ask")[idx].as_py() or 0) if has_ask else 0.0
+        if filtered.num_rows == 0:
+            return None
+
+        strikes_col = filtered.column("strike").to_pylist()
+        for idx, c_strike in enumerate(strikes_col):
+            if abs(float(c_strike or 0) - strike) < 0.01:
+                bid = float(filtered.column("bid")[idx].as_py() or 0) if has_bid else 0.0
+                ask = float(filtered.column("ask")[idx].as_py() or 0) if has_ask else 0.0
                 if bid > 0 and ask > 0:
                     return (bid + ask) / 2
-                last = float(table.column("last_price")[idx].as_py() or 0) if has_last else 0.0
+                last = (
+                    float(filtered.column("last_price")[idx].as_py() or 0)
+                    if has_last
+                    else 0.0
+                )
                 if last > 0:
                     return last
 
@@ -464,17 +475,16 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            tickers_col = table.column("ticker").to_pylist()
-            for idx, t in enumerate(tickers_col):
-                if t == ticker:
-                    records.append(
-                        IVHistoryRecord(
-                            ticker=ticker,
-                            date=trade_date,
-                            atm_iv=table.column("atm_iv")[idx].as_py(),
-                        )
+            # PyArrow push-down filter
+            filtered = table.filter(pc.field("ticker") == ticker)
+            if filtered.num_rows > 0:
+                records.append(
+                    IVHistoryRecord(
+                        ticker=ticker,
+                        date=trade_date,
+                        atm_iv=filtered.column("atm_iv")[0].as_py(),
                     )
-                    break
+                )
 
             if len(records) >= lookback_days:
                 break
@@ -498,25 +508,24 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            # Options parquet has ticker column — search for the contract
-            # Contract format varies; check if any column matches
-            if "ticker" in table.column_names:
-                tickers_col = table.column("ticker").to_pylist()
-                for idx, t in enumerate(tickers_col):
-                    if t == contract:
-                        has_oi = "open_interest" in table.column_names
-                        oi = table.column("open_interest")[idx].as_py() if has_oi else 0
-                        has_vol = "volume" in table.column_names
-                        vol = table.column("volume")[idx].as_py() if has_vol else None
-                        records.append(
-                            OIHistoryRecord(
-                                option_ticker=contract,
-                                date=trade_date,
-                                open_interest=oi or 0,
-                                volume=vol,
-                            )
-                        )
-                        break
+            if "ticker" not in table.column_names:
+                continue
+
+            # PyArrow push-down filter
+            filtered = table.filter(pc.field("ticker") == contract)
+            if filtered.num_rows > 0:
+                has_oi = "open_interest" in filtered.column_names
+                oi = filtered.column("open_interest")[0].as_py() if has_oi else 0
+                has_vol = "volume" in filtered.column_names
+                vol = filtered.column("volume")[0].as_py() if has_vol else None
+                records.append(
+                    OIHistoryRecord(
+                        option_ticker=contract,
+                        date=trade_date,
+                        open_interest=oi or 0,
+                        volume=vol,
+                    )
+                )
 
         return records
 
@@ -532,16 +541,16 @@ class HistoricalDataProvider:
         if table is None:
             return None
 
-        dates = table.column("date").to_pylist()
         target = as_of.isoformat()
-        for idx, d in enumerate(dates):
-            if str(d) == target:
-                return MarketContextData(
-                    date=target,
-                    spy_close=table.column("spy_close")[idx].as_py(),
-                    spy_change_pct=table.column("spy_change_pct")[idx].as_py(),
-                    vix_close=table.column("vix_close")[idx].as_py(),
-                )
+        # PyArrow push-down filter
+        filtered = table.filter(pc.field("date") == target)
+        if filtered.num_rows > 0:
+            return MarketContextData(
+                date=target,
+                spy_close=filtered.column("spy_close")[0].as_py(),
+                spy_change_pct=filtered.column("spy_change_pct")[0].as_py(),
+                vix_close=filtered.column("vix_close")[0].as_py(),
+            )
         return None
 
     # ------------------------------------------------------------------

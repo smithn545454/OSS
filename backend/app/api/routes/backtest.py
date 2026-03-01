@@ -453,6 +453,30 @@ async def _run_backtest_inline(
             await mark_run_failed(run.run_id, error=str(e))
 
 
+@router.post("/capture")
+async def trigger_data_capture(
+    capture_date: Optional[str] = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Trigger daily market data capture for a specific date.
+
+    Captures stock OHLCV, options chains, IV history, and market context
+    from Polygon and writes to S3 in the standard backtest data format.
+
+    Args:
+        capture_date: Date to capture (YYYY-MM-DD). Defaults to today/last trading day.
+        force: If True, overwrite existing data for this date.
+    """
+    from app.data_capture.daily_capture import run_daily_capture
+
+    try:
+        result = await run_daily_capture(capture_date=capture_date, force=force)
+        return result
+    except Exception as e:
+        logger.error(f"Data capture failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
 @router.post("/runs")
 async def create_backtest_run_endpoint(
     request: CreateRunRequest,
