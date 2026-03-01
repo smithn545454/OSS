@@ -3,7 +3,7 @@
 Key design principles:
 - Strict look-ahead bias prevention: ``get_daily_bars()`` uses ``< end_date``
 - In-memory caching of full-day parquet reads (one S3 GET per date per dataset)
-- PyArrow push-down filtering for O(1) ticker lookups in large parquets
+- Pre-indexed ticker lookups: O(1) dict hit + PyArrow take() vs O(N) filter
 - No earnings/catalyst data (returns None/False)
 """
 
@@ -14,6 +14,8 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import numpy as np
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -32,6 +34,9 @@ logger = logging.getLogger(__name__)
 class HistoricalDataProvider:
     """DataProvider backed by S3 parquet files for backtesting."""
 
+    # Max lite tables kept in _price_cache before LRU eviction
+    _PRICE_CACHE_MAX = 15
+
     def __init__(
         self,
         s3_bucket: str,
@@ -41,6 +46,7 @@ class HistoricalDataProvider:
     ) -> None:
         self.s3_bucket = s3_bucket
         self.as_of_date = as_of_date  # Contextual: callers track which date is being processed
+        self.shared_cache = shared_cache
         if s3_client is None:
             import boto3
 
@@ -51,7 +57,51 @@ class HistoricalDataProvider:
         self._cache: dict[str, Any] = shared_cache if shared_cache is not None else {}
         self._market_context_cache: Optional[Any] = None
         # Lightweight cache for exit resolution (column-filtered options reads)
+        # Uses LRU eviction to cap memory during forward-scanning
         self._price_cache: dict[str, Any] = {}
+        # Per-instance ticker indexes for _price_cache tables
+        self._price_ticker_indexes: dict[str, dict[str, np.ndarray]] = {}
+
+    # ------------------------------------------------------------------
+    # Ticker indexing — O(1) lookups instead of O(N) PyArrow filters
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_ticker_index(table: Any) -> dict[str, np.ndarray]:
+        """Build {ticker: int32_row_indices} from a PyArrow table.
+
+        Uses numpy argsort + boundary detection. O(N log N) construction,
+        ~6 MB memory per 1.4M-row table (int32 indices).
+        """
+        if table is None or table.num_rows == 0:
+            return {}
+        ticker_np = table.column("ticker").to_numpy(zero_copy_only=False)
+        order = np.argsort(ticker_np, kind="stable").astype(np.int32)
+        sorted_tickers = ticker_np[order]
+        breaks = np.nonzero(sorted_tickers[1:] != sorted_tickers[:-1])[0] + 1
+        boundaries = np.concatenate([[0], breaks, [len(sorted_tickers)]])
+        index: dict[str, np.ndarray] = {}
+        for i in range(len(boundaries) - 1):
+            index[sorted_tickers[boundaries[i]]] = order[boundaries[i] : boundaries[i + 1]]
+        return index
+
+    def _get_ticker_index(self, cache_key: str, table: Any) -> dict[str, np.ndarray]:
+        """Get or build a ticker index for a cached table.
+
+        Indexes are stored in _cache (shared across providers for the same
+        batch) under ``__idx__<cache_key>`` so they're built once and reused.
+        """
+        idx_key = f"__idx__{cache_key}"
+        existing = self._cache.get(idx_key)
+        if existing is not None:
+            return existing
+        index = self._build_ticker_index(table)
+        self._cache[idx_key] = index
+        return index
+
+    def _take_rows(self, table: Any, indices: np.ndarray) -> Any:
+        """Efficient sub-table extraction using pre-computed row indices."""
+        return table.take(pa.array(indices, type=pa.int32()))
 
     # ------------------------------------------------------------------
     # Internal S3 helpers
@@ -87,9 +137,13 @@ class HistoricalDataProvider:
 
         Uses a separate cache from _read_options_chain to avoid inflating
         memory when the full table is not needed (e.g. exit resolution).
+        LRU eviction caps at _PRICE_CACHE_MAX entries to prevent OOM
+        during exit resolution forward-scanning (~60 unique dates).
         """
         s3_key = f"options-chains/date={trade_date}/data.parquet"
         if s3_key in self._price_cache:
+            # Move to end (most recently used) for LRU
+            self._price_cache[s3_key] = self._price_cache.pop(s3_key)
             return self._price_cache[s3_key]
         # Also check if the full table is already cached — reuse it
         if s3_key in self._cache:
@@ -102,6 +156,12 @@ class HistoricalDataProvider:
             available = set(pf.schema.names)
             cols = [c for c in self._PRICE_COLUMNS if c in available]
             table = pf.read(columns=cols)
+            # LRU eviction — remove oldest entries to stay within memory budget
+            while len(self._price_cache) >= self._PRICE_CACHE_MAX:
+                evicted_key = next(iter(self._price_cache))
+                del self._price_cache[evicted_key]
+                # Also clean up any ticker index for the evicted table
+                self._price_ticker_indexes.pop(evicted_key, None)
             self._price_cache[s3_key] = table
             return table
         except Exception as e:
@@ -158,10 +218,12 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            # PyArrow push-down filter: O(1) vs O(n) Python loop
-            filtered = table.filter(pc.field("ticker") == ticker)
-            if filtered.num_rows > 0:
-                row = filtered.slice(0, 1)
+            # Ticker-indexed lookup: O(1) dict hit + take()
+            s3_key = f"stock-ohlcv/date={trade_date}/data.parquet"
+            index = self._get_ticker_index(s3_key, table)
+            row_indices = index.get(ticker)
+            if row_indices is not None and len(row_indices) > 0:
+                row = self._take_rows(table, row_indices[:1])
                 bars.append(
                     DailyBar(
                         ticker=ticker,
@@ -282,17 +344,26 @@ class HistoricalDataProvider:
         max_dte: int = 120,
     ) -> list[dict[str, Any]]:
         """Read options chain from parquet for as_of date (EOD data)."""
-        table = self._read_options_chain(as_of.isoformat())
+        date_str = as_of.isoformat()
+        table = self._read_options_chain(date_str)
         if table is None:
             return []
 
         min_expiry = (as_of + timedelta(days=min_dte)).isoformat()
         max_expiry = (as_of + timedelta(days=max_dte)).isoformat()
 
-        # PyArrow push-down filter: ticker + expiry range
-        filtered = table.filter(
-            (pc.field("ticker") == ticker)
-            & (pc.field("expiry_date") >= min_expiry)
+        # Ticker-indexed lookup: O(1) dict hit + take() on ~280 rows
+        s3_key = f"options-chains/date={date_str}/data.parquet"
+        index = self._get_ticker_index(s3_key, table)
+        row_indices = index.get(ticker)
+        if row_indices is None or len(row_indices) == 0:
+            return []
+
+        ticker_table = self._take_rows(table, row_indices)
+
+        # Apply DTE filter on the small per-ticker sub-table
+        filtered = ticker_table.filter(
+            (pc.field("expiry_date") >= min_expiry)
             & (pc.field("expiry_date") <= max_expiry)
         )
 
@@ -335,9 +406,10 @@ class HistoricalDataProvider:
 
         Optimized for exit resolution: reads only price-relevant columns
         (~33MB vs ~75MB per file), reducing memory during 21-day forward scans.
-        Uses PyArrow push-down filters for O(1) lookup in large parquets.
+        Uses ticker indexing for O(1) lookup in large parquets.
         """
-        table = self._read_options_chain_lite(as_of.isoformat())
+        date_str = as_of.isoformat()
+        table = self._read_options_chain_lite(date_str)
         if table is None:
             return None
 
@@ -348,11 +420,23 @@ class HistoricalDataProvider:
         has_ask = "ask" in table.column_names
         has_last = "last_price" in table.column_names
 
-        # PyArrow push-down filter: ticker + expiry + option_type
-        # Strike uses fuzzy match, so filter by ticker first then check strike
-        filtered = table.filter(
-            (pc.field("ticker") == ticker)
-            & (pc.field("expiry_date") == expiration_date)
+        # Ticker-indexed lookup on lite table
+        s3_key = f"options-chains/date={date_str}/data.parquet"
+        if s3_key not in self._price_ticker_indexes:
+            if "ticker" in table.column_names:
+                self._price_ticker_indexes[s3_key] = self._build_ticker_index(table)
+            else:
+                self._price_ticker_indexes[s3_key] = {}
+        index = self._price_ticker_indexes[s3_key]
+        row_indices = index.get(ticker)
+        if row_indices is None or len(row_indices) == 0:
+            return None
+
+        ticker_table = self._take_rows(table, row_indices)
+
+        # Filter by expiry + option_type on the small per-ticker sub-table
+        filtered = ticker_table.filter(
+            (pc.field("expiry_date") == expiration_date)
             & (
                 (pc.field("option_type") == target_type)
                 | (pc.field("option_type") == ("call" if target_type == "c" else "put"))
@@ -465,7 +549,40 @@ class HistoricalDataProvider:
         as_of: date,
         lookback_days: int = 252,
     ) -> list[IVHistoryRecord]:
-        records: list[IVHistoryRecord] = []
+        # Fast path: use pre-built combined IV table from prefetch
+        combined_iv = self._cache.get("__combined_iv__")
+        iv_ticker_index = self._cache.get("__iv_ticker_index__")
+        if combined_iv is not None and iv_ticker_index is not None:
+            row_indices = iv_ticker_index.get(ticker)
+            if row_indices is None or len(row_indices) == 0:
+                return []
+            sub = self._take_rows(combined_iv, row_indices)
+            # Filter by date < as_of and sort
+            as_of_str = as_of.isoformat()
+            filtered = sub.filter(pc.field("trade_date") < as_of_str)
+            if filtered.num_rows == 0:
+                return []
+            # Sort by date and take the most recent lookback_days
+            sorted_indices = pc.sort_indices(filtered, sort_keys=[("trade_date", "ascending")])
+            sorted_table = filtered.take(sorted_indices)
+            # Take last N rows
+            start = max(0, sorted_table.num_rows - lookback_days)
+            result_table = sorted_table.slice(start)
+            records: list[IVHistoryRecord] = []
+            dates_col = result_table.column("trade_date").to_pylist()
+            iv_col = result_table.column("atm_iv").to_pylist()
+            for i in range(result_table.num_rows):
+                records.append(
+                    IVHistoryRecord(
+                        ticker=ticker,
+                        date=str(dates_col[i]),
+                        atm_iv=iv_col[i],
+                    )
+                )
+            return records
+
+        # Slow path: per-date iteration with ticker indexing
+        records = []
         candidate_dates = self._trading_days_before(as_of, lookback_days)
 
         for trade_date in candidate_dates:
@@ -475,14 +592,17 @@ class HistoricalDataProvider:
             if table is None:
                 continue
 
-            # PyArrow push-down filter
-            filtered = table.filter(pc.field("ticker") == ticker)
-            if filtered.num_rows > 0:
+            # Ticker-indexed lookup
+            s3_key = f"iv-history/date={trade_date}/data.parquet"
+            index = self._get_ticker_index(s3_key, table)
+            row_indices = index.get(ticker)
+            if row_indices is not None and len(row_indices) > 0:
+                row = self._take_rows(table, row_indices[:1])
                 records.append(
                     IVHistoryRecord(
                         ticker=ticker,
                         date=trade_date,
-                        atm_iv=filtered.column("atm_iv")[0].as_py(),
+                        atm_iv=row.column("atm_iv")[0].as_py(),
                     )
                 )
 
@@ -511,13 +631,16 @@ class HistoricalDataProvider:
             if "ticker" not in table.column_names:
                 continue
 
-            # PyArrow push-down filter
-            filtered = table.filter(pc.field("ticker") == contract)
-            if filtered.num_rows > 0:
-                has_oi = "open_interest" in filtered.column_names
-                oi = filtered.column("open_interest")[0].as_py() if has_oi else 0
-                has_vol = "volume" in filtered.column_names
-                vol = filtered.column("volume")[0].as_py() if has_vol else None
+            # Ticker-indexed lookup (contract tickers are in the same "ticker" col)
+            s3_key = f"options-chains/date={trade_date}/data.parquet"
+            index = self._get_ticker_index(s3_key, table)
+            row_indices = index.get(contract)
+            if row_indices is not None and len(row_indices) > 0:
+                row = self._take_rows(table, row_indices[:1])
+                has_oi = "open_interest" in row.column_names
+                oi = row.column("open_interest")[0].as_py() if has_oi else 0
+                has_vol = "volume" in row.column_names
+                vol = row.column("volume")[0].as_py() if has_vol else None
                 records.append(
                     OIHistoryRecord(
                         option_ticker=contract,
@@ -579,4 +702,5 @@ class HistoricalDataProvider:
         """Clear all in-memory caches."""
         self._cache.clear()
         self._price_cache.clear()
+        self._price_ticker_indexes.clear()
         self._market_context_cache = None

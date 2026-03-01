@@ -68,7 +68,7 @@ class TestGenerateWeekdays:
 class TestComputeDateRanges:
     def test_basic_ranges(self):
         batch = [date(2024, 6, 10), date(2024, 6, 14)]  # Mon-Fri
-        ohlcv, iv, options = _compute_date_ranges(
+        ohlcv, iv, options, uv_vol = _compute_date_ranges(
             batch, ohlcv_lookback=7, iv_lookback=14,
         )
 
@@ -82,12 +82,17 @@ class TestComputeDateRanges:
         # Options: only batch days (no forward scan — exit resolver reads on-demand)
         assert options == batch
 
+        # UV volume: weekdays before batch start (not including batch days)
+        assert all(d < date(2024, 6, 10) for d in uv_vol)
+        assert all(d.weekday() < 5 for d in uv_vol)
+
     def test_only_weekdays(self):
         batch = [date(2024, 1, 8)]
-        ohlcv, iv, options = _compute_date_ranges(batch, ohlcv_lookback=7)
+        ohlcv, iv, options, uv_vol = _compute_date_ranges(batch, ohlcv_lookback=7)
         assert all(d.weekday() < 5 for d in ohlcv)
         assert all(d.weekday() < 5 for d in iv)
         assert all(d.weekday() < 5 for d in options)
+        assert all(d.weekday() < 5 for d in uv_vol)
 
 
 # ============================================================================
@@ -174,6 +179,8 @@ class TestPrefetchBatchData:
             max_workers=2,
         )
 
+        # Should have downloaded files (parquet keys) even though they
+        # don't have the expected schema for IV/UV post-processing
         assert len(cache) > 0
         assert "market-context/data.parquet" in cache
 
@@ -190,7 +197,8 @@ class TestPrefetchBatchData:
             max_workers=2,
         )
 
-        assert cache == {}
+        # No S3 files found, no post-processing indexes created
+        assert len(cache) == 0
 
     def test_s3_called_with_correct_bucket(self):
         parquet_bytes = _make_parquet_bytes()

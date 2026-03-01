@@ -209,12 +209,28 @@ class HistoricalUVScanner(BaseScanner):
     ) -> dict[str, float]:
         """Compute 20-day average volume per contract.
 
-        Loads historical chains for each of the prior 20 trading days
-        and averages volume per option ticker.
+        Fast path: uses pre-computed UV volume index from prefetch
+        (eliminates 20 x get_options_chain calls per ticker).
+
+        Slow path fallback: loads historical chains for each of the
+        prior 20 trading days and averages volume per option ticker.
 
         Returns:
             Dict mapping option_ticker -> average daily volume.
         """
+        # Fast path: pre-computed UV volume index from prefetch
+        dp = context.data_provider
+        shared = getattr(dp, "shared_cache", None)
+        if isinstance(shared, dict):
+            uv_index = shared.get("__uv_volume_index__")
+            if isinstance(uv_index, dict):
+                avg_vol = uv_index.get(ticker, 0.0)
+                if avg_vol > 0:
+                    # Return as {ticker: avg_volume} matching the slow path format
+                    return {ticker: avg_vol}
+                return {}
+
+        # Slow path: load 20 days of chains (for live mode or missing index)
         volume_totals: dict[str, list[int]] = {}
 
         # Sample historical dates (trading days approximation)
