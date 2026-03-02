@@ -620,6 +620,84 @@ async def create_backtest_run_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Max minutes a run can stay RUNNING without completing before auto-finalization.
+STALE_RUN_TIMEOUT_MINUTES = 20
+
+
+async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Check for RUNNING runs that have stalled and auto-finalize them.
+
+    A run is considered stale if it has been RUNNING for longer than
+    STALE_RUN_TIMEOUT_MINUTES. This handles workers that silently fail
+    (timeout, OOM, concurrency throttle) without reporting completion.
+    """
+    from app.backtest.metrics import calculate_metrics
+    from app.core.schemas import BacktestTrade
+
+    now = datetime.now(timezone.utc)
+    updated = []
+
+    for run in runs:
+        if run.get("status") != "RUNNING":
+            updated.append(run)
+            continue
+
+        created_str = run.get("created_at", "")
+        try:
+            created = datetime.fromisoformat(created_str)
+        except (ValueError, TypeError):
+            updated.append(run)
+            continue
+
+        age_minutes = (now - created).total_seconds() / 60
+        if age_minutes < STALE_RUN_TIMEOUT_MINUTES:
+            updated.append(run)
+            continue
+
+        # Stale run — auto-finalize with whatever trades exist
+        run_id = run.get("run_id", "")
+        logger.info(
+            f"Auto-finalizing stale backtest run {run_id} "
+            f"(running for {age_minutes:.0f} min)"
+        )
+        try:
+            trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
+            trades = []
+            for td in trade_dicts:
+                try:
+                    trades.append(BacktestTrade(**td))
+                except Exception:
+                    pass
+
+            starting_capital = 10_000.0
+            config = run.get("config")
+            if isinstance(config, dict):
+                starting_capital = config.get("starting_capital", 10_000.0)
+
+            metrics = calculate_metrics(trades, starting_capital=starting_capital)
+            progress = run.get("progress", {})
+            metrics["total_days"] = int(progress.get("days_completed", 0))
+            metrics["total_batches"] = int(run.get("total_batches", 0))
+            metrics["auto_finalized"] = True
+            metrics["batches_completed"] = int(run.get("batches_completed", 0))
+
+            from app.backtest.coordinator import mark_run_completed
+
+            await mark_run_completed(run_id, summary=metrics)
+            run["status"] = "COMPLETED"
+            run["summary"] = metrics
+            logger.info(
+                f"Auto-finalized run {run_id}: {len(trades)} trades, "
+                f"win_rate={metrics.get('win_rate', 0):.1f}%"
+            )
+        except Exception as e:
+            logger.error(f"Failed to auto-finalize run {run_id}: {e}")
+
+        updated.append(run)
+
+    return updated
+
+
 @router.get("/runs")
 async def list_backtest_runs(
     status: Optional[str] = None,
@@ -633,6 +711,7 @@ async def list_backtest_runs(
     """
     try:
         runs = await BacktestRunTable.list_runs(status=status, limit=limit)
+        runs = await _finalize_stale_runs(runs)
         return {"runs": runs, "count": len(runs)}
     except Exception as e:
         logger.error(f"Error listing backtest runs: {e}")
