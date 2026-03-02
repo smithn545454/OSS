@@ -728,3 +728,21 @@ export function useBacktestInsights(runId: string) {
     staleTime: 60000,
   })
 }
+
+export function useBacktestChat() {
+  return useMutation({
+    mutationFn: ({
+      runId,
+      message,
+      conversationHistory,
+    }: {
+      runId: string
+      message: string
+      conversationHistory?: { role: string; content: string }[]
+    }) =>
+      api.chatWithBacktest(runId, {
+        message,
+        conversation_history: conversationHistory,
+      }),
+  })
+}

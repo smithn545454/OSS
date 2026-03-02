@@ -6,7 +6,7 @@
  * - AI-generated Insights (pattern detection, regime analysis, etc.)
  */
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   ShieldCheck,
   ShieldAlert,
@@ -18,11 +18,14 @@ import {
   XCircle,
   AlertTriangle,
   Brain,
+  Send,
+  MessageSquare,
 } from 'lucide-react'
 import {
   useBacktestRuns,
   useReadinessAssessment,
   useBacktestInsights,
+  useBacktestChat,
 } from '@/hooks/useApi'
 import type {
   BacktestRun,
@@ -200,6 +203,155 @@ function InsightsList({ insights }: { insights: BacktestInsight[] }) {
 }
 
 // ============================================================================
+// Interactive Chat
+// ============================================================================
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+function ChatPanel({ runId }: { runId: string }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const chatMutation = useBacktestChat()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const sendMessage = () => {
+    const text = input.trim()
+    if (!text || chatMutation.isPending) return
+
+    const userMsg: ChatMessage = { role: 'user', content: text }
+    const updatedMessages = [...messages, userMsg]
+    setMessages(updatedMessages)
+    setInput('')
+
+    chatMutation.mutate(
+      {
+        runId,
+        message: text,
+        conversationHistory: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      },
+      {
+        onSuccess: (data) => {
+          const assistantMsg: ChatMessage = {
+            role: 'assistant',
+            content: data.response,
+          }
+          setMessages((prev) => [...prev, assistantMsg])
+        },
+        onError: () => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: 'Sorry, I encountered an error. Please try again.',
+            },
+          ])
+        },
+      }
+    )
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+  }
+
+  const suggestions = [
+    'Which scanner performed best?',
+    'What patterns led to losses?',
+    'How could I improve the win rate?',
+    'Summarize the key takeaways.',
+  ]
+
+  return (
+    <div className="flex flex-col h-[480px]">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto space-y-3 p-4">
+        {messages.length === 0 && (
+          <div className="text-center py-8">
+            <MessageSquare className="w-8 h-8 mx-auto mb-2 text-gray-600" />
+            <p className="text-sm text-gray-500">
+              Ask questions about your backtest results
+            </p>
+            <div className="flex flex-wrap gap-2 justify-center mt-4">
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setInput(s)}
+                  className="text-xs px-3 py-1.5 rounded-full border border-gray-700 text-gray-400 hover:border-cyan-500/50 hover:text-cyan-400 transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg, idx) => (
+          <div
+            key={idx}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
+                msg.role === 'user'
+                  ? 'bg-cyan-600/20 border border-cyan-500/30 text-gray-200'
+                  : 'bg-gray-800 border border-gray-700 text-gray-300'
+              }`}
+            >
+              <div className="whitespace-pre-wrap">{msg.content}</div>
+            </div>
+          </div>
+        ))}
+
+        {chatMutation.isPending && (
+          <div className="flex justify-start">
+            <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5">
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="border-t border-gray-700 p-3">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about your backtest results..."
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-cyan-500 focus:outline-none"
+            disabled={chatMutation.isPending}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={!input.trim() || chatMutation.isPending}
+            className="px-3 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // Run Selector (shared with Results)
 // ============================================================================
 
@@ -303,6 +455,17 @@ export default function AIAdvisorTab() {
               <ReadinessGrid readiness={readinessData.readiness} />
             </div>
           )}
+
+          {/* Interactive Chat */}
+          <div className="bg-gray-900 rounded-lg border border-gray-700 p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <MessageSquare className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-lg font-semibold text-white">
+                Ask the AI Advisor
+              </h2>
+            </div>
+            <ChatPanel runId={selectedRunId} />
+          </div>
 
           {/* AI Insights */}
           <div className="bg-gray-900 rounded-lg border border-gray-700 p-4">

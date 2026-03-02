@@ -1241,6 +1241,28 @@ class BacktestExitConfig(OSSBaseModel):
     trailing_stop_pct: Optional[float] = None  # Enable at e.g. 30%
 
 
+class BacktestGateOverrides(OSSBaseModel):
+    """Per-gate overrides for backtesting.
+
+    Allows disabling specific gates or adjusting thresholds when running
+    against historical data that may lack real-time bid/ask or liquidity.
+    """
+
+    disabled_gates: list[str] = Field(default_factory=list)
+    threshold_overrides: dict[str, float] = Field(default_factory=dict)
+
+
+# Sensible defaults for historical data: relax spread/liquidity gates
+BACKTEST_DEFAULT_GATE_OVERRIDES = BacktestGateOverrides(
+    disabled_gates=[],
+    threshold_overrides={
+        "max_spread_pct": 15.0,   # Historical data uses synthetic spreads
+        "min_open_interest": 50,   # Historical OI may be incomplete
+        "min_volume": 10,          # Historical volume data sparser
+    },
+)
+
+
 class BacktestRunConfig(OSSBaseModel):
     """Configuration for a backtest run."""
 
@@ -1256,6 +1278,9 @@ class BacktestRunConfig(OSSBaseModel):
     slippage_model: str = "ask_plus_pct"  # "mid" | "ask" | "ask_plus_pct"
     slippage_pct: float = 0.05  # 5% slippage on ask price
     exit_rules: BacktestExitConfig = Field(default_factory=BacktestExitConfig)
+    gate_overrides: BacktestGateOverrides = Field(
+        default_factory=lambda: BACKTEST_DEFAULT_GATE_OVERRIDES.model_copy()
+    )
     min_option_volume: int = 50
     min_open_interest: int = 200
     starting_capital: float = 10_000.0

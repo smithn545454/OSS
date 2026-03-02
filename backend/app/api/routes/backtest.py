@@ -387,6 +387,7 @@ class CreateRunRequest(BaseModel):
     slippage_pct: float = 0.05
     exit_rules: Optional[dict[str, Any]] = None
     starting_capital: float = 10_000.0
+    gate_overrides: Optional[dict[str, Any]] = None
 
 
 async def _run_backtest_inline(
@@ -570,6 +571,11 @@ async def create_backtest_run_endpoint(
         if request.exit_rules:
             from app.core.schemas import BacktestExitConfig
             config_kwargs["exit_rules"] = BacktestExitConfig(**request.exit_rules)
+        if request.gate_overrides:
+            from app.core.schemas import BacktestGateOverrides
+            config_kwargs["gate_overrides"] = BacktestGateOverrides(
+                **request.gate_overrides
+            )
 
         config = BacktestRunConfig(**config_kwargs)
 
@@ -624,12 +630,17 @@ async def create_backtest_run_endpoint(
 STALE_RUN_TIMEOUT_MINUTES = 20
 
 
-async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Check for RUNNING runs that have stalled and auto-finalize them.
+ACTIVE_RUN_STATUSES = {"RUNNING", "EVALUATING", "RESOLVING", "FINALIZING"}
 
-    A run is considered stale if it has been RUNNING for longer than
-    STALE_RUN_TIMEOUT_MINUTES. This handles workers that silently fail
+
+async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Check for active runs that have stalled and auto-finalize them.
+
+    A run is considered stale if it has been in an active state for longer
+    than STALE_RUN_TIMEOUT_MINUTES. This handles workers that silently fail
     (timeout, OOM, concurrency throttle) without reporting completion.
+
+    Phase-aware: recognizes EVALUATING, RESOLVING, FINALIZING as active.
     """
     from app.backtest.metrics import calculate_metrics
     from app.core.schemas import BacktestTrade
@@ -638,7 +649,7 @@ async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any
     updated = []
 
     for run in runs:
-        if run.get("status") != "RUNNING":
+        if run.get("status") not in ACTIVE_RUN_STATUSES:
             updated.append(run)
             continue
 
@@ -738,12 +749,19 @@ async def delete_backtest_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
 
     try:
-        # If running, mark as failed first
-        if run.get("status") == "RUNNING":
+        # If active, mark as failed first
+        if run.get("status") in ACTIVE_RUN_STATUSES:
             await BacktestRunTable.update_status(run_id, "FAILED", error="Cancelled by user")
 
         # Delete associated trades
         trades_deleted = await BacktestTradeTable.delete_by_run(run_id)
+
+        # Clean up pending trades (Phase 1 → Phase 2 handoff table)
+        try:
+            from app.db.backtest_pending_table import BacktestPendingTradeTable
+            await BacktestPendingTradeTable.delete_by_run(run_id)
+        except Exception:
+            pass  # Non-blocking: table may not have data
 
         # Delete the run itself
         await BacktestRunTable.delete(run_id)
@@ -1041,6 +1059,50 @@ async def get_readiness_assessment(
         }
     except Exception as e:
         logger.error(f"Error computing readiness for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChatRequest(BaseModel):
+    """Request body for AI chat about a backtest run."""
+    message: str
+    conversation_history: list[dict[str, str]] = Field(default_factory=list)
+
+
+@router.post("/runs/{run_id}/chat")
+async def chat_about_run(
+    run_id: str,
+    request: ChatRequest,
+) -> dict[str, Any]:
+    """Interactive AI chat about a completed backtest run.
+
+    Send a question and get an AI-powered analysis response that references
+    the actual trade data and metrics from the run.
+    """
+    run = await BacktestRunTable.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Backtest run '{run_id}' not found")
+
+    if run.get("status") != "COMPLETED":
+        return {
+            "run_id": run_id,
+            "response": f"Run is {run.get('status')} — chat is only available for completed runs.",
+            "error": "run_not_completed",
+        }
+
+    try:
+        from app.backtest.ai_chat import chat_with_backtest
+
+        s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+        result = await chat_with_backtest(
+            run_id=run_id,
+            message=request.message,
+            conversation_history=request.conversation_history,
+            s3_bucket=s3_bucket,
+        )
+        return {"run_id": run_id, **result}
+
+    except Exception as e:
+        logger.error(f"AI chat failed for run {run_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

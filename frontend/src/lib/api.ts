@@ -657,5 +657,19 @@ export async function getBacktestInsights(
   return fetchApi(`/api/backtest/runs/${encodeURIComponent(runId)}/insights`)
 }
 
+export async function chatWithBacktest(
+  runId: string,
+  request: import('./types').BacktestChatRequest
+): Promise<import('./types').BacktestChatResponse> {
+  return fetchApi(
+    `/api/backtest/runs/${encodeURIComponent(runId)}/chat`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }
+  )
+}
+
 // Export the ApiError for error handling
 export { ApiError }

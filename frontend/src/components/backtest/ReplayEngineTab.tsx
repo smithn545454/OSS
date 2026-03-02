@@ -30,6 +30,9 @@ function RunConfigForm({ onSubmit, isLoading }: {
   const [profitTarget, setProfitTarget] = useState(100)
   const [maxHolding, setMaxHolding] = useState(21)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [maxSpreadPct, setMaxSpreadPct] = useState(15.0)
+  const [minOpenInterest, setMinOpenInterest] = useState(50)
+  const [minVolume, setMinVolume] = useState(10)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,6 +47,13 @@ function RunConfigForm({ onSubmit, isLoading }: {
         stop_loss_pct: stopLoss,
         profit_target_pct: profitTarget,
         max_holding_days: maxHolding,
+      },
+      gate_overrides: {
+        threshold_overrides: {
+          max_spread_pct: maxSpreadPct,
+          min_open_interest: minOpenInterest,
+          min_volume: minVolume,
+        },
       },
     })
   }
@@ -142,6 +152,49 @@ function RunConfigForm({ onSubmit, isLoading }: {
             </div>
           </div>
 
+          {/* Gate Overrides (for historical data) */}
+          <div>
+            <label className="block text-xs font-medium text-oss-muted mb-2">
+              Gate Thresholds (relaxed for historical data)
+            </label>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Max Spread %
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={maxSpreadPct}
+                  onChange={(e) => setMaxSpreadPct(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Min Open Interest
+                </label>
+                <input
+                  type="number"
+                  value={minOpenInterest}
+                  onChange={(e) => setMinOpenInterest(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Min Volume
+                </label>
+                <input
+                  type="number"
+                  value={minVolume}
+                  onChange={(e) => setMinVolume(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Exit Rules */}
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -202,20 +255,38 @@ function RunConfigForm({ onSubmit, isLoading }: {
 // Status Badge
 // ============================================================================
 
+const ACTIVE_STATUSES = new Set(['RUNNING', 'EVALUATING', 'RESOLVING', 'FINALIZING', 'PENDING'])
+
+const STATUS_LABELS: Record<string, string> = {
+  EVALUATING: 'Phase 1: Evaluating',
+  RESOLVING: 'Phase 2: Resolving',
+  FINALIZING: 'Phase 3: Finalizing',
+}
+
 function StatusBadge({ status }: { status: string }) {
+  const isActive = status === 'RUNNING' || status === 'EVALUATING'
+    || status === 'RESOLVING' || status === 'FINALIZING'
+
   const config = {
     PENDING: { icon: Clock, color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' },
     RUNNING: { icon: Loader2, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+    EVALUATING: { icon: Loader2, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+    RESOLVING: { icon: Loader2, color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
+    FINALIZING: { icon: Loader2, color: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' },
     COMPLETED: { icon: CheckCircle2, color: 'text-green-400 bg-green-400/10 border-green-400/20' },
     FAILED: { icon: XCircle, color: 'text-red-400 bg-red-400/10 border-red-400/20' },
   }[status] ?? { icon: Clock, color: 'text-oss-muted bg-oss-bg border-oss-border' }
 
   const Icon = config.icon
+  const label = STATUS_LABELS[status] ?? status
 
   return (
-    <span className={clsx('inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium', config.color)}>
-      <Icon className={clsx('h-3 w-3', status === 'RUNNING' && 'animate-spin')} />
-      {status}
+    <span className={clsx(
+      'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium',
+      config.color,
+    )}>
+      <Icon className={clsx('h-3 w-3', isActive && 'animate-spin')} />
+      {label}
     </span>
   )
 }
@@ -508,8 +579,8 @@ export default function ReplayEngineTab() {
     }
   }, [runs, selectedRunId])
 
-  // Poll running runs every 5s
-  const hasRunning = runs.some((r) => r.status === 'RUNNING' || r.status === 'PENDING')
+  // Poll active runs every 5s
+  const hasRunning = runs.some((r) => ACTIVE_STATUSES.has(r.status))
 
   useEffect(() => {
     if (!hasRunning) return

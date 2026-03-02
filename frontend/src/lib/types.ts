@@ -1276,7 +1276,14 @@ export interface DataStoreValidationResponse {
   timestamp: string
 }
 
-export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+export type BacktestRunStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'EVALUATING'
+  | 'RESOLVING'
+  | 'FINALIZING'
+  | 'COMPLETED'
+  | 'FAILED'
 
 export interface BacktestRun {
   run_id: string
@@ -1284,9 +1291,15 @@ export interface BacktestRun {
   status: BacktestRunStatus
   config: Record<string, unknown>
   progress: {
+    phase?: string
     days_completed: number
     days_total: number
     trades_found?: number
+    trades_resolved?: number
+    phase1_workers_total?: number
+    phase1_workers_completed?: number
+    phase2_workers_total?: number
+    phase2_workers_completed?: number
   }
   summary: Record<string, unknown> | null
   created_at: string
@@ -1330,6 +1343,11 @@ export interface BacktestTradesResponse {
   total_in_run: number
 }
 
+export interface BacktestGateOverrides {
+  disabled_gates?: string[]
+  threshold_overrides?: Record<string, number>
+}
+
 export interface CreateBacktestRunRequest {
   name: string
   start_date: string
@@ -1346,6 +1364,7 @@ export interface CreateBacktestRunRequest {
     trailing_stop_pct?: number | null
   }
   starting_capital?: number
+  gate_overrides?: BacktestGateOverrides
 }
 
 export interface CreateBacktestRunResponse {
@@ -1496,4 +1515,17 @@ export interface InsightsResponse {
   run_id: string
   insights: BacktestInsight[]
   count: number
+}
+
+export interface BacktestChatRequest {
+  message: string
+  conversation_history?: { role: string; content: string }[]
+}
+
+export interface BacktestChatResponse {
+  run_id: string
+  response: string
+  tokens_used?: number
+  model?: string
+  error?: string
 }

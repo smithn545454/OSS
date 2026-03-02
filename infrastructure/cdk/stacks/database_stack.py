@@ -360,7 +360,31 @@ class DatabaseStack(Stack):
             ),
         )
 
-        # 15. Backtest insights table
+        # 15. Backtest pending trades table (Phase 1 → Phase 2 handoff)
+        self.backtest_pending_trades_table = dynamodb.Table(
+            self,
+            "BacktestPendingTradesTable",
+            table_name=f"{self.table_prefix}-backtest-pending-trades",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.backtest_pending_trades_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
+        # 16. Backtest insights table
         self.backtest_insights_table = dynamodb.Table(
             self,
             "BacktestInsightsTable",
@@ -406,6 +430,7 @@ class DatabaseStack(Stack):
             self.earnings_cache_table,
             self.backtest_runs_table,
             self.backtest_trades_table,
+            self.backtest_pending_trades_table,
             self.backtest_insights_table,
             self.calibration_reports_table,
         ]
