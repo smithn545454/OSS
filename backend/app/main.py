@@ -649,25 +649,12 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
-        logger.info(
-            f"Backtest run {run_id}: {len(day_batches)} day-batches × "
-            f"{len(ticker_chunks)} ticker-chunks = {total_batches} workers "
-            f"({len(all_tickers)} tickers, {TICKERS_PER_CHUNK}/chunk)"
-        )
-
-        # Fan out to parallel worker Lambdas
-        import boto3
-
-        function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
-        lambda_client = boto3.client("lambda")
-
-        dispatched = 0
-        errors: list[str] = []
+        # Build all worker payloads
+        all_payloads: list[dict[str, Any]] = []
         idx = 0
-
         for day_batch in day_batches:
             for chunk in ticker_chunks:
-                payload = {
+                all_payloads.append({
                     "source": "oss.scheduler",
                     "action": "backtest_worker",
                     "run_id": run_id,
@@ -677,29 +664,57 @@ async def _run_backtest_coordinator(event: dict[str, Any]) -> dict[str, Any]:
                     "batch_index": idx,
                     "total_batches": total_batches,
                     "s3_bucket": s3_bucket,
-                }
-
-                try:
-                    lambda_client.invoke(
-                        FunctionName=function_name,
-                        InvocationType="Event",
-                        Payload=json.dumps(payload),
-                    )
-                    dispatched += 1
-                except Exception as e:
-                    errors.append(f"Failed to dispatch batch {idx}: {e}")
+                })
                 idx += 1
 
+        # Throttled dispatch: only run MAX_CONCURRENT_WORKERS at a time
+        # to leave Lambda concurrency slots free for API requests.
+        # Completing workers chain-dispatch the next pending batch.
+        MAX_CONCURRENT_WORKERS = 7
+        initial = all_payloads[:MAX_CONCURRENT_WORKERS]
+        remaining = all_payloads[MAX_CONCURRENT_WORKERS:]
+
+        # Store remaining payloads in DynamoDB for workers to pop
+        if remaining:
+            await BacktestRunTable.store_pending_batches(run_id, remaining)
+
         logger.info(
-            f"Backtest coordinator dispatched {dispatched}/{total_batches} workers "
-            f"for run {run_id}"
+            f"Backtest run {run_id}: {len(day_batches)} day-batches × "
+            f"{len(ticker_chunks)} ticker-chunks = {total_batches} workers "
+            f"({len(all_tickers)} tickers, {TICKERS_PER_CHUNK}/chunk), "
+            f"dispatching {len(initial)} now, {len(remaining)} queued"
+        )
+
+        # Fan out initial batch of workers
+        import boto3
+
+        function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+        lambda_client = boto3.client("lambda")
+
+        dispatched = 0
+        errors: list[str] = []
+
+        for payload in initial:
+            try:
+                lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+                dispatched += 1
+            except Exception as e:
+                errors.append(f"Failed to dispatch batch {payload['batch_index']}: {e}")
+
+        logger.info(
+            f"Backtest coordinator dispatched {dispatched}/{len(initial)} initial workers "
+            f"for run {run_id} ({len(remaining)} pending in queue)"
         )
 
         if dispatched == 0:
             await mark_run_failed(run_id, error="Failed to dispatch any worker Lambdas")
 
         return {
-            "status": "success" if dispatched == total_batches else "partial_success",
+            "status": "success" if dispatched == len(initial) else "partial_success",
             "run_id": run_id,
             "mode": "fan_out",
             "batches_dispatched": dispatched,
@@ -789,6 +804,26 @@ async def _run_backtest_worker(event: dict[str, Any]) -> dict[str, Any]:
             f"Backtest worker batch {batch_index} done: "
             f"{batches_completed}/{total_batches} batches completed for run {run_id}"
         )
+
+        # Chain-dispatch: pop next pending batch and invoke it.
+        # This keeps a steady stream of workers without saturating concurrency.
+        next_batch = await BacktestRunTable.pop_pending_batch(run_id)
+        if next_batch:
+            try:
+                import boto3 as _boto3
+
+                fn = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+                _boto3.client("lambda").invoke(
+                    FunctionName=fn,
+                    InvocationType="Event",
+                    Payload=json.dumps(next_batch),
+                )
+                logger.info(
+                    f"Chain-dispatched batch {next_batch.get('batch_index')} "
+                    f"for run {run_id}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to chain-dispatch next batch: {e}")
 
         if batches_completed >= total_batches:
             # Last worker — compute final metrics and mark run COMPLETED

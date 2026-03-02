@@ -176,6 +176,63 @@ class BacktestRunTable:
         return int(attrs.get("batches_completed", 0))
 
     @staticmethod
+    async def store_pending_batches(run_id: str, batches: list[dict]) -> None:
+        """Store pending batch payloads as a JSON string on the run record."""
+        import json as _json
+
+        db = get_dynamodb()
+        await db.update_item(
+            BacktestRunTable.TABLE_SUFFIX, f"RUN#{run_id}", "META",
+            {"pending_batches": _json.dumps(batches)},
+        )
+
+    @staticmethod
+    async def pop_pending_batch(run_id: str) -> Optional[dict]:
+        """Atomically pop the first pending batch payload. Returns None if empty.
+
+        Uses a conditional update to avoid race conditions between workers.
+        """
+        import json as _json
+
+        db = get_dynamodb()
+        # Read current pending_batches
+        run = await BacktestRunTable.get(run_id)
+        if not run:
+            return None
+
+        pending_str = run.get("pending_batches", "[]")
+        try:
+            pending = _json.loads(pending_str) if isinstance(pending_str, str) else []
+        except (ValueError, TypeError):
+            return None
+
+        if not pending:
+            return None
+
+        # Pop first item and write back atomically with condition
+        batch = pending[0]
+        remaining = pending[1:]
+        table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
+
+        try:
+            table.update_item(
+                Key={"PK": f"RUN#{run_id}", "SK": "META"},
+                UpdateExpression="SET pending_batches = :remaining",
+                ConditionExpression="pending_batches = :current",
+                ExpressionAttributeValues={
+                    ":remaining": _json.dumps(remaining),
+                    ":current": pending_str,
+                },
+            )
+            return batch
+        except Exception as e:
+            if "ConditionalCheckFailed" in str(e):
+                # Another worker already popped — retry once
+                return await BacktestRunTable.pop_pending_batch(run_id)
+            logger.warning(f"Failed to pop pending batch for {run_id}: {e}")
+            return None
+
+    @staticmethod
     async def list_runs(
         status: Optional[str] = None, limit: int = 50
     ) -> list[dict[str, Any]]:
