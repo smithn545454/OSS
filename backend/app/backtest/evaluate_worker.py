@@ -33,13 +33,13 @@ def apply_gate_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
 
     The ScannerOrchestrator reads gate thresholds from policy_config.gates,
     so we inject overrides there before the scan runs.
+
+    All models are frozen (OSSBaseModel), so we use model_copy(update=...)
+    to produce new immutable instances rather than mutating in place.
     """
     overrides = config.gate_overrides
     if not overrides.threshold_overrides and not overrides.disabled_gates:
         return config
-
-    # Deep copy so we don't mutate the original
-    config = config.model_copy(deep=True)
 
     gate_dict = {}
     if config.policy_snapshot.gates:
@@ -51,8 +51,9 @@ def apply_gate_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
         if key in gate_dict:
             gate_dict[key] = value
 
-    config.policy_snapshot.gates = GateConfig(**gate_dict)
-    return config
+    new_gates = GateConfig(**gate_dict)
+    new_policy = config.policy_snapshot.model_copy(update={"gates": new_gates})
+    return config.model_copy(update={"policy_snapshot": new_policy})
 
 
 async def evaluate_day(
