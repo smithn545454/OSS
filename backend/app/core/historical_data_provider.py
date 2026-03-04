@@ -298,9 +298,13 @@ class HistoricalDataProvider:
         )
 
         if filtered.num_rows == 0:
-            logger.debug(
+            # Check column types for debugging
+            expiry_col = table.schema.field("expiry_date")
+            logger.info(
                 f"[HDP] 0 contracts for {ticker} on {as_of} "
-                f"(expiry {min_expiry}-{max_expiry}, table rows: {table.num_rows})"
+                f"(expiry {min_expiry}-{max_expiry}, "
+                f"table rows: {table.num_rows}, "
+                f"expiry_type: {expiry_col.type})"
             )
 
         contracts: list[dict[str, Any]] = []

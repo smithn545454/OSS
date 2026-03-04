@@ -950,15 +950,26 @@ class ScannerOrchestrator:
         )
 
         # Stream: one opportunity at a time through stages 3-7
+        skip_no_snapshot = 0
+        skip_bad_price = 0
+        skip_no_chain = 0
+        skip_error = 0
+        skip_no_candidates = 0
+
         for opp_idx, opportunity in enumerate(filtered_opportunities):
             ticker = opportunity.underlying_ticker
             snapshot = snapshots.get(ticker)
             if not snapshot:
-                logger.debug(f"[Streaming] No snapshot for {ticker}, skipping")
+                skip_no_snapshot += 1
+                logger.info(f"[Streaming] No snapshot for {ticker}, skipping")
                 continue
 
             underlying_price = snapshot.close
             if underlying_price <= 0:
+                skip_bad_price += 1
+                logger.info(
+                    f"[Streaming] Bad price for {ticker}: close={underlying_price}, skipping"
+                )
                 continue
 
             # ----------------------------------------------------------
@@ -970,7 +981,8 @@ class ScannerOrchestrator:
                 ) if data_provider else []
 
                 if not chain:
-                    logger.debug(
+                    skip_no_chain += 1
+                    logger.info(
                         f"[Streaming] No options chain for {ticker} on {effective_date}"
                     )
                     continue
@@ -978,8 +990,18 @@ class ScannerOrchestrator:
                 ticker_candidates = await contract_selector._select_for_ticker(
                     ticker, underlying_price, chain,
                 )
+                if not ticker_candidates:
+                    skip_no_candidates += 1
+                    logger.info(
+                        f"[Streaming] No candidates for {ticker}: "
+                        f"chain={len(chain)}, price={underlying_price:.2f}"
+                    )
             except Exception as e:
-                logger.error(f"[Streaming] Contract selection failed for {ticker}: {e}")
+                skip_error += 1
+                logger.error(
+                    f"[Streaming] Contract selection failed for {ticker}: {e}",
+                    exc_info=True,
+                )
                 continue
 
             # Build evaluations for this ticker's candidates
@@ -1077,6 +1099,14 @@ class ScannerOrchestrator:
                 # gate_evaluations) go out of scope and are GC'd on next iteration
 
             all_evaluations.extend(ticker_evaluations)
+
+        # Diagnostic summary
+        logger.info(
+            f"[Streaming] Complete: {len(filtered_opportunities)} opps → "
+            f"{stage3_out} evals. Skips: no_snapshot={skip_no_snapshot}, "
+            f"bad_price={skip_bad_price}, no_chain={skip_no_chain}, "
+            f"no_candidates={skip_no_candidates}, error={skip_error}"
+        )
 
         # Record aggregate stage events (one per stage, summarizing all streaming evals)
         await self._pipeline.record_stage_event(
