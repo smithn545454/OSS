@@ -12,6 +12,7 @@ from typing import Optional, Sequence
 from app.core.schemas import (
     Evaluation,
     GateConfig,
+    GateOperator,
     GateResult,
     Opportunity,
 )
@@ -90,8 +91,8 @@ class GateCalculator:
                     passed=True,
                     measured_value=0.0,
                     threshold_value=0.0,
-                    operator="disabled",
-                    units="backtest_override",
+                    operator=GateOperator.EQUALS,
+                    units="disabled",
                     reason_code=f"{gate_id}_DISABLED",
                     notes="Gate disabled via backtest override",
                 ))
