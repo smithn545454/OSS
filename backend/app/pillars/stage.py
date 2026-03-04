@@ -45,7 +45,7 @@ class PillarScoringStage:
             orchestrator: Pipeline orchestrator for event tracking
             config: Pillar scoring configuration
         """
-        self._orchestrator = orchestrator
+        self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = config or PillarConfig()
         self._calculator = PillarCalculator(config)
     

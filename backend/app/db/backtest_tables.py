@@ -133,12 +133,19 @@ class BacktestRunTable:
                 "trades_found": int(progress.get("trades_found", 0)),
             }
 
-        response = table.update_item(
-            Key={"PK": f"RUN#{run_id}", "SK": "META"},
-            UpdateExpression="ADD " + ", ".join(add_parts),
-            ExpressionAttributeValues=expr_values,
-            ReturnValues="ALL_NEW",
-        )
+        try:
+            response = table.update_item(
+                Key={"PK": f"RUN#{run_id}", "SK": "META"},
+                UpdateExpression="ADD " + ", ".join(add_parts),
+                ExpressionAttributeValues=expr_values,
+                ConditionExpression="attribute_exists(PK)",
+                ReturnValues="ALL_NEW",
+            )
+        except table.meta.client.exceptions.ConditionalCheckFailedException:
+            logger.warning(
+                f"Run {run_id} not found (deleted?), skipping increment"
+            )
+            return {"days_completed": 0, "trades_found": 0}
 
         attrs = response.get("Attributes", {})
         progress = attrs.get("progress", {})
@@ -166,12 +173,20 @@ class BacktestRunTable:
         """
         db = get_dynamodb()
         table = db.get_table(BacktestRunTable.TABLE_SUFFIX)
-        response = table.update_item(
-            Key={"PK": f"RUN#{run_id}", "SK": "META"},
-            UpdateExpression="ADD batches_completed :inc",
-            ExpressionAttributeValues={":inc": 1},
-            ReturnValues="ALL_NEW",
-        )
+        try:
+            response = table.update_item(
+                Key={"PK": f"RUN#{run_id}", "SK": "META"},
+                UpdateExpression="ADD batches_completed :inc",
+                ExpressionAttributeValues={":inc": 1},
+                ConditionExpression="attribute_exists(PK)",
+                ReturnValues="ALL_NEW",
+            )
+        except table.meta.client.exceptions.ConditionalCheckFailedException:
+            logger.warning(
+                f"Run {run_id} not found (deleted?), "
+                "skipping batch increment"
+            )
+            return 0
         attrs = response.get("Attributes", {})
         return int(attrs.get("batches_completed", 0))
 

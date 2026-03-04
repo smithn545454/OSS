@@ -46,7 +46,7 @@ class HardGatesStage:
             orchestrator: Pipeline orchestrator for event tracking
             config: Gate configuration with thresholds
         """
-        self._orchestrator = orchestrator
+        self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = config or GateConfig()
         self._calculator = GateCalculator(config)
     

@@ -47,7 +47,7 @@ class PaperTradingStage:
             orchestrator: Pipeline orchestrator for event tracking
             config: Optional tracking configuration
         """
-        self._orchestrator = orchestrator
+        self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = config or TrackingConfig()
     
     async def execute(

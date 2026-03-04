@@ -65,7 +65,7 @@ class DecisionStage:
             pillar_weights: Weights for combining pillar scores
             thesis_config: LLM thesis generation configuration
         """
-        self._orchestrator = orchestrator
+        self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = decision_config or DecisionConfig()
         self._weights = pillar_weights or PillarWeights()
         self._thesis_config = thesis_config or ThesisConfig()
