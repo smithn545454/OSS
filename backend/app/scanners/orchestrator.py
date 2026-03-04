@@ -906,7 +906,6 @@ class ScannerOrchestrator:
         """
         from app.core.schemas import Verdict
         from app.decision.stage import run_decision_logic
-        from app.features.stage import run_feature_computation
         from app.gates.stage import run_hard_gates
         from app.pillars.stage import run_pillar_scoring
 
@@ -956,6 +955,41 @@ class ScannerOrchestrator:
             chains_by_ticker = await data_provider.get_options_chain_batch(
                 tickers, as_of=effective_date, min_dte=7, max_dte=120,
             )
+
+        # Pre-create a shared FeatureComputer for all evaluations.
+        # Pre-fetch daily bars + IV history once to avoid per-eval S3 round-trips.
+        from app.features.calculator import FeatureComputer
+        shared_feature_computer = FeatureComputer(
+            config=policy_config.features,
+            data_provider=data_provider,
+            as_of_date=effective_date,
+        )
+        # Pre-populate underlying bars cache for all tickers
+        all_tickers_plus_spy = tickers + [policy_config.features.rs_benchmark_ticker]
+        if data_provider:
+            bars_by_ticker = await data_provider.get_daily_bars_batch(
+                all_tickers_plus_spy, end_date=effective_date, lookback_days=60,
+            )
+            shared_feature_computer._underlying_bars_cache.update(bars_by_ticker)
+            shared_feature_computer._spy_bars = bars_by_ticker.get(
+                policy_config.features.rs_benchmark_ticker
+            )
+        # Pre-fetch IV history for all tickers (one pass through cached parquets)
+        shared_iv_history: dict = {}
+        if data_provider and hasattr(data_provider, "get_iv_history"):
+            import asyncio as _asyncio
+
+            async def _fetch_iv(t: str):
+                try:
+                    return t, await data_provider.get_iv_history(
+                        t, as_of=effective_date,
+                        lookback_days=policy_config.features.iv_percentile_lookback_days,
+                    )
+                except Exception:
+                    return t, []
+
+            iv_results = await _asyncio.gather(*[_fetch_iv(t) for t in tickers])
+            shared_iv_history = {t: h for t, h in iv_results if h}
 
         # Stream: one opportunity at a time through stages 3-7
         skip_no_snapshot = 0
@@ -1008,18 +1042,17 @@ class ScannerOrchestrator:
             # Stream each evaluation through stages 4-7
             for eval_obj in ticker_evaluations:
                 try:
-                    # Stage 4: Feature computation (single evaluation)
-                    feature_sets = await run_feature_computation(
-                        run_id=run_id,
-                        evaluations=[eval_obj],
-                        opportunities=[opportunity],
-                        polygon_client=polygon,
-                        orchestrator=None,  # Suppress per-eval stage events
-                        config=policy_config.features,
-                        persist_features=False,  # Backtest — skip DynamoDB writes
-                        data_provider=data_provider,
-                        as_of_date=effective_date,
-                    )
+                    # Stage 4: Feature computation (using shared pre-cached computer)
+                    iv_hist = shared_iv_history.get(ticker)
+                    try:
+                        fs = await shared_feature_computer.compute_features(
+                            evaluation=eval_obj,
+                            opportunity=opportunity,
+                            iv_history=iv_hist,
+                        )
+                        feature_sets = [fs]
+                    except Exception:
+                        feature_sets = []
                     if not feature_sets:
                         continue
                     stage4_out += 1
