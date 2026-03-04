@@ -57,10 +57,13 @@ class HistoricalDataProvider:
     # Internal S3 helpers
     # ------------------------------------------------------------------
 
+    _MISSING = object()  # Sentinel for cached negative lookups
+
     def _read_parquet(self, s3_key: str) -> Optional[Any]:
         """Read a parquet file from S3, returning a pyarrow Table."""
-        if s3_key in self._cache:
-            return self._cache[s3_key]
+        cached = self._cache.get(s3_key, self._MISSING)
+        if cached is not self._MISSING:
+            return cached  # Hit (table or None for cached 404)
         try:
             obj = self.s3.get_object(Bucket=self.s3_bucket, Key=s3_key)
             buf = io.BytesIO(obj["Body"].read())
@@ -69,6 +72,7 @@ class HistoricalDataProvider:
             return table
         except Exception as e:
             if "NoSuchKey" in str(e) or "404" in str(e):
+                self._cache[s3_key] = None  # Cache negative lookups
                 return None
             logger.warning(f"Error reading s3://{self.s3_bucket}/{s3_key}: {e}")
             return None
