@@ -79,7 +79,24 @@ class GateCalculator:
         # Run all gates
         results: list[GateResult] = []
         
+        disabled = set(self._config.disabled_gates) if self._config.disabled_gates else set()
+
         for gate_id, gate_func in ALL_GATES:
+            if gate_id in disabled:
+                results.append(GateResult(
+                    evaluation_id=ctx.evaluation_id,
+                    gate_id=gate_id,
+                    enabled=False,
+                    passed=True,
+                    measured_value=0.0,
+                    threshold_value=0.0,
+                    operator="disabled",
+                    units="backtest_override",
+                    reason_code=f"{gate_id}_DISABLED",
+                    notes="Gate disabled via backtest override",
+                ))
+                continue
+
             try:
                 result = gate_func(ctx, self._config)
                 results.append(result)

@@ -284,6 +284,7 @@ class HistoricalDataProvider:
         """Read options chain from parquet for as_of date (EOD data)."""
         table = self._read_options_chain(as_of.isoformat())
         if table is None:
+            logger.warning(f"[HDP] No options parquet for date={as_of.isoformat()}")
             return []
 
         min_expiry = (as_of + timedelta(days=min_dte)).isoformat()
@@ -295,6 +296,12 @@ class HistoricalDataProvider:
             & (pc.field("expiry_date") >= min_expiry)
             & (pc.field("expiry_date") <= max_expiry)
         )
+
+        if filtered.num_rows == 0:
+            logger.debug(
+                f"[HDP] 0 contracts for {ticker} on {as_of} "
+                f"(expiry {min_expiry}-{max_expiry}, table rows: {table.num_rows})"
+            )
 
         contracts: list[dict[str, Any]] = []
         for idx in range(filtered.num_rows):

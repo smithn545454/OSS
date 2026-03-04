@@ -627,7 +627,7 @@ async def create_backtest_run_endpoint(
 
 
 # Max minutes a run can stay RUNNING without completing before auto-finalization.
-STALE_RUN_TIMEOUT_MINUTES = 20
+STALE_RUN_TIMEOUT_MINUTES = 120
 
 
 ACTIVE_RUN_STATUSES = {"RUNNING", "EVALUATING", "RESOLVING", "FINALIZING"}

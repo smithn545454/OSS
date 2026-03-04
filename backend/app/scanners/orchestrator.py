@@ -137,13 +137,18 @@ class ScannerOrchestrator:
         run_id: Optional[str] = None,
         run_full_pipeline: bool = True,
         as_of_date: Optional[date] = None,
+        streaming: bool = False,
     ) -> ScanRunResult:
         """Run a complete scan across all scanners and pipeline stages.
 
         Executes:
         - Stage 1: Opportunity Discovery (Scanners)
         - Stage 2: Underlying Quality Filters
-        - Stage 3: Contract Selection
+        - Stage 3-7: Contract Selection → Features → Pillars → Gates → Decision
+
+        When ``streaming=True``, stages 3-7 process one opportunity at a time
+        to bound memory usage (backtest mode). When ``False`` (default), all
+        evaluations are accumulated in memory simultaneously (live mode).
 
         Args:
             policy_config: Policy configuration (loads active if not provided)
@@ -151,6 +156,8 @@ class ScannerOrchestrator:
             run_id: Optional run ID for telemetry (creates new if not provided)
             run_full_pipeline: If True, run all stages; if False, only run scanners
             as_of_date: Target date for backtesting (defaults to today for live mode)
+            streaming: If True, stream evaluations through stages 3-7 one at a
+                       time for O(1) memory per evaluation (backtest mode)
 
         Returns:
             ScanRunResult with all opportunities, evaluations, and statistics
@@ -455,9 +462,38 @@ class ScannerOrchestrator:
                     filtered_opportunities = opportunities  # Fall through with unfiltered
 
                 # ================================================================
+                # STREAMING PATH: stages 3-7 one evaluation at a time (backtest)
+                # ================================================================
+                if streaming and filtered_opportunities:
+                    stream_evals, stream_decisions, stream_approve, stream_watch, stream_reject = (
+                        await self._run_stages_3_7_streaming(
+                            run_id=run_id,
+                            filtered_opportunities=filtered_opportunities,
+                            policy_config=policy_config,
+                            policy_version=policy_version,
+                            data_provider=data_provider,
+                            polygon=polygon,
+                            effective_date=effective_date,
+                            earnings_cache=earnings_cache,
+                        )
+                    )
+                    evaluations = stream_evals
+                    decisions = stream_decisions
+                    approve_count = stream_approve
+                    watch_count = stream_watch
+                    reject_count = stream_reject
+
+                    # Mark pipeline run as complete
+                    await self._pipeline.complete_run(run_id, status="completed")
+
+                # ================================================================
+                # BATCH PATH: stages 3-7 all evaluations in memory (live mode)
+                # ================================================================
+
+                # ================================================================
                 # STAGE 3: Contract Selection
                 # ================================================================
-                if filtered_opportunities:
+                elif filtered_opportunities:
                     try:
                         await self._pipeline.update_current_stage(
                             run_id, PipelineStage.CONTRACT_SELECTION
@@ -522,6 +558,12 @@ class ScannerOrchestrator:
                         )
 
                 # ================================================================
+                # STAGE 4-8: Batch path (skipped when streaming handled above)
+                # ================================================================
+                if streaming:
+                    pass  # Stages 3-7 handled by _run_stages_3_7_streaming above
+
+                # ================================================================
                 # STAGE 4: Feature Computation
                 # ================================================================
                 # Lazy imports to avoid circular import issues
@@ -532,7 +574,7 @@ class ScannerOrchestrator:
                 from app.pillars.stage import run_pillar_scoring
 
                 feature_sets: list[FeatureSet] = []
-                if evaluations:
+                if not streaming and evaluations:
                     try:
                         feature_sets = await run_feature_computation(
                             run_id=run_id,
@@ -561,7 +603,7 @@ class ScannerOrchestrator:
                             items_out=0,
                             metadata={"error": str(e), "status": "failed"},
                         )
-                else:
+                elif not streaming:
                     await self._pipeline.record_stage_event(
                         run_id=run_id,
                         stage=PipelineStage.FEATURE_COMPUTATION,
@@ -574,7 +616,7 @@ class ScannerOrchestrator:
                 # STAGE 5: Pillar Scoring
                 # ================================================================
                 pillar_results: dict[str, list[PillarResult]] = {}
-                if evaluations and feature_sets:
+                if not streaming and evaluations and feature_sets:
                     try:
                         pillar_results = await run_pillar_scoring(
                             run_id=run_id,
@@ -601,7 +643,7 @@ class ScannerOrchestrator:
                             items_out=0,
                             metadata={"error": str(e), "status": "failed"},
                         )
-                else:
+                elif not streaming:
                     await self._pipeline.record_stage_event(
                         run_id=run_id,
                         stage=PipelineStage.PILLAR_SCORING,
@@ -614,11 +656,12 @@ class ScannerOrchestrator:
                 # STAGE 6: Hard Gates
                 # ================================================================
                 gate_evaluations: dict[str, GateEvaluation] = {}
-                logger.info(
-                    f"Stage 6 guard: evaluations={len(evaluations) if evaluations else 0}, "
-                    f"feature_sets={len(feature_sets) if feature_sets else 0}"
-                )
-                if evaluations and feature_sets:
+                if not streaming:
+                    logger.info(
+                        f"Stage 6 guard: evaluations={len(evaluations) if evaluations else 0}, "
+                        f"feature_sets={len(feature_sets) if feature_sets else 0}"
+                    )
+                if not streaming and evaluations and feature_sets:
                     try:
                         gate_evaluations = await run_hard_gates(
                             run_id=run_id,
@@ -648,7 +691,7 @@ class ScannerOrchestrator:
                             items_out=0,
                             metadata={"error": str(e), "status": "failed"},
                         )
-                else:
+                elif not streaming:
                     await self._pipeline.record_stage_event(
                         run_id=run_id,
                         stage=PipelineStage.HARD_GATES,
@@ -662,7 +705,7 @@ class ScannerOrchestrator:
                 # ================================================================
                 decisions: dict[str, Decision] = {}
                 theses: list[TradeThesis] = []
-                if evaluations and pillar_results and gate_evaluations:
+                if not streaming and evaluations and pillar_results and gate_evaluations:
                     try:
                         # Build scanner triggers map for LLM context
                         scanner_triggers_map = self._build_scanner_triggers_map(
@@ -717,7 +760,7 @@ class ScannerOrchestrator:
                             items_out=0,
                             metadata={"error": str(e), "status": "failed"},
                         )
-                else:
+                elif not streaming:
                     await self._pipeline.record_stage_event(
                         run_id=run_id,
                         stage=PipelineStage.DECISION_LOGIC,
@@ -727,10 +770,10 @@ class ScannerOrchestrator:
                     )
 
                 # ================================================================
-                # STAGE 8: Paper Trading
+                # STAGE 8: Paper Trading (batch path only — skipped in backtest)
                 # ================================================================
                 paper_trading_results: dict[str, Any] = {}
-                if evaluations and decisions:
+                if not streaming and evaluations and decisions:
                     try:
                         paper_trading_results = await run_paper_trading(
                             run_id=run_id,
@@ -759,7 +802,7 @@ class ScannerOrchestrator:
                             items_out=0,
                             metadata={"error": str(e), "status": "failed"},
                         )
-                else:
+                elif not streaming:
                     await self._pipeline.record_stage_event(
                         run_id=run_id,
                         stage=PipelineStage.PAPER_TRADING,
@@ -768,8 +811,9 @@ class ScannerOrchestrator:
                         metadata={"status": "skipped", "reason": "missing_prerequisites"},
                     )
 
-                # Mark pipeline run as complete
-                await self._pipeline.complete_run(run_id, status="completed")
+                # Mark pipeline run as complete (batch path only)
+                if not streaming:
+                    await self._pipeline.complete_run(run_id, status="completed")
 
         # Calculate duration
         end_time = datetime.now(timezone.utc)
@@ -824,6 +868,260 @@ class ScannerOrchestrator:
         )
 
         return result
+
+    async def _run_stages_3_7_streaming(
+        self,
+        run_id: str,
+        filtered_opportunities: list[Opportunity],
+        policy_config: PolicyConfig,
+        policy_version: str,
+        data_provider: Any,
+        polygon: Any,
+        effective_date: date,
+        earnings_cache: Any,
+    ) -> tuple[list[Evaluation], dict[str, Decision], int, int, int]:
+        """Stream evaluations through stages 3-7, one at a time.
+
+        Instead of accumulating all evaluations in memory simultaneously,
+        this method processes each opportunity individually through the full
+        pipeline (contract selection → features → pillars → gates → decision).
+        Only one evaluation pipeline exists in memory at a time.
+
+        Memory profile: ~323 MB base (parquet cache) + ~50 MB per streaming
+        eval = ~373 MB. This eliminates the O(N) memory scaling problem that
+        caused OOM crashes with 80+ simultaneous evaluation pipelines.
+
+        Args:
+            run_id: Pipeline run ID for telemetry
+            filtered_opportunities: Opportunities that passed Stage 2 filters
+            policy_config: Active policy configuration
+            policy_version: Policy version string
+            data_provider: HistoricalDataProvider (backtest) or None (live)
+            polygon: PolygonClient or None
+            effective_date: Target date for evaluation
+            earnings_cache: Earnings cache service or None
+
+        Returns:
+            Tuple of (evaluations, decisions, approve_count, watch_count, reject_count)
+        """
+        from app.core.schemas import Verdict
+        from app.decision.stage import run_decision_logic
+        from app.features.stage import run_feature_computation
+        from app.gates.stage import run_hard_gates
+        from app.pillars.stage import run_pillar_scoring
+
+        # Initialize components once (shared across all evaluations)
+        contract_selector = ContractSelector(
+            policy_config.contract_selection,
+            data_provider=data_provider,
+            as_of_date=effective_date,
+        )
+        if polygon:
+            contract_selector.set_polygon_client(polygon)
+
+        policy_hash = Policy.compute_hash(policy_config)
+        evaluation_builder = EvaluationBuilder(
+            policy_version, policy_hash, policy_snapshot_id=policy_version
+        )
+
+        # Accumulators for final results
+        all_evaluations: list[Evaluation] = []
+        all_decisions: dict[str, Decision] = {}
+
+        # Stage counters for aggregate telemetry
+        stage3_out = 0
+        stage4_out = 0
+        stage5_out = 0
+        stage6_passed = 0
+        stage7_approve = 0
+        stage7_watch = 0
+        stage7_reject = 0
+
+        # Batch fetch stock snapshots (one parquet read for all tickers)
+        tickers = list(set(opp.underlying_ticker for opp in filtered_opportunities))
+        if data_provider:
+            snapshots = await data_provider.get_stock_snapshots_batch(tickers, as_of=effective_date)
+        else:
+            snapshots = {}
+
+        logger.info(
+            f"[Streaming] Starting: {len(filtered_opportunities)} opportunities, "
+            f"{len(tickers)} unique tickers, {len(snapshots)} snapshots"
+        )
+
+        # Stream: one opportunity at a time through stages 3-7
+        for opp_idx, opportunity in enumerate(filtered_opportunities):
+            ticker = opportunity.underlying_ticker
+            snapshot = snapshots.get(ticker)
+            if not snapshot:
+                logger.debug(f"[Streaming] No snapshot for {ticker}, skipping")
+                continue
+
+            underlying_price = snapshot.close
+            if underlying_price <= 0:
+                continue
+
+            # ----------------------------------------------------------
+            # Stage 3: Select contracts for THIS opportunity only
+            # ----------------------------------------------------------
+            try:
+                chain = await data_provider.get_options_chain(
+                    ticker, as_of=effective_date, min_dte=7, max_dte=120
+                ) if data_provider else []
+
+                if not chain:
+                    logger.debug(
+                        f"[Streaming] No options chain for {ticker} on {effective_date}"
+                    )
+                    continue
+
+                ticker_candidates = await contract_selector._select_for_ticker(
+                    ticker, underlying_price, chain,
+                )
+            except Exception as e:
+                logger.error(f"[Streaming] Contract selection failed for {ticker}: {e}")
+                continue
+
+            # Build evaluations for this ticker's candidates
+            ticker_evaluations = evaluation_builder.build_evaluations(
+                ticker_candidates, [opportunity],
+            )
+            stage3_out += len(ticker_evaluations)
+
+            # Stream each evaluation through stages 4-7
+            for eval_obj in ticker_evaluations:
+                try:
+                    # Stage 4: Feature computation (single evaluation)
+                    feature_sets = await run_feature_computation(
+                        run_id=run_id,
+                        evaluations=[eval_obj],
+                        opportunities=[opportunity],
+                        polygon_client=polygon,
+                        orchestrator=None,  # Suppress per-eval stage events
+                        config=policy_config.features,
+                        persist_features=False,  # Backtest — skip DynamoDB writes
+                        data_provider=data_provider,
+                        as_of_date=effective_date,
+                    )
+                    if not feature_sets:
+                        continue
+                    stage4_out += 1
+
+                    # Stage 5: Pillar scoring (single evaluation)
+                    pillar_results = await run_pillar_scoring(
+                        run_id=run_id,
+                        evaluations=[eval_obj],
+                        feature_sets=feature_sets,
+                        opportunities=[opportunity],
+                        orchestrator=None,  # Suppress per-eval stage events
+                        config=policy_config.pillars,
+                        persist_scores=False,
+                    )
+                    if not pillar_results:
+                        continue
+                    stage5_out += 1
+
+                    # Stage 6: Hard gates (single evaluation)
+                    gate_evaluations = await run_hard_gates(
+                        run_id=run_id,
+                        evaluations=[eval_obj],
+                        feature_sets=feature_sets,
+                        opportunities=[opportunity],
+                        orchestrator=None,  # Suppress per-eval stage events
+                        config=policy_config.gates,
+                        persist_results=False,
+                    )
+                    gate_eval = gate_evaluations.get(eval_obj.evaluation_id)
+                    if gate_eval and gate_eval.all_passed:
+                        stage6_passed += 1
+
+                    # Stage 7: Decision logic (single evaluation)
+                    scanner_triggers_map = self._build_scanner_triggers_map(
+                        [eval_obj], [opportunity]
+                    )
+                    features_map = self._build_features_map(feature_sets)
+
+                    decisions_batch, _ = await run_decision_logic(
+                        run_id=run_id,
+                        evaluations=[eval_obj],
+                        pillar_results=pillar_results,
+                        gate_evaluations=gate_evaluations,
+                        orchestrator=None,  # Suppress per-eval stage events
+                        decision_config=policy_config.decision,
+                        pillar_weights=policy_config.pillars.weights,
+                        thesis_config=policy_config.thesis,
+                        scanner_triggers=scanner_triggers_map,
+                        features=features_map,
+                        persist_decisions=False,
+                        check_concentration=False,
+                        generate_theses=False,  # No LLM in backtest
+                    )
+
+                    # Collect verdict counts
+                    for eval_id, decision in decisions_batch.items():
+                        all_decisions[eval_id] = decision
+                        if decision.verdict == Verdict.APPROVE:
+                            stage7_approve += 1
+                        elif decision.verdict == Verdict.WATCH:
+                            stage7_watch += 1
+                        else:
+                            stage7_reject += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"[Streaming] Pipeline failed for {eval_obj.evaluation_id}: {e}"
+                    )
+                    continue
+
+                # Eval processed — intermediate objects (feature_sets, pillar_results,
+                # gate_evaluations) go out of scope and are GC'd on next iteration
+
+            all_evaluations.extend(ticker_evaluations)
+
+        # Record aggregate stage events (one per stage, summarizing all streaming evals)
+        await self._pipeline.record_stage_event(
+            run_id=run_id,
+            stage=PipelineStage.CONTRACT_SELECTION,
+            items_in=len(filtered_opportunities),
+            items_out=stage3_out,
+            metadata={"mode": "streaming"},
+        )
+        await self._pipeline.record_stage_event(
+            run_id=run_id,
+            stage=PipelineStage.FEATURE_COMPUTATION,
+            items_in=stage3_out,
+            items_out=stage4_out,
+            metadata={"mode": "streaming"},
+        )
+        await self._pipeline.record_stage_event(
+            run_id=run_id,
+            stage=PipelineStage.PILLAR_SCORING,
+            items_in=stage4_out,
+            items_out=stage5_out,
+            metadata={"mode": "streaming"},
+        )
+        await self._pipeline.record_stage_event(
+            run_id=run_id,
+            stage=PipelineStage.HARD_GATES,
+            items_in=stage5_out,
+            items_out=stage6_passed,
+            metadata={"mode": "streaming"},
+        )
+        await self._pipeline.record_stage_event(
+            run_id=run_id,
+            stage=PipelineStage.DECISION_LOGIC,
+            items_in=stage5_out,
+            items_out=stage7_approve + stage7_watch + stage7_reject,
+            metadata={"mode": "streaming"},
+        )
+
+        logger.info(
+            f"[Streaming] Complete: {len(filtered_opportunities)} opportunities → "
+            f"{stage3_out} evals → {stage7_approve} APPROVE, "
+            f"{stage7_watch} WATCH, {stage7_reject} REJECT"
+        )
+
+        return all_evaluations, all_decisions, stage7_approve, stage7_watch, stage7_reject
 
     async def _persist_opportunities(
         self,

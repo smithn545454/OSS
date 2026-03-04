@@ -581,6 +581,9 @@ class GateConfig(OSSBaseModel):
     pillar_minimum: float = 60.0
     pillar_spread_max: float = 30.0
 
+    # Gates to skip entirely (by gate_id, e.g. "GATE_GREEKS_COHERENCE")
+    disabled_gates: list[str] = Field(default_factory=list)
+
 
 class PillarWeights(OSSBaseModel):
     """Pillar weight configuration. Weights must sum to 1.0."""
@@ -1253,12 +1256,19 @@ class BacktestGateOverrides(OSSBaseModel):
 
 
 # Sensible defaults for historical data: relax spread/liquidity gates
+# and disable gates that require real-time data unavailable in backtesting
 BACKTEST_DEFAULT_GATE_OVERRIDES = BacktestGateOverrides(
-    disabled_gates=[],
+    disabled_gates=["GATE_GREEKS_COHERENCE"],
     threshold_overrides={
-        "max_spread_pct": 15.0,   # Historical data uses synthetic spreads
-        "min_open_interest": 50,   # Historical OI may be incomplete
-        "min_volume": 10,          # Historical volume data sparser
+        "max_spread_pct": 15.0,         # Historical data uses synthetic spreads
+        "min_open_interest": 10,         # Historical OI may be incomplete
+        "min_volume": 5,                 # Historical volume data sparser
+        "combined_score_min": 40.0,      # Relax composite to allow more signals through
+        "pillar_minimum": 30.0,          # Relax pillar floor for historical data
+        "pillar_spread_max": 50.0,       # Allow wider pillar spread
+        "breakout_volume_min": 1.0,      # Relax breakout volume requirement
+        "theta_burden_max": 8.0,         # Relax theta burden for historical
+        "move_sufficiency_max": 2.0,     # More permissive on move sufficiency
     },
 )
 
