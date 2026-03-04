@@ -1282,7 +1282,7 @@ class BacktestRunConfig(OSSBaseModel):
     policy_snapshot: PolicyConfig  # Frozen at run creation
     scanners_enabled: list[str] = Field(
         default_factory=lambda: [
-            "breakout", "compression", "cheap_options", "unusual_volume",
+            "breakout", "compression", "cheap_options",
         ]
     )
     slippage_model: str = "ask_plus_pct"  # "mid" | "ask" | "ask_plus_pct"

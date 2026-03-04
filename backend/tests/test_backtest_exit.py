@@ -451,7 +451,7 @@ class TestBacktestModels:
             end_date="2024-12-31",
             policy_snapshot=PolicyConfig(),
         )
-        assert len(config.scanners_enabled) == 4
+        assert len(config.scanners_enabled) == 3
         assert config.slippage_model == "ask_plus_pct"
         assert config.starting_capital == 10_000.0
 
