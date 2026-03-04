@@ -298,13 +298,10 @@ class HistoricalDataProvider:
         )
 
         if filtered.num_rows == 0:
-            # Check column types for debugging
-            expiry_col = table.schema.field("expiry_date")
-            logger.info(
+            logger.debug(
                 f"[HDP] 0 contracts for {ticker} on {as_of} "
                 f"(expiry {min_expiry}-{max_expiry}, "
-                f"table rows: {table.num_rows}, "
-                f"expiry_type: {expiry_col.type})"
+                f"table rows: {table.num_rows})"
             )
 
         contracts: list[dict[str, Any]] = []
@@ -312,6 +309,51 @@ class HistoricalDataProvider:
             contracts.append(self._row_to_contract(filtered, idx, as_of))
 
         return contracts
+
+    async def get_options_chain_batch(
+        self,
+        tickers: list[str],
+        as_of: date,
+        min_dte: int = 7,
+        max_dte: int = 120,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Batch-read options chains for multiple tickers in a single pass.
+
+        Much faster than calling get_options_chain() per ticker because
+        it does a single PyArrow isin() filter instead of N individual
+        equality filters on a ~1.5M row table.
+        """
+        table = self._read_options_chain(as_of.isoformat())
+        if table is None:
+            return {}
+
+        min_expiry = (as_of + timedelta(days=min_dte)).isoformat()
+        max_expiry = (as_of + timedelta(days=max_dte)).isoformat()
+
+        # Single PyArrow filter: all tickers + expiry range
+        filtered = table.filter(
+            pc.field("ticker").isin(tickers)
+            & (pc.field("expiry_date") >= min_expiry)
+            & (pc.field("expiry_date") <= max_expiry)
+        )
+
+        # Group by ticker
+        result: dict[str, list[dict[str, Any]]] = {}
+        if filtered.num_rows > 0:
+            ticker_col = filtered.column("ticker").to_pylist()
+            for idx, t in enumerate(ticker_col):
+                if t not in result:
+                    result[t] = []
+                result[t].append(
+                    self._row_to_contract(filtered, idx, as_of)
+                )
+
+        logger.info(
+            f"[HDP] Batch chain: {len(tickers)} tickers → "
+            f"{filtered.num_rows} contracts across "
+            f"{len(result)} tickers"
+        )
+        return result
 
     async def get_options_chain_minimal(
         self,

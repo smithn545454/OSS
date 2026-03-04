@@ -949,6 +949,14 @@ class ScannerOrchestrator:
             f"{len(tickers)} unique tickers, {len(snapshots)} snapshots"
         )
 
+        # Batch-fetch all options chains in a single PyArrow pass
+        # (316 individual filters on 1.5M rows → 1 isin filter + dict lookup)
+        chains_by_ticker: dict[str, list] = {}
+        if data_provider and hasattr(data_provider, "get_options_chain_batch"):
+            chains_by_ticker = await data_provider.get_options_chain_batch(
+                tickers, as_of=effective_date, min_dte=7, max_dte=120,
+            )
+
         # Stream: one opportunity at a time through stages 3-7
         skip_no_snapshot = 0
         skip_bad_price = 0
@@ -961,30 +969,21 @@ class ScannerOrchestrator:
             snapshot = snapshots.get(ticker)
             if not snapshot:
                 skip_no_snapshot += 1
-                logger.info(f"[Streaming] No snapshot for {ticker}, skipping")
                 continue
 
             underlying_price = snapshot.close
             if underlying_price <= 0:
                 skip_bad_price += 1
-                logger.info(
-                    f"[Streaming] Bad price for {ticker}: close={underlying_price}, skipping"
-                )
                 continue
 
             # ----------------------------------------------------------
             # Stage 3: Select contracts for THIS opportunity only
             # ----------------------------------------------------------
             try:
-                chain = await data_provider.get_options_chain(
-                    ticker, as_of=effective_date, min_dte=7, max_dte=120
-                ) if data_provider else []
+                chain = chains_by_ticker.get(ticker, [])
 
                 if not chain:
                     skip_no_chain += 1
-                    logger.info(
-                        f"[Streaming] No options chain for {ticker} on {effective_date}"
-                    )
                     continue
 
                 ticker_candidates = await contract_selector._select_for_ticker(
@@ -992,10 +991,6 @@ class ScannerOrchestrator:
                 )
                 if not ticker_candidates:
                     skip_no_candidates += 1
-                    logger.info(
-                        f"[Streaming] No candidates for {ticker}: "
-                        f"chain={len(chain)}, price={underlying_price:.2f}"
-                    )
             except Exception as e:
                 skip_error += 1
                 logger.error(
