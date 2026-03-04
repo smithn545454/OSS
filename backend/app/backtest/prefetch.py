@@ -188,6 +188,7 @@ def prefetch_batch_data(
                 cache[key] = table
                 downloaded += 1
             else:
+                cache[key] = None  # Negative cache: prevents S3 re-fetch
                 missing += 1
 
     logger.info(

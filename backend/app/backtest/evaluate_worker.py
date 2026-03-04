@@ -261,7 +261,7 @@ async def run_phase1_worker(
         s3_bucket=s3_bucket,
         batch_days=[as_of_date],
         ohlcv_lookback=70,
-        iv_lookback=0,
+        iv_lookback=260,
     )
 
     provider = HistoricalDataProvider(

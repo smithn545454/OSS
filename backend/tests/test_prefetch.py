@@ -190,7 +190,9 @@ class TestPrefetchBatchData:
             max_workers=2,
         )
 
-        assert cache == {}
+        # All entries should be cached as None (negative cache for missing files)
+        assert all(v is None for v in cache.values())
+        assert len(cache) > 0
 
     def test_s3_called_with_correct_bucket(self):
         parquet_bytes = _make_parquet_bytes()
