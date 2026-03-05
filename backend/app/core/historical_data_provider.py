@@ -14,9 +14,6 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Optional
 
-import pyarrow.compute as pc
-import pyarrow.parquet as pq
-
 from app.core.data_provider import (
     AggregatedOptionsVolume,
     DailyBar,
@@ -65,6 +62,8 @@ class HistoricalDataProvider:
         if cached is not self._MISSING:
             return cached  # Hit (table or None for cached 404)
         try:
+            import pyarrow.parquet as pq
+
             obj = self.s3.get_object(Bucket=self.s3_bucket, Key=s3_key)
             buf = io.BytesIO(obj["Body"].read())
             table = pq.ParquetFile(buf).read()
@@ -99,6 +98,8 @@ class HistoricalDataProvider:
         if s3_key in self._cache:
             return self._cache[s3_key]
         try:
+            import pyarrow.parquet as pq
+
             obj = self.s3.get_object(Bucket=self.s3_bucket, Key=s3_key)
             buf = io.BytesIO(obj["Body"].read())
             pf = pq.ParquetFile(buf)
@@ -152,6 +153,8 @@ class HistoricalDataProvider:
         lookback_days: int = 60,
     ) -> list[DailyBar]:
         """Daily OHLCV bars for ``[end_date - lookback, end_date)`` — strict < end_date."""
+        import pyarrow.compute as pc
+
         candidate_dates = self._trading_days_before(end_date, lookback_days)
         bars: list[DailyBar] = []
 
@@ -194,6 +197,8 @@ class HistoricalDataProvider:
         end_date: date,
         lookback_days: int = 60,
     ) -> dict[str, list[DailyBar]]:
+        import pyarrow.compute as pc
+
         candidate_dates = self._trading_days_before(end_date, lookback_days)
         result: dict[str, list[DailyBar]] = {t: [] for t in tickers}
 
@@ -286,6 +291,8 @@ class HistoricalDataProvider:
         max_dte: int = 120,
     ) -> list[dict[str, Any]]:
         """Read options chain from parquet for as_of date (EOD data)."""
+        import pyarrow.compute as pc
+
         table = self._read_options_chain(as_of.isoformat())
         if table is None:
             logger.warning(f"[HDP] No options parquet for date={as_of.isoformat()}")
@@ -327,6 +334,8 @@ class HistoricalDataProvider:
         it does a single PyArrow isin() filter instead of N individual
         equality filters on a ~1.5M row table.
         """
+        import pyarrow.compute as pc
+
         table = self._read_options_chain(as_of.isoformat())
         if table is None:
             return {}
@@ -394,6 +403,8 @@ class HistoricalDataProvider:
         (~33MB vs ~75MB per file), reducing memory during 21-day forward scans.
         Uses PyArrow push-down filters for O(1) lookup in large parquets.
         """
+        import pyarrow.compute as pc
+
         table = self._read_options_chain_lite(as_of.isoformat())
         if table is None:
             return None
@@ -522,6 +533,8 @@ class HistoricalDataProvider:
         as_of: date,
         lookback_days: int = 252,
     ) -> list[IVHistoryRecord]:
+        import pyarrow.compute as pc
+
         records: list[IVHistoryRecord] = []
         candidate_dates = self._trading_days_before(as_of, lookback_days)
 
@@ -555,6 +568,8 @@ class HistoricalDataProvider:
         lookback_days: int = 5,
     ) -> list[OIHistoryRecord]:
         """Extract OI from options-chains parquets for last N trading days."""
+        import pyarrow.compute as pc
+
         records: list[OIHistoryRecord] = []
         candidate_dates = self._trading_days_before(as_of, lookback_days)
 
@@ -594,6 +609,8 @@ class HistoricalDataProvider:
         self,
         as_of: date,
     ) -> Optional[MarketContextData]:
+        import pyarrow.compute as pc
+
         table = self._read_market_context()
         if table is None:
             return None

@@ -16,8 +16,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Any, Optional
 
-import pyarrow.parquet as pq
-
 logger = logging.getLogger(__name__)
 
 
@@ -107,6 +105,8 @@ def _download_one(
     """
     try:
         obj = s3_client.get_object(Bucket=bucket, Key=key)
+        import pyarrow.parquet as pq
+
         buf = io.BytesIO(obj["Body"].read())
         table = pq.ParquetFile(buf).read()
         return (key, table)

@@ -20,8 +20,6 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Optional
 
-import pyarrow.compute as pc
-
 from app.core.schemas import (
     BacktestExitConfig,
     BacktestTrade,
@@ -632,6 +630,8 @@ def _build_price_index(
 
     # PyArrow push-down filter to relevant tickers only
     if needed_tickers and "ticker" in table.column_names:
+        import pyarrow.compute as pc
+
         filtered = table.filter(pc.field("ticker").isin(list(needed_tickers)))
     else:
         filtered = table
