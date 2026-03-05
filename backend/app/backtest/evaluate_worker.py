@@ -29,14 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 def apply_backtest_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
-    """Return a config copy with gate AND contract selection overrides for backtesting.
+    """Return a config copy with gate, decision, and contract selection overrides.
 
-    Applies two categories of overrides:
+    Applies three categories of overrides:
     1. Gate threshold overrides + disabled gates (Stage 6)
-    2. Contract selection filter relaxation (Stage 3)
+    2. Decision threshold relaxation (Stage 7)
+    3. Contract selection filter relaxation (Stage 3)
 
     Historical data often has lower liquidity/volume than live markets,
-    so both filter layers must be relaxed for realistic backtest results.
+    so all filter layers must be relaxed for realistic backtest results.
 
     All models are frozen (OSSBaseModel), so we use model_copy(update=...)
     to produce new immutable instances rather than mutating in place.
@@ -63,7 +64,25 @@ def apply_backtest_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
         new_policy = config.policy_snapshot.model_copy(update={"gates": new_gates})
         effective_config = config.model_copy(update={"policy_snapshot": new_policy})
 
-    # 2. Contract selection filter relaxation (Stage 3)
+    # 2. Decision threshold relaxation (Stage 7)
+    # The gate combined_score_min is overridden (e.g., 40), but the decision
+    # approve_threshold (75) and watch_threshold (65) are NOT — causing all
+    # evaluations that score 40-65 to pass gates but get REJECT from decisions.
+    # Align decision thresholds with the relaxed gate thresholds.
+    decision = effective_config.policy_snapshot.decision
+    gate_score_min = int(overrides.threshold_overrides.get(
+        "combined_score_min", decision.approve_threshold
+    ))
+    new_decision = decision.model_copy(update={
+        "approve_threshold": min(decision.approve_threshold, max(gate_score_min + 10, 50)),
+        "watch_threshold": min(decision.watch_threshold, max(gate_score_min, 40)),
+    })
+    new_policy = effective_config.policy_snapshot.model_copy(
+        update={"decision": new_decision}
+    )
+    effective_config = effective_config.model_copy(update={"policy_snapshot": new_policy})
+
+    # 3. Contract selection filter relaxation (Stage 3)
     # The policy's ContractSelectionConfig has its own min_oi, min_volume,
     # max_spread_pct that are SEPARATE from GateConfig. These must also be
     # relaxed for historical data, otherwise Stage 3 drops all contracts.
@@ -121,8 +140,14 @@ async def evaluate_day(
     pending_trades: list[dict[str, Any]] = []
 
     try:
-        # Apply backtest overrides (gates + contract selection) into the policy snapshot
+        # Apply backtest overrides (gates + decision + contract selection)
         effective_config = apply_backtest_overrides(config)
+        dec = effective_config.policy_snapshot.decision
+        logger.info(
+            f"[Phase1] Effective thresholds: approve={dec.approve_threshold}, "
+            f"watch={dec.watch_threshold}, "
+            f"gate_score_min={effective_config.policy_snapshot.gates.combined_score_min}"
+        )
 
         # Create pipeline orchestrator (suppress persistence — backtest only)
         pipeline_orchestrator = PipelineOrchestrator()

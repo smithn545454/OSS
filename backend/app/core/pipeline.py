@@ -21,6 +21,32 @@ from app.db.tables import PipelineRunTable, StageEventTable
 logger = logging.getLogger(__name__)
 
 
+class NoOpOrchestrator:
+    """No-op orchestrator that skips DynamoDB writes.
+
+    Used in streaming backtest mode where per-evaluation stage events
+    are wasteful (N×3 DynamoDB writes). Aggregate events are recorded
+    once after the streaming loop completes.
+    """
+
+    async def update_current_stage(self, run_id: str, stage: PipelineStage) -> None:
+        pass
+
+    async def record_stage_event(self, **kwargs: Any) -> StageEvent:
+        return StageEvent(
+            run_id=kwargs.get("run_id", ""),
+            stage=kwargs.get("stage", PipelineStage.OPPORTUNITY_DISCOVERY),
+            started_at="",
+            completed_at="",
+            items_in=kwargs.get("items_in", 0),
+            items_out=kwargs.get("items_out", 0),
+            items_dropped=0,
+        )
+
+    async def complete_run(self, run_id: str, status: str = "completed") -> None:
+        pass
+
+
 class PipelineOrchestrator:
     """Orchestrator for pipeline execution and monitoring."""
 

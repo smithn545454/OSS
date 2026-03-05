@@ -904,10 +904,16 @@ class ScannerOrchestrator:
         Returns:
             Tuple of (evaluations, decisions, approve_count, watch_count, reject_count)
         """
+        from app.core.pipeline import NoOpOrchestrator
         from app.core.schemas import Verdict
         from app.decision.stage import run_decision_logic
         from app.gates.stage import run_hard_gates
         from app.pillars.stage import run_pillar_scoring
+
+        # Single no-op orchestrator shared across all streaming evals —
+        # avoids N×3 DynamoDB writes for per-eval stage events.
+        # Aggregate stage events are recorded ONCE after the streaming loop.
+        noop_orchestrator = NoOpOrchestrator()
 
         # Initialize components once (shared across all evaluations)
         contract_selector = ContractSelector(
@@ -1063,7 +1069,7 @@ class ScannerOrchestrator:
                         evaluations=[eval_obj],
                         feature_sets=feature_sets,
                         opportunities=[opportunity],
-                        orchestrator=None,  # Suppress per-eval stage events
+                        orchestrator=noop_orchestrator,
                         config=policy_config.pillars,
                         persist_scores=False,
                     )
@@ -1077,7 +1083,7 @@ class ScannerOrchestrator:
                         evaluations=[eval_obj],
                         feature_sets=feature_sets,
                         opportunities=[opportunity],
-                        orchestrator=None,  # Suppress per-eval stage events
+                        orchestrator=noop_orchestrator,
                         config=policy_config.gates,
                         persist_results=False,
                     )
@@ -1096,7 +1102,7 @@ class ScannerOrchestrator:
                         evaluations=[eval_obj],
                         pillar_results=pillar_results,
                         gate_evaluations=gate_evaluations,
-                        orchestrator=None,  # Suppress per-eval stage events
+                        orchestrator=noop_orchestrator,
                         decision_config=policy_config.decision,
                         pillar_weights=policy_config.pillars.weights,
                         thesis_config=policy_config.thesis,
