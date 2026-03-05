@@ -33,6 +33,10 @@ function RunConfigForm({ onSubmit, isLoading }: {
   const [maxSpreadPct, setMaxSpreadPct] = useState(15.0)
   const [minOpenInterest, setMinOpenInterest] = useState(50)
   const [minVolume, setMinVolume] = useState(10)
+  const [combinedScoreMin, setCombinedScoreMin] = useState(40)
+  const [pillarMinimum, setPillarMinimum] = useState(30)
+  const [pillarSpreadMax, setPillarSpreadMax] = useState(50)
+  const [disableGreeksGate, setDisableGreeksGate] = useState(true)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,7 +57,11 @@ function RunConfigForm({ onSubmit, isLoading }: {
           max_spread_pct: maxSpreadPct,
           min_open_interest: minOpenInterest,
           min_volume: minVolume,
+          combined_score_min: combinedScoreMin,
+          pillar_minimum: pillarMinimum,
+          pillar_spread_max: pillarSpreadMax,
         },
+        disabled_gates: disableGreeksGate ? ['GATE_GREEKS_COHERENCE'] : [],
       },
     })
   }
@@ -193,6 +201,50 @@ function RunConfigForm({ onSubmit, isLoading }: {
                 />
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-4 mt-3">
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Min Combined Score
+                </label>
+                <input
+                  type="number"
+                  value={combinedScoreMin}
+                  onChange={(e) => setCombinedScoreMin(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Min Pillar Score
+                </label>
+                <input
+                  type="number"
+                  value={pillarMinimum}
+                  onChange={(e) => setPillarMinimum(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-oss-muted mb-1">
+                  Max Pillar Spread
+                </label>
+                <input
+                  type="number"
+                  value={pillarSpreadMax}
+                  onChange={(e) => setPillarSpreadMax(Number(e.target.value))}
+                  className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 mt-3 text-xs text-oss-muted cursor-pointer">
+              <input
+                type="checkbox"
+                checked={disableGreeksGate}
+                onChange={(e) => setDisableGreeksGate(e.target.checked)}
+                className="rounded border-oss-border text-oss-accent focus:ring-oss-accent"
+              />
+              Disable Greeks Coherence Gate (unreliable on historical data)
+            </label>
           </div>
 
           {/* Exit Rules */}

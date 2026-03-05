@@ -156,8 +156,8 @@ class BackendStack(Stack):
                 ],
             ),
             role=lambda_role,
-            timeout=Duration.minutes(10),  # 10 minutes for scanning all tickers
-            memory_size=3008,  # Max Lambda memory for backtest exit resolution (~21 parquet files)
+            timeout=Duration.minutes(15),  # 15 min for backtest window processing (3 days × ~3 min)
+            memory_size=3008,  # Account max — backtest uses cache eviction to stay within
             environment={
                 "APP_NAME": "OSS",
                 "APP_VERSION": "0.1.0",

@@ -27,11 +27,25 @@ from app.db.backtest_tables import BacktestRunTable
 
 logger = logging.getLogger(__name__)
 
+# Sensible gate thresholds for backtesting historical data.
+# Production defaults (combined_score_min=75, pillar_minimum=60, etc.) are too
+# strict for historical data where liquidity/volume are lower. These defaults
+# are merged UNDER user-provided overrides (user values always take precedence).
+BACKTEST_GATE_DEFAULTS: dict[str, int | float] = {
+    "combined_score_min": 40,
+    "pillar_minimum": 30,
+    "pillar_spread_max": 50,
+    "theta_burden_max": 8,
+    "move_sufficiency_max": 2,
+    "breakout_volume_min": 1,
+}
+
 
 def apply_backtest_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
     """Return a config copy with gate, decision, and contract selection overrides.
 
-    Applies three categories of overrides:
+    Applies four categories of overrides:
+    0. Auto-fill missing gate thresholds with backtest-friendly defaults
     1. Gate threshold overrides + disabled gates (Stage 6)
     2. Decision threshold relaxation (Stage 7)
     3. Contract selection filter relaxation (Stage 3)
@@ -43,6 +57,21 @@ def apply_backtest_overrides(config: BacktestRunConfig) -> BacktestRunConfig:
     to produce new immutable instances rather than mutating in place.
     """
     overrides = config.gate_overrides
+
+    # 0. Auto-fill missing gate thresholds with backtest-friendly defaults
+    effective_thresholds = {**BACKTEST_GATE_DEFAULTS}
+    effective_thresholds.update(overrides.threshold_overrides)  # User values win
+    overrides = overrides.model_copy(
+        update={"threshold_overrides": effective_thresholds}
+    )
+
+    # Auto-disable Greeks Coherence gate (unreliable on historical data)
+    if not overrides.disabled_gates:
+        overrides = overrides.model_copy(
+            update={"disabled_gates": {"GATE_GREEKS_COHERENCE"}}
+        )
+
+    config = config.model_copy(update={"gate_overrides": overrides})
     effective_config = config
 
     # 1. Gate threshold overrides (Stage 6)
@@ -284,6 +313,9 @@ async def run_phase1_worker(
 ) -> dict[str, Any]:
     """Full Phase 1 worker: evaluate one day, write trades, report progress.
 
+    Legacy single-day worker. Kept for backward compatibility.
+    New runs use run_phase1_window() instead.
+
     Args:
         run_id: Backtest run ID
         as_of_date: Trading day to evaluate
@@ -358,4 +390,183 @@ async def run_phase1_worker(
         "phase1_completed": phase1_completed,
         "phase1_total": phase1_total,
         "trigger_phase2": is_last,
+    }
+
+
+async def run_phase1_window(
+    run_id: str,
+    window_index: int,
+    window_days: list[date],
+    config: BacktestRunConfig,
+    s3_bucket: str,
+    total_windows: int,
+    total_days: int,
+) -> dict[str, Any]:
+    """Phase 1 window worker: evaluate multiple consecutive days, chain to successor.
+
+    Rolling-dispatch architecture: each worker processes a window of days (up to
+    DAYS_PER_WINDOW), then dispatches its own successor window. This maintains
+    MAX_CONCURRENT_CHAINS parallel workers at all times.
+
+    Args:
+        run_id: Backtest run ID
+        window_index: This window's position in the full window list (0-based)
+        window_days: Trading days to process in this window (up to 3)
+        config: Run configuration
+        s3_bucket: S3 bucket for historical data
+        total_windows: Total number of windows across all chains
+        total_days: Total number of trading days in the backtest
+
+    Returns:
+        Summary dict with trade counts and phase transition info.
+    """
+    import os
+
+    import boto3
+
+    from app.backtest.phase_coordinator import (
+        MAX_CONCURRENT_CHAINS,
+        _chunk_days_into_windows,
+        dispatch_window_worker,
+    )
+    from app.backtest.prefetch import prefetch_batch_data
+    from app.core.historical_data_provider import HistoricalDataProvider
+
+    logger.info(
+        f"[Phase1-Window] Window {window_index}/{total_windows}: "
+        f"processing {len(window_days)} days "
+        f"({window_days[0].isoformat()} to {window_days[-1].isoformat()}) "
+        f"for run {run_id}"
+    )
+
+    # Prefetch all S3 data for this window.
+    # Adjacent days share 95%+ of OHLCV/IV lookback — only the options chain
+    # files differ per day. prefetch_batch_data() handles this efficiently.
+    shared_cache = prefetch_batch_data(
+        s3_bucket=s3_bucket,
+        batch_days=window_days,
+        ohlcv_lookback=70,
+        iv_lookback=260,
+    )
+
+    total_trades_in_window = 0
+    days_processed = 0
+
+    # Process each day in the window sequentially
+    for day_idx, day in enumerate(window_days):
+        day_trades: list[dict[str, Any]] = []
+        try:
+            provider = HistoricalDataProvider(
+                as_of_date=day,
+                s3_bucket=s3_bucket,
+                shared_cache=shared_cache,
+            )
+
+            day_trades = await evaluate_day(
+                run_id=run_id,
+                as_of_date=day,
+                config=config,
+                data_provider=provider,
+            )
+
+            # Write pending trades to DynamoDB
+            if day_trades:
+                await BacktestPendingTradeTable.put_batch(day_trades)
+
+        except Exception as e:
+            import traceback
+            logger.error(
+                f"[Phase1-Window] Error on day {day} "
+                f"(window {window_index}, day {day_idx}): "
+                f"{e}\n{traceback.format_exc()}"
+            )
+
+        # ALWAYS increment progress — even on failure
+        await BacktestRunTable.atomic_increment_progress(
+            run_id,
+            days_increment=1,
+            trades_increment=len(day_trades),
+        )
+        total_trades_in_window += len(day_trades)
+        days_processed += 1
+
+        # Evict processed day's options chain from cache to free memory.
+        # OHLCV/IV lookback data is shared across days and stays in cache.
+        options_key = f"options-chains/date={day.isoformat()}/data.parquet"
+        if options_key in shared_cache:
+            del shared_cache[options_key]
+            logger.debug(
+                f"[Phase1-Window] Evicted options cache for {day.isoformat()}"
+            )
+
+    # Increment batches_completed (one per window, not per day)
+    batches_completed = await BacktestRunTable.atomic_increment_batches_completed(
+        run_id
+    )
+
+    logger.info(
+        f"[Phase1-Window] Window {window_index} done: "
+        f"{days_processed} days, {total_trades_in_window} trades, "
+        f"{batches_completed}/{total_windows} windows complete"
+    )
+
+    # Dispatch successor window in this chain
+    successor_index = window_index + MAX_CONCURRENT_CHAINS
+    trigger_phase2 = False
+
+    if successor_index < total_windows:
+        # Recompute the successor's window days from config
+        from app.backtest.coordinator import generate_trading_days
+
+        start = date.fromisoformat(config.start_date)
+        end = date.fromisoformat(config.end_date)
+        all_days = generate_trading_days(start, end)
+        all_windows = _chunk_days_into_windows(all_days)
+
+        if successor_index < len(all_windows):
+            try:
+                function_name = os.environ.get(
+                    "AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend"
+                )
+                lambda_client = boto3.client("lambda")
+                config_json = config.model_dump(mode="json")
+
+                dispatch_window_worker(
+                    lambda_client=lambda_client,
+                    function_name=function_name,
+                    run_id=run_id,
+                    window_index=successor_index,
+                    window_days=all_windows[successor_index],
+                    config_json=config_json,
+                    s3_bucket=s3_bucket,
+                    total_windows=total_windows,
+                    total_days=total_days,
+                )
+                logger.info(
+                    f"[Phase1-Window] Dispatched successor window "
+                    f"{successor_index} in chain"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[Phase1-Window] Failed to dispatch successor "
+                    f"window {successor_index}: {e}"
+                )
+
+    # Check if all windows are complete → trigger Phase 2
+    if batches_completed >= total_windows:
+        trigger_phase2 = True
+        logger.info(
+            f"[Phase1-Window] All {total_windows} windows complete "
+            f"— TRIGGERING PHASE 2"
+        )
+
+    return {
+        "status": "success",
+        "phase": "evaluate",
+        "window_index": window_index,
+        "days_processed": days_processed,
+        "trades_found": total_trades_in_window,
+        "batches_completed": batches_completed,
+        "total_windows": total_windows,
+        "trigger_phase2": trigger_phase2,
     }

@@ -635,6 +635,71 @@ async def _run_backtest_evaluate(event: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "run_id": run_id, "date": date_str, "error": str(e)}
 
 
+async def _run_backtest_evaluate_window(event: dict[str, Any]) -> dict[str, Any]:
+    """Phase 1 window worker: evaluate multiple consecutive days in one invocation.
+
+    Part of the rolling-dispatch architecture. Processes a window of days,
+    then dispatches its own successor window. This maintains controlled
+    concurrency (MAX_CONCURRENT_CHAINS workers at a time).
+
+    After processing, atomically increments the Phase 1 counter. If this is
+    the last window, triggers Phase 2 (resolve exits).
+
+    Args:
+        event: Must contain run_id, window_index, window_days, config,
+               s3_bucket, total_windows, total_days.
+    """
+    from app.backtest.evaluate_worker import run_phase1_window
+    from app.core.schemas import BacktestRunConfig
+
+    run_id = event.get("run_id", "")
+    window_index = event.get("window_index", 0)
+    window_days_str = event.get("window_days", [])
+    config_data = event.get("config", {})
+    s3_bucket = event.get("s3_bucket", os.environ.get("BACKTEST_S3_BUCKET", ""))
+    total_windows = event.get("total_windows", 1)
+    total_days = event.get("total_days", 0)
+
+    logger.info(
+        f"Phase 1 window worker: run={run_id}, window={window_index}, "
+        f"days={len(window_days_str)}"
+    )
+
+    try:
+        from datetime import date as date_type
+        config = BacktestRunConfig(**config_data)
+        window_days = [date_type.fromisoformat(d) for d in window_days_str]
+
+        result = await run_phase1_window(
+            run_id=run_id,
+            window_index=window_index,
+            window_days=window_days,
+            config=config,
+            s3_bucket=s3_bucket,
+            total_windows=total_windows,
+            total_days=total_days,
+        )
+
+        # If this was the last window, trigger Phase 2
+        if result.get("trigger_phase2"):
+            logger.info(f"Phase 1 complete for run {run_id}, triggering Phase 2")
+            from app.backtest.phase_coordinator import coordinate_phase2
+            await coordinate_phase2(run_id, config)
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            f"Phase 1 window worker failed: {e}", exc_info=True
+        )
+        return {
+            "status": "error",
+            "run_id": run_id,
+            "window_index": window_index,
+            "error": str(e),
+        }
+
+
 async def _run_backtest_resolve(event: dict[str, Any]) -> dict[str, Any]:
     """Phase 2 worker: resolve exits for a ticker partition.
 
@@ -883,7 +948,8 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     3. Worker scan (chunk): {"source": "oss.scheduler", "action": "worker_scan", ...}
     4. Paper trading update: {"source": "oss.scheduler", "action": "paper_update"}
     5. Backtest coordinator: {"source": "oss.scheduler", "action": "backtest_coordinator", ...}
-    6. Backtest Phase 1: {"source": "oss.scheduler", "action": "backtest_evaluate", ...}
+    6. Backtest Phase 1 (legacy): {"source": "oss.scheduler", "action": "backtest_evaluate", ...}
+    6b. Backtest Phase 1 window: {"source": "oss.scheduler", "action": "backtest_evaluate_window", ...}
     7. Backtest Phase 2: {"source": "oss.scheduler", "action": "backtest_resolve", ...}
     8. Backtest Phase 3: {"source": "oss.scheduler", "action": "backtest_finalize", ...}
     9. Earnings refresh: {"source": "oss.scheduler", "action": "earnings_refresh"}
@@ -947,10 +1013,20 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             return asyncio.run(_run_backtest_coordinator(event))
 
         elif action == "backtest_evaluate":
-            # Phase 1 worker: evaluate a single trading day
+            # Phase 1 worker: evaluate a single trading day (legacy)
             date_str = event.get("date", "")
             logger.info(f"Received backtest_evaluate event (date={date_str})")
             return asyncio.run(_run_backtest_evaluate(event))
+
+        elif action == "backtest_evaluate_window":
+            # Phase 1 window worker: evaluate multiple days, chain to successor
+            window_idx = event.get("window_index", 0)
+            window_days = event.get("window_days", [])
+            logger.info(
+                f"Received backtest_evaluate_window event "
+                f"(window={window_idx}, days={len(window_days)})"
+            )
+            return asyncio.run(_run_backtest_evaluate_window(event))
 
         elif action == "backtest_resolve":
             # Phase 2 worker: resolve exits for a ticker partition

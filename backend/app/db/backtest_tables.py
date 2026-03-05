@@ -117,6 +117,7 @@ class BacktestRunTable:
 
         # Build ADD expression for each non-zero increment
         add_parts = []
+        set_parts = []
         expr_values: dict[str, Any] = {}
         if days_increment:
             add_parts.append("progress.days_completed :days_inc")
@@ -133,10 +134,18 @@ class BacktestRunTable:
                 "trades_found": int(progress.get("trades_found", 0)),
             }
 
+        # Track when progress was last updated (for stale run detection)
+        set_parts.append("progress.last_progress_at = :now")
+        expr_values[":now"] = datetime.now(timezone.utc).isoformat()
+
+        update_expr = "ADD " + ", ".join(add_parts)
+        if set_parts:
+            update_expr += " SET " + ", ".join(set_parts)
+
         try:
             response = table.update_item(
                 Key={"PK": f"RUN#{run_id}", "SK": "META"},
-                UpdateExpression="ADD " + ", ".join(add_parts),
+                UpdateExpression=update_expr,
                 ExpressionAttributeValues=expr_values,
                 ConditionExpression="attribute_exists(PK)",
                 ReturnValues="ALL_NEW",

@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 import boto3
@@ -626,21 +626,123 @@ async def create_backtest_run_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Max minutes a run can stay RUNNING without completing before auto-finalization.
-STALE_RUN_TIMEOUT_MINUTES = 120
+# Minutes with no progress before a run is considered stale (chain may have broken).
+# For EVALUATING runs: re-dispatch stuck chains. For others: auto-finalize.
+STALE_PROGRESS_TIMEOUT_MINUTES = 30
+
+# Minutes with zero total progress before a run is force-finalized (genuinely dead).
+STALE_FORCE_FINALIZE_MINUTES = 240
 
 
 ACTIVE_RUN_STATUSES = {"RUNNING", "EVALUATING", "RESOLVING", "FINALIZING"}
 
 
+async def _try_redispatch_stuck_chains(run: dict[str, Any]) -> bool:
+    """Attempt to re-dispatch broken chains for an EVALUATING run.
+
+    Uses the rolling-dispatch architecture: recomputes which window indices
+    haven't completed, and dispatches workers for the first missing window
+    in each chain.
+
+    Returns True if any workers were re-dispatched.
+    """
+    import os
+
+    import boto3
+
+    from app.backtest.coordinator import generate_trading_days
+    from app.backtest.phase_coordinator import (
+        MAX_CONCURRENT_CHAINS,
+        _chunk_days_into_windows,
+        dispatch_window_worker,
+    )
+
+    run_id = run.get("run_id", "")
+    config_data = run.get("config", {})
+    if not config_data:
+        return False
+
+    try:
+        from app.core.schemas import BacktestRunConfig
+        config = BacktestRunConfig(**config_data)
+    except Exception:
+        return False
+
+    # Recompute the full window schedule
+    start = date.fromisoformat(config.start_date)
+    end = date.fromisoformat(config.end_date)
+    trading_days = generate_trading_days(start, end)
+    windows = _chunk_days_into_windows(trading_days)
+    total_windows = len(windows)
+    total_days = len(trading_days)
+
+    batches_completed = int(run.get("batches_completed", 0))
+    if batches_completed >= total_windows:
+        # All windows done but Phase 2 wasn't triggered — trigger it now
+        logger.info(f"[SelfHeal] All windows done for {run_id}, triggering Phase 2")
+        from app.backtest.phase_coordinator import coordinate_phase2
+        await coordinate_phase2(run_id, config)
+        return True
+
+    # The rolling dispatch has MAX_CONCURRENT_CHAINS independent chains.
+    # If a chain broke, its "next" window was never dispatched.
+    # We can't easily know WHICH windows completed, but we know how many.
+    # Re-dispatch by sending fresh workers for the next expected windows.
+    # If a window was already completed, the duplicate worker just increments
+    # the counter again — this is acceptable (counter may overshoot, but
+    # the >= check in Phase 2 triggering handles it).
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+    s3_bucket = os.environ.get("BACKTEST_S3_BUCKET", "")
+    lambda_client = boto3.client("lambda")
+    config_json = config.model_dump(mode="json")
+
+    # Dispatch up to MAX_CONCURRENT_CHAINS workers starting from where we estimate
+    # the chains should be. Use batches_completed as a rough position estimate.
+    dispatched = 0
+    for chain_offset in range(MAX_CONCURRENT_CHAINS):
+        # Each chain processes windows at indices: chain_offset, chain_offset+3, chain_offset+6, ...
+        # Find the first window in this chain that's beyond batches_completed
+        window_idx = chain_offset
+        while window_idx < batches_completed and window_idx < total_windows:
+            window_idx += MAX_CONCURRENT_CHAINS
+        if window_idx >= total_windows:
+            continue
+        try:
+            dispatch_window_worker(
+                lambda_client=lambda_client,
+                function_name=function_name,
+                run_id=run_id,
+                window_index=window_idx,
+                window_days=windows[window_idx],
+                config_json=config_json,
+                s3_bucket=s3_bucket,
+                total_windows=total_windows,
+                total_days=total_days,
+            )
+            dispatched += 1
+            logger.info(
+                f"[SelfHeal] Re-dispatched window {window_idx} "
+                f"for stuck run {run_id}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[SelfHeal] Failed to re-dispatch window {window_idx}: {e}"
+            )
+
+    return dispatched > 0
+
+
 async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Check for active runs that have stalled and auto-finalize them.
+    """Check for active runs that have stalled and attempt recovery.
 
-    A run is considered stale if it has been in an active state for longer
-    than STALE_RUN_TIMEOUT_MINUTES. This handles workers that silently fail
-    (timeout, OOM, concurrency throttle) without reporting completion.
+    Uses progress-based staleness detection:
+    - If progress.last_progress_at hasn't updated in STALE_PROGRESS_TIMEOUT_MINUTES:
+      For EVALUATING runs, re-dispatch stuck chains (self-healing).
+    - If no progress at all for STALE_FORCE_FINALIZE_MINUTES:
+      Auto-finalize with whatever trades exist (genuinely dead run).
 
-    Phase-aware: recognizes EVALUATING, RESOLVING, FINALIZING as active.
+    This supports long backtests (hours) that legitimately take a long time,
+    by checking progress freshness rather than creation age.
     """
     from app.backtest.metrics import calculate_metrics
     from app.core.schemas import BacktestTrade
@@ -653,23 +755,62 @@ async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any
             updated.append(run)
             continue
 
+        # Check progress freshness (preferred) or fall back to creation time
+        progress = run.get("progress", {})
+        last_progress_str = progress.get("last_progress_at", "")
         created_str = run.get("created_at", "")
+
+        reference_time = None
         try:
-            created = datetime.fromisoformat(created_str)
+            if last_progress_str:
+                reference_time = datetime.fromisoformat(last_progress_str)
+            elif created_str:
+                reference_time = datetime.fromisoformat(created_str)
         except (ValueError, TypeError):
+            pass
+
+        if reference_time is None:
             updated.append(run)
             continue
 
-        age_minutes = (now - created).total_seconds() / 60
-        if age_minutes < STALE_RUN_TIMEOUT_MINUTES:
+        staleness_minutes = (now - reference_time).total_seconds() / 60
+
+        # Not stale yet — keep as-is
+        if staleness_minutes < STALE_PROGRESS_TIMEOUT_MINUTES:
             updated.append(run)
             continue
 
-        # Stale run — auto-finalize with whatever trades exist
         run_id = run.get("run_id", "")
+
+        # For EVALUATING runs with partial progress, try to re-dispatch stuck chains
+        if (
+            run.get("status") == "EVALUATING"
+            and staleness_minutes < STALE_FORCE_FINALIZE_MINUTES
+        ):
+            logger.info(
+                f"[SelfHeal] Run {run_id} stale for {staleness_minutes:.0f} min "
+                f"in EVALUATING — attempting chain re-dispatch"
+            )
+            try:
+                redispatched = await _try_redispatch_stuck_chains(run)
+                if redispatched:
+                    logger.info(
+                        f"[SelfHeal] Re-dispatched workers for run {run_id}"
+                    )
+                    updated.append(run)
+                    continue
+            except Exception as e:
+                logger.error(f"[SelfHeal] Re-dispatch failed for {run_id}: {e}")
+
+        # Force-finalize only after STALE_FORCE_FINALIZE_MINUTES (4 hours)
+        if staleness_minutes < STALE_FORCE_FINALIZE_MINUTES:
+            updated.append(run)
+            continue
+
+        # Genuinely dead run — auto-finalize with whatever trades exist
         logger.info(
             f"Auto-finalizing stale backtest run {run_id} "
-            f"(running for {age_minutes:.0f} min)"
+            f"(no progress for {staleness_minutes:.0f} min)"
         )
         try:
             trade_dicts = await BacktestTradeTable.list_by_run(run_id, limit=10000)
@@ -686,7 +827,6 @@ async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any
                 starting_capital = config.get("starting_capital", 10_000.0)
 
             metrics = calculate_metrics(trades, starting_capital=starting_capital)
-            progress = run.get("progress", {})
             metrics["total_days"] = int(progress.get("days_completed", 0))
             metrics["total_batches"] = int(run.get("total_batches", 0))
             metrics["auto_finalized"] = True
