@@ -154,12 +154,20 @@ async def evaluate_day(
                 )
 
         # Collect pending trades for APPROVE/WATCH decisions
+        skip_no_decision = 0
+        skip_verdict = 0
+        skip_price = 0
+        skip_entry = 0
+        skip_expiry = 0
+
         for evaluation in result.evaluations:
             decision = result.decisions.get(evaluation.evaluation_id)
             if not decision:
+                skip_no_decision += 1
                 continue
             verdict = decision.verdict
             if verdict not in (Verdict.APPROVE, Verdict.WATCH):
+                skip_verdict += 1
                 continue
 
             option_ticker = evaluation.option_ticker
@@ -178,6 +186,12 @@ async def evaluate_day(
             mid = evaluation.mid
 
             if mid <= 0 and ask <= 0:
+                skip_price += 1
+                if skip_price <= 3:
+                    logger.warning(
+                        f"[Phase1] SKIP price: {underlying_ticker} "
+                        f"mid={mid} ask={ask} bid={evaluation.bid}"
+                    )
                 continue
 
             entry_price = apply_entry_slippage(
@@ -188,6 +202,7 @@ async def evaluate_day(
             )
 
             if entry_price <= 0:
+                skip_entry += 1
                 continue
 
             verdict_str = verdict.value if hasattr(verdict, "value") else str(verdict)
@@ -197,6 +212,7 @@ async def evaluate_day(
             try:
                 date.fromisoformat(expiration_date)
             except (ValueError, TypeError):
+                skip_expiry += 1
                 continue
 
             pending_trades.append({
@@ -220,7 +236,9 @@ async def evaluate_day(
 
         logger.info(
             f"[Phase1] Day {as_of_date}: {len(result.evaluations)} evaluations, "
-            f"{len(pending_trades)} pending trades"
+            f"{len(pending_trades)} pending trades. "
+            f"Skips: no_decision={skip_no_decision}, verdict={skip_verdict}, "
+            f"price={skip_price}, entry={skip_entry}, expiry={skip_expiry}"
         )
 
     except Exception as e:
