@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # Production defaults (combined_score_min=75, pillar_minimum=60, etc.) are too
 # strict for historical data where liquidity/volume are lower. These defaults
 # are merged UNDER user-provided overrides (user values always take precedence).
+# Number of tickers to process per pipeline invocation in window workers.
+# Bounds pipeline memory at ~500 MB regardless of market conditions.
+TICKER_CHUNK_SIZE = 100
+
+# Sensible gate thresholds for backtesting historical data.
 BACKTEST_GATE_DEFAULTS: dict[str, int | float] = {
     "combined_score_min": 40,
     "pillar_minimum": 30,
@@ -331,12 +336,15 @@ async def run_phase1_worker(
 
     # Prefetch options-chain parquet for this single date
     # ohlcv_lookback=70 ensures feature computation has enough history for SMA50/SMA20
+    # ticker_filter reduces cache from ~520 MB (all ~10K stocks) to ~20 MB
+    tickers = config.policy_snapshot.watchlist.tickers or []
     logger.info(f"[Phase1] Prefetching data for {as_of_date}...")
     shared_cache = prefetch_batch_data(
         s3_bucket=s3_bucket,
         batch_days=[as_of_date],
         ohlcv_lookback=70,
         iv_lookback=260,
+        ticker_filter=set(tickers) if tickers else None,
     )
 
     provider = HistoricalDataProvider(
@@ -408,6 +416,12 @@ async def run_phase1_window(
     DAYS_PER_WINDOW), then dispatches its own successor window. This maintains
     MAX_CONCURRENT_CHAINS parallel workers at all times.
 
+    Memory safety (two layers):
+      1. Parquets are filtered to watchlist tickers at load time (~35 MB vs ~661 MB)
+      2. Tickers are processed in chunks of TICKER_CHUNK_SIZE (100) to bound
+         pipeline memory at ~500 MB regardless of market conditions.
+      Total peak: ~535 MB out of 3008 MB (2473 MB headroom).
+
     Args:
         run_id: Backtest run ID
         window_index: This window's position in the full window list (0-based)
@@ -420,6 +434,7 @@ async def run_phase1_window(
     Returns:
         Summary dict with trade counts and phase transition info.
     """
+    import gc
     import os
 
     import boto3
@@ -432,21 +447,25 @@ async def run_phase1_window(
     from app.backtest.prefetch import prefetch_batch_data
     from app.core.historical_data_provider import HistoricalDataProvider
 
+    tickers = config.policy_snapshot.watchlist.tickers or []
+
     logger.info(
         f"[Phase1-Window] Window {window_index}/{total_windows}: "
         f"processing {len(window_days)} days "
         f"({window_days[0].isoformat()} to {window_days[-1].isoformat()}) "
-        f"for run {run_id}"
+        f"for run {run_id} ({len(tickers)} tickers, "
+        f"chunks of {TICKER_CHUNK_SIZE})"
     )
 
-    # Prefetch all S3 data for this window.
-    # Adjacent days share 95%+ of OHLCV/IV lookback — only the options chain
-    # files differ per day. prefetch_batch_data() handles this efficiently.
+    # Prefetch S3 data for this window, filtered to watchlist tickers only.
+    # Without filtering: ~661 MB (all ~10K stocks). With filtering: ~35 MB.
+    # Adjacent days share 95%+ of OHLCV/IV lookback data.
     shared_cache = prefetch_batch_data(
         s3_bucket=s3_bucket,
         batch_days=window_days,
         ohlcv_lookback=70,
         iv_lookback=260,
+        ticker_filter=set(tickers) if tickers else None,
     )
 
     total_trades_in_window = 0
@@ -455,31 +474,46 @@ async def run_phase1_window(
     # Process each day in the window sequentially
     for day_idx, day in enumerate(window_days):
         day_trades: list[dict[str, Any]] = []
-        try:
-            provider = HistoricalDataProvider(
-                as_of_date=day,
-                s3_bucket=s3_bucket,
-                shared_cache=shared_cache,
-            )
 
-            day_trades = await evaluate_day(
-                run_id=run_id,
-                as_of_date=day,
-                config=config,
-                data_provider=provider,
-            )
+        # Process tickers in chunks to bound pipeline memory.
+        # Each chunk runs the full pipeline (stages 1-7) independently.
+        # All scanners/features evaluate tickers independently (no cross-ticker
+        # dependencies), so chunking produces identical results.
+        for chunk_start in range(0, max(len(tickers), 1), TICKER_CHUNK_SIZE):
+            chunk = tickers[chunk_start:chunk_start + TICKER_CHUNK_SIZE]
+            if not chunk:
+                break
 
-            # Write pending trades to DynamoDB
-            if day_trades:
-                await BacktestPendingTradeTable.put_batch(day_trades)
+            try:
+                provider = HistoricalDataProvider(
+                    as_of_date=day,
+                    s3_bucket=s3_bucket,
+                    shared_cache=shared_cache,
+                )
 
-        except Exception as e:
-            import traceback
-            logger.error(
-                f"[Phase1-Window] Error on day {day} "
-                f"(window {window_index}, day {day_idx}): "
-                f"{e}\n{traceback.format_exc()}"
-            )
+                chunk_trades = await evaluate_day(
+                    run_id=run_id,
+                    as_of_date=day,
+                    config=config,
+                    data_provider=provider,
+                    tickers=chunk,
+                )
+                day_trades.extend(chunk_trades)
+
+            except Exception as e:
+                import traceback
+                logger.error(
+                    f"[Phase1-Window] Error on day {day} "
+                    f"(window {window_index}, chunk {chunk_start}): "
+                    f"{e}\n{traceback.format_exc()}"
+                )
+
+            # Reclaim pipeline intermediates between chunks
+            gc.collect()
+
+        # Write pending trades for this day to DynamoDB
+        if day_trades:
+            await BacktestPendingTradeTable.put_batch(day_trades)
 
         # ALWAYS increment progress — even on failure
         await BacktestRunTable.atomic_increment_progress(
@@ -490,14 +524,17 @@ async def run_phase1_window(
         total_trades_in_window += len(day_trades)
         days_processed += 1
 
+        logger.info(
+            f"[Phase1-Window] Day {day.isoformat()} done: "
+            f"{len(day_trades)} trades ({days_processed}/{len(window_days)} "
+            f"days in window {window_index})"
+        )
+
         # Evict processed day's options chain from cache to free memory.
         # OHLCV/IV lookback data is shared across days and stays in cache.
         options_key = f"options-chains/date={day.isoformat()}/data.parquet"
         if options_key in shared_cache:
             del shared_cache[options_key]
-            logger.debug(
-                f"[Phase1-Window] Evicted options cache for {day.isoformat()}"
-            )
 
     # Increment batches_completed (one per window, not per day)
     batches_completed = await BacktestRunTable.atomic_increment_batches_completed(

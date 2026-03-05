@@ -797,6 +797,15 @@ async def _finalize_stale_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any
                     logger.info(
                         f"[SelfHeal] Re-dispatched workers for run {run_id}"
                     )
+                    # Reset staleness clock so the NEXT poll doesn't
+                    # immediately re-dispatch again (thundering herd fix).
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    updated_progress = {**progress}
+                    updated_progress["last_progress_at"] = now_iso
+                    updated_progress["last_redispatch_at"] = now_iso
+                    await BacktestRunTable.update_progress(
+                        run_id, progress=updated_progress,
+                    )
                     updated.append(run)
                     continue
             except Exception as e:
