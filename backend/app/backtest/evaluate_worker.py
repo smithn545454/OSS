@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # are merged UNDER user-provided overrides (user values always take precedence).
 # Number of tickers to process per pipeline invocation in window workers.
 # Bounds pipeline memory at ~500 MB regardless of market conditions.
-TICKER_CHUNK_SIZE = 100
+TICKER_CHUNK_SIZE = 50
 
 # Sensible gate thresholds for backtesting historical data.
 BACKTEST_GATE_DEFAULTS: dict[str, int | float] = {
@@ -418,7 +418,7 @@ async def run_phase1_window(
 
     Memory safety (two layers):
       1. Parquets are filtered to watchlist tickers at load time (~35 MB vs ~661 MB)
-      2. Tickers are processed in chunks of TICKER_CHUNK_SIZE (100) to bound
+      2. Tickers are processed in chunks of TICKER_CHUNK_SIZE (50) to bound
          pipeline memory at ~500 MB regardless of market conditions.
       Total peak: ~535 MB out of 3008 MB (2473 MB headroom).
 
