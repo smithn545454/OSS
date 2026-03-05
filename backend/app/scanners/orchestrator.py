@@ -703,8 +703,9 @@ class ScannerOrchestrator:
                 # ================================================================
                 # STAGE 7: Decision Logic (includes LLM thesis generation)
                 # ================================================================
-                decisions: dict[str, Decision] = {}
-                theses: list[TradeThesis] = []
+                if not streaming:
+                    decisions: dict[str, Decision] = {}
+                    theses: list[TradeThesis] = []
                 if not streaming and evaluations and pillar_results and gate_evaluations:
                     try:
                         # Build scanner triggers map for LLM context
