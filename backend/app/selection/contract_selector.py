@@ -534,17 +534,10 @@ class ContractSelector:
                 or 0
             )
 
-            # Fallback: use day close as mid proxy when no bid/ask available
-            # Polygon basic tier may not include last_quote in snapshot data
+            # Reject contracts with no real bid/ask data
+            # Synthetic pricing (estimating from day close) is unsafe for trading
             if bid <= 0 or ask <= 0:
-                day_close = day.get("close", 0) or 0
-                if day_close > 0:
-                    # Estimate spread at 5% of price (conservative)
-                    half_spread = day_close * 0.025
-                    bid = day_close - half_spread
-                    ask = day_close + half_spread
-                else:
-                    return None
+                return None
 
             mid = (bid + ask) / 2
             spread_abs = ask - bid

@@ -202,9 +202,9 @@ class TestCheckIVPercentileMax:
         result = check_iv_percentile_max(_make_ctx(iv_percentile=95), _config())
         assert result.passed is False
 
-    def test_none_passes(self):
+    def test_none_fails(self):
         result = check_iv_percentile_max(_make_ctx(iv_percentile=None), _config())
-        assert result.passed is True
+        assert result.passed is False
 
 
 class TestCheckThetaBurdenMax:
@@ -217,8 +217,10 @@ class TestCheckThetaBurdenMax:
         result = check_theta_burden_max(_make_ctx(theta_pct=6.0), _config())
         assert result.passed is False
 
-    def test_zero_mid(self):
+    def test_calculate_from_theta_and_mid(self):
+        """When theta_pct is None but mid > 0, calculates from theta and mid."""
         result = check_theta_burden_max(_make_ctx(theta_pct=None), _config())
+        # abs(-0.08) / 5.0 * 100 = 1.6%, which passes the 4% threshold
         assert result.passed is True
 
 
@@ -245,7 +247,7 @@ class TestCheckBreakoutVolume:
         result = check_breakout_volume(
             _make_ctx(scanner_triggers=["BREAKDOWN"], volume_ratio=None), _config()
         )
-        assert result.passed is True
+        assert result.passed is False
 
 
 class TestCheckGreeksCoherence:

@@ -42,13 +42,13 @@ async def create_position_from_evaluation(
     """Create a paper position from an evaluation and decision.
     
     Per Section 17.1:
-    - Entry price = mid at evaluation time
+    - Entry price = ask at evaluation time (realistic buy price)
     - Quantity = 1 contract
-    
+
     Args:
         evaluation: The evaluation record
         decision: The decision for this evaluation
-        
+
     Returns:
         Created PaperPosition or None if position already exists
     """
@@ -86,15 +86,17 @@ async def create_position_from_evaluation(
     # Count convergence (number of scanner triggers from the opportunity)
     convergence_count = 1  # At least the primary scanner
 
+    # Entry price uses ask (what you'd actually pay to buy a long option)
+    entry_price = evaluation.ask if evaluation.ask > 0 else evaluation.mid
     position = PaperPosition(
         evaluation_id=evaluation.evaluation_id,
         option_ticker=evaluation.option_ticker,
-        entry_price=evaluation.mid,
+        entry_price=entry_price,
         entry_date=entry_date,
         quantity=1,
         verdict_at_entry=decision.verdict,
         quality_tier_at_entry=quality_tier,
-        current_price=evaluation.mid,
+        current_price=entry_price,
         current_pnl_pct=0.0,
         max_favorable_excursion=0.0,
         max_adverse_excursion=0.0,
@@ -145,7 +147,7 @@ async def create_positions_from_decisions(
     
     Per Section 17.1:
     - Trigger: Verdict = APPROVE or WATCH
-    - Entry price = mid at evaluation time
+    - Entry price = ask at evaluation time (realistic buy price)
     - Quantity = 1 contract
     
     Args:
@@ -439,7 +441,7 @@ async def _update_position_from_chain(
             error="Contract not found in chain",
         )
     
-    # Extract current price (mid)
+    # Extract current price (bid for long positions — what you'd get selling)
     day = contract.get("day", {})
     underlying = contract.get("underlying_asset", {})
     
@@ -447,9 +449,9 @@ async def _update_position_from_chain(
     bid = last_quote.get("bid", 0) or 0
     ask = last_quote.get("ask", 0) or 0
     
-    # Use mid price if both bid/ask available, otherwise use close or last_quote
-    if bid > 0 and ask > 0:
-        current_price = (bid + ask) / 2
+    # Use bid for current price (long positions exit at bid, not mid)
+    if bid > 0:
+        current_price = bid
     elif day.get("close"):
         current_price = day["close"]
     else:

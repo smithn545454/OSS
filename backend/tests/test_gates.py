@@ -402,13 +402,14 @@ class TestGateIVPercentileMax:
         assert result.passed is False
         assert result.reason_code == "GATE_FAIL_IV_PERCENTILE"
     
-    def test_pass_when_none(self, passing_call_context, default_config):
-        """Should pass when IV percentile is None (data unavailable)."""
+    def test_fail_when_none(self, passing_call_context, default_config):
+        """Should fail when IV percentile is None (insufficient data)."""
         ctx = GateContext(
             **{**passing_call_context.__dict__, "iv_percentile": None}
         )
         result = check_iv_percentile_max(ctx, default_config)
-        assert result.passed is True
+        assert result.passed is False
+        assert result.reason_code == "GATE_FAIL_IV_PERCENTILE_MISSING"
         assert "not available" in result.notes
 
 
@@ -444,13 +445,14 @@ class TestGateBreakoutVolume:
         assert result.passed is False
         assert result.reason_code == "GATE_FAIL_BREAKOUT_VOLUME"
     
-    def test_pass_when_volume_ratio_none(self, breakout_context, default_config):
-        """Should pass when volume_ratio is None (data unavailable)."""
+    def test_fail_when_volume_ratio_none(self, breakout_context, default_config):
+        """Should fail when volume_ratio is None (insufficient data)."""
         ctx = GateContext(
             **{**breakout_context.__dict__, "volume_ratio": None}
         )
         result = check_breakout_volume(ctx, default_config)
-        assert result.passed is True
+        assert result.passed is False
+        assert result.reason_code == "GATE_FAIL_BREAKOUT_VOLUME_MISSING"
         assert "not available" in result.notes
 
 
@@ -795,12 +797,13 @@ class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
     
     def test_zero_mid_price(self, passing_call_context, default_config):
-        """Should handle zero mid price gracefully."""
+        """Should fail when mid price is 0 (insufficient data)."""
         ctx = GateContext(
             **{**passing_call_context.__dict__, "mid": 0.0, "theta_pct": None}
         )
         result = check_theta_burden_max(ctx, default_config)
-        assert result.passed is True
+        assert result.passed is False
+        assert result.reason_code == "GATE_FAIL_THETA_BURDEN_MISSING"
         assert "Cannot calculate" in result.notes
     
     def test_delta_at_boundary_call(self, passing_call_context, default_config):

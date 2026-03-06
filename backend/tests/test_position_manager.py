@@ -90,7 +90,7 @@ class TestCreatePositionFromEvaluation:
 
         assert result is not None
         assert isinstance(result, PaperPosition)
-        assert result.entry_price == 4.25
+        assert result.entry_price == 4.5  # Uses ask price (realistic buy price)
         mock_table.put.assert_called_once()
 
     @pytest.mark.asyncio

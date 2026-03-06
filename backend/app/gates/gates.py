@@ -219,19 +219,19 @@ def check_iv_percentile_max(ctx: GateContext, config: GateConfig) -> GateResult:
     threshold = config.iv_percentile_max
     measured = ctx.iv_percentile
     
-    # Handle case where IV percentile is not available
+    # Fail when IV percentile data is missing — insufficient data to evaluate
     if measured is None:
         return GateResult(
             evaluation_id=ctx.evaluation_id,
             gate_id="GATE_IV_PERCENTILE_MAX",
             enabled=True,
-            passed=True,  # Pass if data not available (can't evaluate)
+            passed=False,
             measured_value=0.0,
             threshold_value=float(threshold),
             operator=GateOperator.LTE,
             units="percent",
-            reason_code="GATE_PASS_IV_PERCENTILE",
-            notes="IV percentile not available, gate skipped",
+            reason_code="GATE_FAIL_IV_PERCENTILE_MISSING",
+            notes="IV percentile not available — insufficient data to evaluate",
         )
     
     passed = measured <= threshold
@@ -291,18 +291,18 @@ def check_breakout_volume(ctx: GateContext, config: GateConfig) -> GateResult:
     measured = ctx.volume_ratio
     
     if measured is None:
-        # Volume ratio not available in scanner metrics
+        # Fail when volume ratio data is missing for a breakout trigger
         return GateResult(
             evaluation_id=ctx.evaluation_id,
             gate_id="GATE_BREAKOUT_VOLUME",
             enabled=True,
-            passed=True,  # Pass if we can't evaluate
+            passed=False,
             measured_value=0.0,
             threshold_value=threshold,
             operator=GateOperator.GTE,
             units="ratio",
-            reason_code="GATE_PASS_BREAKOUT_VOLUME",
-            notes="Volume ratio not available in scanner metrics",
+            reason_code="GATE_FAIL_BREAKOUT_VOLUME_MISSING",
+            notes="Volume ratio not available — insufficient data to confirm breakout",
         )
     
     passed = measured >= threshold
@@ -417,18 +417,18 @@ def check_theta_burden_max(ctx: GateContext, config: GateConfig) -> GateResult:
     elif ctx.mid > 0:
         measured = abs(ctx.theta) / ctx.mid * 100
     else:
-        # Can't calculate - pass by default
+        # Fail when mid price is 0 — insufficient data to evaluate theta burden
         return GateResult(
             evaluation_id=ctx.evaluation_id,
             gate_id="GATE_THETA_BURDEN_MAX",
             enabled=True,
-            passed=True,
+            passed=False,
             measured_value=0.0,
             threshold_value=threshold,
             operator=GateOperator.LTE,
             units="percent",
-            reason_code="GATE_PASS_THETA_BURDEN",
-            notes="Cannot calculate theta burden (mid price is 0)",
+            reason_code="GATE_FAIL_THETA_BURDEN_MISSING",
+            notes="Cannot calculate theta burden (mid price is 0) — insufficient data",
         )
     
     passed = measured <= threshold
