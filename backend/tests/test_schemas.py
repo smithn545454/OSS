@@ -266,7 +266,7 @@ class TestPolicyConfigDefaults:
         cfg = ThesisConfig()
         assert cfg.enabled is True
         assert cfg.max_daily_calls == 50
-        assert cfg.output_token_limit == 1000
+        assert cfg.output_token_limit == 2000
         assert cfg.preferred_provider == LLMProvider.ANTHROPIC
         assert cfg.fallback_enabled is True
 
