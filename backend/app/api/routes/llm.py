@@ -166,6 +166,7 @@ class GenerateThesisRequest(BaseModel):
     """Request body for on-demand thesis generation."""
 
     evaluationId: str
+    ticker: Optional[str] = None
 
 
 def _thesis_to_dict(thesis: Any) -> dict[str, Any]:
@@ -208,17 +209,20 @@ async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
     if existing and str(getattr(existing.status, "value", existing.status)) == "COMPLETED":
         return _thesis_to_dict(existing)
 
-    # Find the evaluation — we need the ticker to look it up
-    # Try all recent evaluations by verdict (APPROVE) since we don't have the ticker
-    eval_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
+    # Find the evaluation — use direct lookup when ticker is provided
     eval_dict = None
-    for item in eval_items:
-        if item.get("evaluation_id") == evaluation_id:
-            eval_dict = item
-            break
+    if body.ticker:
+        eval_dict = await EvaluationTable.get_by_id(body.ticker, evaluation_id)
+
+    # Fallback: scan by verdict (backward compat for callers without ticker)
+    if not eval_dict:
+        eval_items = await EvaluationTable.list_by_verdict("APPROVE", limit=200)
+        for item in eval_items:
+            if item.get("evaluation_id") == evaluation_id:
+                eval_dict = item
+                break
 
     if not eval_dict:
-        # Also check WATCH verdicts
         watch_items = await EvaluationTable.list_by_verdict("WATCH", limit=200)
         for item in watch_items:
             if item.get("evaluation_id") == evaluation_id:

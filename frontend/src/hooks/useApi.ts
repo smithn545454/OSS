@@ -458,9 +458,15 @@ export function useGenerateThesis() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (evaluationId: string) => api.generateThesis(evaluationId),
-    onSuccess: () => {
-      // Invalidate evaluations and detail queries to refresh thesis data
+    mutationFn: (params: { evaluationId: string; ticker: string }) =>
+      api.generateThesis(params),
+    onSuccess: (data, variables) => {
+      // Inject thesis directly into the detail cache for instant display
+      queryClient.setQueryData(
+        queryKeys.evaluationDetail(variables.ticker, variables.evaluationId),
+        (old: Record<string, unknown> | undefined) =>
+          old ? { ...old, thesis: data } : old
+      )
       queryClient.invalidateQueries({ queryKey: ['evaluations'] })
     },
   })

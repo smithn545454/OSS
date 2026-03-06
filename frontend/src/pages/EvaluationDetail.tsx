@@ -860,15 +860,16 @@ export default function EvaluationDetail() {
     if (
       data &&
       evaluationId &&
+      ticker &&
       verdict === 'APPROVE' &&
       thesisStatus !== 'COMPLETED' &&
       !generateThesis.isPending &&
       !hasTriggeredThesis.current
     ) {
       hasTriggeredThesis.current = true
-      generateThesis.mutate(evaluationId)
+      generateThesis.mutate({ evaluationId, ticker })
     }
-  }, [data, evaluationId, generateThesis.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, evaluationId, ticker, generateThesis.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (
@@ -964,7 +965,7 @@ export default function EvaluationDetail() {
       {decision?.verdict === 'APPROVE' && (
         <AITradeThesis
           thesis={effectiveThesis as TradeThesis | null}
-          onGenerate={() => evaluationId && generateThesis.mutate(evaluationId)}
+          onGenerate={() => evaluationId && ticker && generateThesis.mutate({ evaluationId, ticker })}
           isGenerating={generateThesis.isPending}
           generateError={generateThesis.error as Error | null}
         />

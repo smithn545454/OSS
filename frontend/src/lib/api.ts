@@ -428,10 +428,13 @@ export async function getWatchInsights(sinceDays: number = 7): Promise<WatchInsi
 /**
  * Generate thesis for an evaluation (spec section 21).
  */
-export async function generateThesis(evaluationId: string): Promise<TradeThesis> {
+export async function generateThesis(params: {
+  evaluationId: string
+  ticker: string
+}): Promise<TradeThesis> {
   return fetchApi<TradeThesis>(`/api/thesis/generate`, {
     method: 'POST',
-    body: JSON.stringify({ evaluationId }),
+    body: JSON.stringify(params),
   })
 }
 
