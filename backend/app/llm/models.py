@@ -19,6 +19,8 @@ class UnderlyingData:
     sma50: Optional[float] = None
     return_5d: Optional[float] = None
     return_20d: Optional[float] = None
+    atr14: Optional[float] = None
+    atr14_pct: Optional[float] = None
 
 
 @dataclass
@@ -38,6 +40,10 @@ class ContractData:
     open_interest: Optional[int] = None
     volume: Optional[int] = None
     spread_pct: Optional[float] = None
+    breakeven_price: Optional[float] = None
+    expected_move_pct: Optional[float] = None
+    feasibility_ratio: Optional[float] = None
+    theta_pct: Optional[float] = None
 
 
 @dataclass
@@ -96,6 +102,8 @@ class ThesisInput:
                 "sma50": self.underlying.sma50,
                 "return_5d": self.underlying.return_5d,
                 "return_20d": self.underlying.return_20d,
+                "atr14": self.underlying.atr14,
+                "atr14_pct": self.underlying.atr14_pct,
             },
             "contract": {
                 "type": self.contract.option_type,
@@ -111,6 +119,10 @@ class ThesisInput:
                 "open_interest": self.contract.open_interest,
                 "volume": self.contract.volume,
                 "spread_pct": self.contract.spread_pct,
+                "breakeven_price": self.contract.breakeven_price,
+                "expected_move_pct": self.contract.expected_move_pct,
+                "feasibility_ratio": self.contract.feasibility_ratio,
+                "theta_pct": self.contract.theta_pct,
             },
             "scores": {
                 "final": self.scores.final,
@@ -145,12 +157,44 @@ class ThesisInput:
 
 
 @dataclass
+class TakeProfitTargetOutput:
+    """Single take-profit tier from LLM output."""
+
+    tier: int
+    option_pnl_pct: float
+    underlying_price: float
+    rationale: str
+
+
+@dataclass
+class StopLossTargetOutput:
+    """Structured stop loss from LLM output."""
+
+    option_pnl_pct: float
+    underlying_price: float
+    rationale: str
+
+
+@dataclass
+class TimeExitTargetOutput:
+    """Time-based exit rule from LLM output."""
+
+    dte_threshold: int
+    rationale: str
+
+
+@dataclass
 class ExitPlanOutput:
     """Exit plan section of thesis output."""
 
+    # Legacy summary strings
     profit_target: str
     stop_loss: str
     time_exit: str
+    # Structured targets
+    take_profits: list[TakeProfitTargetOutput] = field(default_factory=list)
+    stop_loss_level: Optional[StopLossTargetOutput] = None
+    time_exit_level: Optional[TimeExitTargetOutput] = None
 
 
 @dataclass
@@ -171,6 +215,36 @@ class ThesisOutput:
     def from_dict(cls, data: dict[str, Any]) -> ThesisOutput:
         """Parse from LLM response dictionary."""
         exit_plan_data = data.get("exit_plan", {})
+
+        # Parse structured take profit targets
+        take_profits = []
+        for tp in exit_plan_data.get("take_profits", []):
+            take_profits.append(TakeProfitTargetOutput(
+                tier=tp.get("tier", len(take_profits) + 1),
+                option_pnl_pct=float(tp.get("option_pnl_pct", 0)),
+                underlying_price=float(tp.get("underlying_price", 0)),
+                rationale=tp.get("rationale", ""),
+            ))
+
+        # Parse structured stop loss
+        sl_data = exit_plan_data.get("stop_loss_level")
+        stop_loss_level = None
+        if sl_data and isinstance(sl_data, dict):
+            stop_loss_level = StopLossTargetOutput(
+                option_pnl_pct=float(sl_data.get("option_pnl_pct", 0)),
+                underlying_price=float(sl_data.get("underlying_price", 0)),
+                rationale=sl_data.get("rationale", ""),
+            )
+
+        # Parse structured time exit
+        te_data = exit_plan_data.get("time_exit_level")
+        time_exit_level = None
+        if te_data and isinstance(te_data, dict):
+            time_exit_level = TimeExitTargetOutput(
+                dte_threshold=int(te_data.get("dte_threshold", 5)),
+                rationale=te_data.get("rationale", ""),
+            )
+
         return cls(
             setup_summary=data.get("setup_summary", ""),
             thesis=data.get("thesis", ""),
@@ -181,12 +255,15 @@ class ThesisOutput:
                 profit_target=exit_plan_data.get("profit_target", ""),
                 stop_loss=exit_plan_data.get("stop_loss", ""),
                 time_exit=exit_plan_data.get("time_exit", ""),
+                take_profits=take_profits,
+                stop_loss_level=stop_loss_level,
+                time_exit_level=time_exit_level,
             ),
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        return {
+        result: dict[str, Any] = {
             "setup_summary": self.setup_summary,
             "thesis": self.thesis,
             "supporting_evidence": self.supporting_evidence,
@@ -196,5 +273,24 @@ class ThesisOutput:
                 "profit_target": self.exit_plan.profit_target,
                 "stop_loss": self.exit_plan.stop_loss,
                 "time_exit": self.exit_plan.time_exit,
+                "take_profits": [
+                    {
+                        "tier": tp.tier,
+                        "option_pnl_pct": tp.option_pnl_pct,
+                        "underlying_price": tp.underlying_price,
+                        "rationale": tp.rationale,
+                    }
+                    for tp in self.exit_plan.take_profits
+                ],
+                "stop_loss_level": {
+                    "option_pnl_pct": self.exit_plan.stop_loss_level.option_pnl_pct,
+                    "underlying_price": self.exit_plan.stop_loss_level.underlying_price,
+                    "rationale": self.exit_plan.stop_loss_level.rationale,
+                } if self.exit_plan.stop_loss_level else None,
+                "time_exit_level": {
+                    "dte_threshold": self.exit_plan.time_exit_level.dte_threshold,
+                    "rationale": self.exit_plan.time_exit_level.rationale,
+                } if self.exit_plan.time_exit_level else None,
             },
         }
+        return result

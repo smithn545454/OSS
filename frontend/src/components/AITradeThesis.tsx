@@ -11,7 +11,7 @@ import {
   Zap,
   Loader2
 } from 'lucide-react'
-import type { TradeThesis, ThesisStatus } from '@/lib/types'
+import type { TradeThesis, ThesisStatus, TakeProfitTarget, StopLossTarget, TimeExitTarget } from '@/lib/types'
 import clsx from 'clsx'
 
 // ============================================================================
@@ -132,7 +132,82 @@ interface ExitPlanCardProps {
   exitPlan: TradeThesis['exit_plan']
 }
 
-function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
+function TakeProfitRow({ target, isActive }: { target: TakeProfitTarget; isActive: boolean }) {
+  const tierColors = {
+    1: 'border-oss-approve/30 bg-oss-approve/5',
+    2: 'border-oss-approve/40 bg-oss-approve/8',
+    3: 'border-oss-approve/50 bg-oss-approve/10',
+  }
+
+  return (
+    <div className={clsx(
+      'rounded-lg border p-4',
+      tierColors[target.tier as 1 | 2 | 3] || tierColors[1]
+    )}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-oss-approve" />
+          <span className="text-xs font-medium text-oss-approve">TP{target.tier}</span>
+          {isActive && (
+            <span className="inline-flex items-center rounded-full bg-oss-approve/20 px-2 py-0.5 text-[10px] font-medium text-oss-approve">
+              Active Target
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-oss-approve">
+            +{target.option_pnl_pct.toFixed(0)}%
+          </span>
+          <span className="text-sm font-medium text-oss-text">
+            ${target.underlying_price.toFixed(2)}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-oss-muted">{target.rationale}</p>
+    </div>
+  )
+}
+
+function StopLossRow({ target }: { target: StopLossTarget }) {
+  return (
+    <div className="rounded-lg border border-oss-reject/30 bg-oss-reject/5 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-oss-reject" />
+          <span className="text-xs font-medium text-oss-reject">Stop Loss</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-oss-reject">
+            {target.option_pnl_pct.toFixed(0)}%
+          </span>
+          <span className="text-sm font-medium text-oss-text">
+            ${target.underlying_price.toFixed(2)}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-oss-muted">{target.rationale}</p>
+    </div>
+  )
+}
+
+function TimeExitRow({ target }: { target: TimeExitTarget }) {
+  return (
+    <div className="rounded-lg border border-oss-watch/30 bg-oss-watch/5 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-oss-watch" />
+          <span className="text-xs font-medium text-oss-watch">Time Exit</span>
+        </div>
+        <span className="text-sm font-semibold text-oss-watch">
+          DTE &le; {target.dte_threshold}
+        </span>
+      </div>
+      <p className="text-xs text-oss-muted">{target.rationale}</p>
+    </div>
+  )
+}
+
+function LegacyExitPlanCard({ exitPlan }: ExitPlanCardProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div className="rounded-lg border border-oss-approve/30 bg-oss-approve/5 p-4">
@@ -142,7 +217,6 @@ function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
         </div>
         <p className="text-sm text-oss-text">{exitPlan.profit_target}</p>
       </div>
-      
       <div className="rounded-lg border border-oss-reject/30 bg-oss-reject/5 p-4">
         <div className="flex items-center gap-2 mb-2">
           <Shield className="h-4 w-4 text-oss-reject" />
@@ -150,7 +224,6 @@ function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
         </div>
         <p className="text-sm text-oss-text">{exitPlan.stop_loss}</p>
       </div>
-      
       <div className="rounded-lg border border-oss-watch/30 bg-oss-watch/5 p-4">
         <div className="flex items-center gap-2 mb-2">
           <Clock className="h-4 w-4 text-oss-watch" />
@@ -158,6 +231,28 @@ function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
         </div>
         <p className="text-sm text-oss-text">{exitPlan.time_exit}</p>
       </div>
+    </div>
+  )
+}
+
+function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
+  const isStructured = exitPlan.take_profits && exitPlan.take_profits.length > 0
+
+  if (!isStructured) {
+    return <LegacyExitPlanCard exitPlan={exitPlan} />
+  }
+
+  return (
+    <div className="space-y-3">
+      {exitPlan.take_profits!.map((tp) => (
+        <TakeProfitRow key={tp.tier} target={tp} isActive={tp.tier === 1} />
+      ))}
+      {exitPlan.stop_loss_level && (
+        <StopLossRow target={exitPlan.stop_loss_level} />
+      )}
+      {exitPlan.time_exit_level && (
+        <TimeExitRow target={exitPlan.time_exit_level} />
+      )}
     </div>
   )
 }

@@ -57,18 +57,21 @@ def check_exit_conditions(
 
     current_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
 
-    # Determine thresholds — backtest config overrides if present
+    # Determine thresholds — thesis-driven > backtest config > tracking config
     profit_target = (
-        backtest_exit_config.profit_target_pct
-        if backtest_exit_config else config.profit_target_pct
+        position.thesis_tp1_pct if position.thesis_tp1_pct is not None
+        else backtest_exit_config.profit_target_pct if backtest_exit_config
+        else config.profit_target_pct
     )
     stop_loss = (
-        backtest_exit_config.stop_loss_pct
-        if backtest_exit_config else config.stop_loss_pct
+        position.thesis_sl_pct if position.thesis_sl_pct is not None
+        else backtest_exit_config.stop_loss_pct if backtest_exit_config
+        else config.stop_loss_pct
     )
     time_exit_dte = (
-        backtest_exit_config.min_dte_at_exit
-        if backtest_exit_config else config.time_exit_dte
+        position.thesis_time_exit_dte if position.thesis_time_exit_dte is not None
+        else backtest_exit_config.min_dte_at_exit if backtest_exit_config
+        else config.time_exit_dte
     )
 
     # Priority 1: Profit Target

@@ -17,8 +17,11 @@ from app.core.schemas import (
     LLMProvider as LLMProviderEnum,
     PillarScore,
     ScannerTrigger,
+    StopLossTarget,
+    TakeProfitTarget,
     ThesisConfig,
     ThesisStatus,
+    TimeExitTarget,
     TradeThesis,
     Verdict,
 )
@@ -125,9 +128,16 @@ class ThesisGenerator:
             sma50=features.get("sma50"),
             return_5d=features.get("return_5d"),
             return_20d=features.get("return_20d"),
+            atr14=features.get("atr14"),
+            atr14_pct=features.get("atr14_pct"),
         )
 
-        # Build contract data
+        # Compute theta_pct from evaluation data
+        theta_pct = None
+        if evaluation.mid and evaluation.mid > 0 and evaluation.theta:
+            theta_pct = abs(evaluation.theta) / evaluation.mid * 100
+
+        # Build contract data with exit-relevant fields
         contract = ContractData(
             option_type=str(evaluation.option_type.value) if hasattr(evaluation.option_type, 'value') else str(evaluation.option_type),
             strike=evaluation.strike,
@@ -142,6 +152,10 @@ class ThesisGenerator:
             open_interest=evaluation.open_interest,
             volume=evaluation.volume,
             spread_pct=evaluation.spread_pct,
+            breakeven_price=getattr(evaluation, "breakeven_price", None),
+            expected_move_pct=getattr(evaluation, "expected_move_pct", None),
+            feasibility_ratio=getattr(evaluation, "feasibility_ratio", None),
+            theta_pct=theta_pct,
         )
 
         # Build scores data
@@ -286,6 +300,30 @@ class ThesisGenerator:
             # Record the call
             await self._rate_limiter.record_call(response.tokens_used)
 
+            # Build structured exit plan
+            take_profits = [
+                TakeProfitTarget(
+                    tier=tp.tier,
+                    option_pnl_pct=tp.option_pnl_pct,
+                    underlying_price=tp.underlying_price,
+                    rationale=tp.rationale,
+                )
+                for tp in output.exit_plan.take_profits
+            ]
+            stop_loss_level = None
+            if output.exit_plan.stop_loss_level:
+                stop_loss_level = StopLossTarget(
+                    option_pnl_pct=output.exit_plan.stop_loss_level.option_pnl_pct,
+                    underlying_price=output.exit_plan.stop_loss_level.underlying_price,
+                    rationale=output.exit_plan.stop_loss_level.rationale,
+                )
+            time_exit_level = None
+            if output.exit_plan.time_exit_level:
+                time_exit_level = TimeExitTarget(
+                    dte_threshold=output.exit_plan.time_exit_level.dte_threshold,
+                    rationale=output.exit_plan.time_exit_level.rationale,
+                )
+
             # Build TradeThesis
             return TradeThesis(
                 thesis_id=str(uuid4()),
@@ -299,6 +337,9 @@ class ThesisGenerator:
                     profit_target=output.exit_plan.profit_target,
                     stop_loss=output.exit_plan.stop_loss,
                     time_exit=output.exit_plan.time_exit,
+                    take_profits=take_profits,
+                    stop_loss_level=stop_loss_level,
+                    time_exit_level=time_exit_level,
                 ),
                 llm_provider=LLMProviderEnum(provider.name),
                 model_used=response.model,

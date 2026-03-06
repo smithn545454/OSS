@@ -13,8 +13,8 @@ from app.llm.models import ThesisInput
 THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst. Your task is to generate a detailed trade thesis for an approved options trade recommendation.
 
 You will receive data about:
-- The underlying stock (ticker, price, technical indicators)
-- The option contract (type, strike, expiration, Greeks)
+- The underlying stock (ticker, price, technical indicators, ATR)
+- The option contract (type, strike, expiration, Greeks, breakeven, expected move)
 - Scoring metrics (directional, volatility, structure scores)
 - The factors that contributed to the recommendation
 
@@ -23,7 +23,16 @@ Based on this data, provide a comprehensive trade thesis that explains:
 2. The key supporting evidence
 3. The primary risks to monitor
 4. Conditions that would invalidate the thesis
-5. Recommended exit strategy
+5. Specific exit targets with numerical price levels
+
+EXIT TARGET GUIDELINES:
+- Provide 3 tiered take-profit targets: TP1 (conservative, +25-40%), TP2 (moderate, +50-80%), TP3 (stretch, +100%+)
+- Calculate underlying price levels using delta: a $1 stock move changes the option by ~delta dollars
+- For CALLs: TP underlying prices should be ABOVE current price; SL underlying price BELOW
+- For PUTs: TP underlying prices should be BELOW current price; SL underlying price ABOVE
+- Stop loss should account for the bid-ask spread and daily volatility (ATR)
+- Time exit should consider theta decay acceleration near expiration
+- All option_pnl_pct values represent the percentage change in the option's price (positive for gains, negative for losses)
 
 Your response MUST be valid JSON matching the exact schema provided."""
 
@@ -34,9 +43,38 @@ THESIS_OUTPUT_SCHEMA = """{
   "risks": ["string - List of 2-4 key risks to monitor"],
   "invalidation_conditions": ["string - List of 2-3 conditions that would invalidate this thesis"],
   "exit_plan": {
-    "profit_target": "string - When to take profits (e.g., 'Exit at 50% gain or when underlying reaches $XXX')",
-    "stop_loss": "string - When to cut losses (e.g., 'Exit if position loses 50% or breaks below $XXX')",
-    "time_exit": "string - Time-based exit rule (e.g., 'Close position when DTE reaches 5 regardless of P&L')"
+    "take_profits": [
+      {
+        "tier": 1,
+        "option_pnl_pct": 30.0,
+        "underlying_price": 185.50,
+        "rationale": "Conservative target near SMA resistance"
+      },
+      {
+        "tier": 2,
+        "option_pnl_pct": 60.0,
+        "underlying_price": 192.00,
+        "rationale": "Moderate target at 1x expected move"
+      },
+      {
+        "tier": 3,
+        "option_pnl_pct": 100.0,
+        "underlying_price": 200.00,
+        "rationale": "Stretch target if momentum accelerates"
+      }
+    ],
+    "stop_loss_level": {
+      "option_pnl_pct": -40.0,
+      "underlying_price": 168.00,
+      "rationale": "Below key support at SMA50 minus 1 ATR"
+    },
+    "time_exit_level": {
+      "dte_threshold": 5,
+      "rationale": "Exit before theta decay accelerates in final week"
+    },
+    "profit_target": "string - Human-readable summary of take profit strategy",
+    "stop_loss": "string - Human-readable summary of stop loss strategy",
+    "time_exit": "string - Human-readable summary of time-based exit rule"
   }
 }"""
 
@@ -58,6 +96,8 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
     sma50 = f"${underlying['sma50']:.2f}" if underlying['sma50'] else "N/A"
     ret_5d = f"{underlying['return_5d']:.1f}%" if underlying['return_5d'] else "N/A"
     ret_20d = f"{underlying['return_20d']:.1f}%" if underlying['return_20d'] else "N/A"
+    atr14 = f"${underlying['atr14']:.2f}" if underlying['atr14'] else "N/A"
+    atr14_pct = f"{underlying['atr14_pct']:.1f}%" if underlying['atr14_pct'] else "N/A"
     underlying_text = f"""
 **Underlying Stock: {underlying['ticker']}**
 - Current Price: ${underlying['price']:.2f}
@@ -65,6 +105,7 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 - 50-Day SMA: {sma50}
 - 5-Day Return: {ret_5d}
 - 20-Day Return: {ret_20d}
+- 14-Day ATR: {atr14} ({atr14_pct})
 """
 
     # Format the contract section
@@ -74,6 +115,18 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
     oi = f"{contract['open_interest']:,}" if contract['open_interest'] else "N/A"
     vol = f"{contract['volume']:,}" if contract['volume'] else "N/A"
     spread = f"{contract['spread_pct']:.1f}%" if contract['spread_pct'] else "N/A"
+    breakeven = (
+        f"${contract['breakeven_price']:.2f}" if contract.get('breakeven_price') else "N/A"
+    )
+    expected_move = (
+        f"{contract['expected_move_pct']:.1f}%" if contract.get('expected_move_pct') else "N/A"
+    )
+    feasibility = (
+        f"{contract['feasibility_ratio']:.2f}" if contract.get('feasibility_ratio') else "N/A"
+    )
+    theta_pct = (
+        f"{contract['theta_pct']:.2f}%" if contract.get('theta_pct') else "N/A"
+    )
     contract_text = f"""
 **Option Contract**
 - Type: {contract['type']}
@@ -89,6 +142,16 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 - Open Interest: {oi}
 - Volume: {vol}
 - Bid-Ask Spread: {spread}
+"""
+
+    # Format exit-relevant data section
+    exit_data_text = f"""
+**Exit-Relevant Data**
+- Breakeven Price: {breakeven}
+- Expected Move (1σ over DTE): {expected_move}
+- Feasibility Ratio: {feasibility} (required move / expected move; <1.0 = achievable)
+- Daily Theta Decay: {theta_pct} of premium per day
+- ATR (14-day): {atr14} ({atr14_pct} of stock price)
 """
 
     # Format the scores section
@@ -131,6 +194,7 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 
 {underlying_text}
 {contract_text}
+{exit_data_text}
 {scores_text}
 {contributors_text}
 {triggers_text}
@@ -196,9 +260,43 @@ def parse_thesis_response(response: str) -> dict[str, Any]:
 
     # Validate exit_plan structure
     exit_plan = data.get("exit_plan", {})
-    exit_fields = ["profit_target", "stop_loss", "time_exit"]
-    missing_exit = [f for f in exit_fields if f not in exit_plan]
-    if missing_exit:
-        raise ValueError(f"Missing exit_plan fields: {missing_exit}")
+
+    # Check for structured exit plan (new format)
+    has_structured = "take_profits" in exit_plan and isinstance(
+        exit_plan["take_profits"], list
+    )
+
+    if has_structured:
+        # Validate structured format
+        take_profits = exit_plan["take_profits"]
+        if len(take_profits) < 1 or len(take_profits) > 3:
+            raise ValueError(
+                f"take_profits must have 1-3 items, got {len(take_profits)}"
+            )
+        for tp in take_profits:
+            tp_required = ["tier", "option_pnl_pct", "underlying_price", "rationale"]
+            tp_missing = [f for f in tp_required if f not in tp]
+            if tp_missing:
+                raise ValueError(
+                    f"take_profit tier missing fields: {tp_missing}"
+                )
+
+        sl = exit_plan.get("stop_loss_level")
+        if sl and isinstance(sl, dict):
+            sl_required = ["option_pnl_pct", "underlying_price", "rationale"]
+            sl_missing = [f for f in sl_required if f not in sl]
+            if sl_missing:
+                raise ValueError(f"stop_loss_level missing fields: {sl_missing}")
+
+        # Ensure legacy string fields exist (may be generated alongside structured)
+        for field_name in ["profit_target", "stop_loss", "time_exit"]:
+            if field_name not in exit_plan:
+                exit_plan[field_name] = ""
+    else:
+        # Legacy format — validate string fields
+        exit_fields = ["profit_target", "stop_loss", "time_exit"]
+        missing_exit = [f for f in exit_fields if f not in exit_plan]
+        if missing_exit:
+            raise ValueError(f"Missing exit_plan fields: {missing_exit}")
 
     return data

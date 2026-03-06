@@ -23,6 +23,7 @@ from app.db.tables import (
     FeatureValueTable,
     LLMUsageTable,
     OpportunityTable,
+    PaperPositionTable,
     PillarScoreTable,
     TradeThesisTable,
 )
@@ -135,26 +136,7 @@ async def get_thesis(evaluation_id: str) -> dict[str, Any]:
             detail=f"No thesis found for evaluation: {evaluation_id}",
         )
     
-    return {
-        "thesis_id": thesis.thesis_id,
-        "evaluation_id": thesis.evaluation_id,
-        "status": thesis.status.value if hasattr(thesis.status, 'value') else str(thesis.status),
-        "setup_summary": thesis.setup_summary,
-        "thesis": thesis.thesis,
-        "supporting_evidence": thesis.supporting_evidence,
-        "risks": thesis.risks,
-        "invalidation_conditions": thesis.invalidation_conditions,
-        "exit_plan": {
-            "profit_target": thesis.exit_plan.profit_target,
-            "stop_loss": thesis.exit_plan.stop_loss,
-            "time_exit": thesis.exit_plan.time_exit,
-        },
-        "llm_provider": thesis.llm_provider.value if hasattr(thesis.llm_provider, 'value') else str(thesis.llm_provider),
-        "model_used": thesis.model_used,
-        "tokens_used": thesis.tokens_used,
-        "generated_at": thesis.generated_at,
-        "error_message": thesis.error_message,
-    }
+    return _thesis_to_dict(thesis)
 
 
 # ============================================================================
@@ -171,6 +153,14 @@ class GenerateThesisRequest(BaseModel):
 
 def _thesis_to_dict(thesis: Any) -> dict[str, Any]:
     """Convert a TradeThesis to a serializable dict."""
+    exit_plan = thesis.exit_plan.to_api_dict() if hasattr(thesis.exit_plan, 'to_api_dict') else {
+        "profit_target": thesis.exit_plan.profit_target,
+        "stop_loss": thesis.exit_plan.stop_loss,
+        "time_exit": thesis.exit_plan.time_exit,
+        "take_profits": [],
+        "stop_loss_level": None,
+        "time_exit_level": None,
+    }
     return {
         "thesis_id": thesis.thesis_id,
         "evaluation_id": thesis.evaluation_id,
@@ -180,11 +170,7 @@ def _thesis_to_dict(thesis: Any) -> dict[str, Any]:
         "supporting_evidence": thesis.supporting_evidence,
         "risks": thesis.risks,
         "invalidation_conditions": thesis.invalidation_conditions,
-        "exit_plan": {
-            "profit_target": thesis.exit_plan.profit_target,
-            "stop_loss": thesis.exit_plan.stop_loss,
-            "time_exit": thesis.exit_plan.time_exit,
-        },
+        "exit_plan": exit_plan,
         "llm_provider": str(thesis.llm_provider.value) if hasattr(thesis.llm_provider, "value") else str(thesis.llm_provider),
         "model_used": thesis.model_used,
         "tokens_used": thesis.tokens_used,
@@ -296,5 +282,31 @@ async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
     # Persist the thesis
     await TradeThesisTable.put(thesis)
     logger.info(f"Generated thesis for {evaluation_id}: status={thesis.status}")
+
+    # Apply structured exit levels to linked paper position
+    thesis_status = str(thesis.status.value) if hasattr(thesis.status, "value") else str(thesis.status)
+    if thesis_status == "COMPLETED" and thesis.exit_plan.take_profits:
+        try:
+            position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+            if position:
+                pos_status = str(getattr(position.status, "value", position.status))
+                if pos_status == "OPEN":
+                    updates: dict[str, Any] = {}
+                    tp1 = thesis.exit_plan.take_profits[0]
+                    updates["thesis_tp1_pct"] = tp1.option_pnl_pct
+                    if thesis.exit_plan.stop_loss_level:
+                        updates["thesis_sl_pct"] = abs(
+                            thesis.exit_plan.stop_loss_level.option_pnl_pct
+                        )
+                    if thesis.exit_plan.time_exit_level:
+                        updates["thesis_time_exit_dte"] = (
+                            thesis.exit_plan.time_exit_level.dte_threshold
+                        )
+                    await PaperPositionTable.update(position, updates)
+                    logger.info(
+                        f"Applied thesis exit levels to position {position.position_id}"
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to apply thesis exit levels to position: {e}")
 
     return _thesis_to_dict(thesis)

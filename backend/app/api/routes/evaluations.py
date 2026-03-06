@@ -319,6 +319,15 @@ async def get_evaluation_detail_by_id(
     thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
     thesis_dict = None
     if thesis:
+        has_api = hasattr(thesis.exit_plan, 'to_api_dict')
+        exit_plan = thesis.exit_plan.to_api_dict() if has_api else {
+            "profit_target": thesis.exit_plan.profit_target,
+            "stop_loss": thesis.exit_plan.stop_loss,
+            "time_exit": thesis.exit_plan.time_exit,
+            "take_profits": [],
+            "stop_loss_level": None,
+            "time_exit_level": None,
+        }
         thesis_dict = {
             "thesis_id": thesis.thesis_id,
             "status": _enum_str(thesis.status),
@@ -327,11 +336,7 @@ async def get_evaluation_detail_by_id(
             "supporting_evidence": thesis.supporting_evidence,
             "risks": thesis.risks,
             "invalidation_conditions": thesis.invalidation_conditions,
-            "exit_plan": {
-                "profit_target": thesis.exit_plan.profit_target,
-                "stop_loss": thesis.exit_plan.stop_loss,
-                "time_exit": thesis.exit_plan.time_exit,
-            },
+            "exit_plan": exit_plan,
             "llm_provider": _enum_str(thesis.llm_provider),
             "model_used": thesis.model_used,
             "tokens_used": thesis.tokens_used,
@@ -509,6 +514,15 @@ async def get_evaluation_detail(
     thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
     thesis_dict = None
     if thesis:
+        has_api = hasattr(thesis.exit_plan, 'to_api_dict')
+        exit_plan = thesis.exit_plan.to_api_dict() if has_api else {
+            "profit_target": thesis.exit_plan.profit_target,
+            "stop_loss": thesis.exit_plan.stop_loss,
+            "time_exit": thesis.exit_plan.time_exit,
+            "take_profits": [],
+            "stop_loss_level": None,
+            "time_exit_level": None,
+        }
         thesis_dict = {
             "thesis_id": thesis.thesis_id,
             "status": _enum_str(thesis.status),
@@ -517,11 +531,7 @@ async def get_evaluation_detail(
             "supporting_evidence": thesis.supporting_evidence,
             "risks": thesis.risks,
             "invalidation_conditions": thesis.invalidation_conditions,
-            "exit_plan": {
-                "profit_target": thesis.exit_plan.profit_target,
-                "stop_loss": thesis.exit_plan.stop_loss,
-                "time_exit": thesis.exit_plan.time_exit,
-            },
+            "exit_plan": exit_plan,
             "llm_provider": _enum_str(thesis.llm_provider),
             "model_used": thesis.model_used,
             "tokens_used": thesis.tokens_used,

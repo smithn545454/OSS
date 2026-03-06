@@ -630,10 +630,31 @@ export type ThesisStatus = 'COMPLETED' | 'FAILED' | 'RATE_LIMITED' | 'PENDING'
 
 export type LLMProvider = 'anthropic' | 'openai'
 
+export interface TakeProfitTarget {
+  tier: number
+  option_pnl_pct: number
+  underlying_price: number
+  rationale: string
+}
+
+export interface StopLossTarget {
+  option_pnl_pct: number
+  underlying_price: number
+  rationale: string
+}
+
+export interface TimeExitTarget {
+  dte_threshold: number
+  rationale: string
+}
+
 export interface ExitPlanThesis {
   profit_target: string
   stop_loss: string
   time_exit: string
+  take_profits?: TakeProfitTarget[]
+  stop_loss_level?: StopLossTarget | null
+  time_exit_level?: TimeExitTarget | null
 }
 
 export interface TradeThesis {

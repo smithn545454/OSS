@@ -403,6 +403,11 @@ class PaperPosition(OSSBaseModel):
     gate_margin: Optional[float] = None
     theta_adj_ev: Optional[float] = None
 
+    # Thesis-driven exit thresholds (applied when thesis is generated)
+    thesis_tp1_pct: Optional[float] = None
+    thesis_sl_pct: Optional[float] = None
+    thesis_time_exit_dte: Optional[int] = None
+
 
 # ============================================================================
 # Pipeline Run & Stage Events
@@ -1031,12 +1036,68 @@ class UnderlyingStats(OSSBaseModel):
 # ============================================================================
 
 
+class TakeProfitTarget(OSSBaseModel):
+    """Single take-profit tier (TP1, TP2, TP3)."""
+
+    tier: int  # 1, 2, or 3
+    option_pnl_pct: float  # e.g. 30.0 = +30% option gain
+    underlying_price: float  # stock price at which TP triggers
+    rationale: str  # 1-sentence reason for this level
+
+
+class StopLossTarget(OSSBaseModel):
+    """Structured stop loss level."""
+
+    option_pnl_pct: float  # e.g. -40.0 = -40% option loss
+    underlying_price: float  # stock price at which SL triggers
+    rationale: str
+
+
+class TimeExitTarget(OSSBaseModel):
+    """Time-based exit rule."""
+
+    dte_threshold: int  # close when DTE <= this
+    rationale: str
+
+
 class ExitPlanThesis(OSSBaseModel):
     """Exit plan section of trade thesis."""
 
-    profit_target: str
-    stop_loss: str
-    time_exit: str
+    # Legacy string fields (backward compat with existing DynamoDB items)
+    profit_target: str = ""
+    stop_loss: str = ""
+    time_exit: str = ""
+    # Structured fields
+    take_profits: list[TakeProfitTarget] = Field(default_factory=list)
+    stop_loss_level: Optional[StopLossTarget] = None
+    time_exit_level: Optional[TimeExitTarget] = None
+
+    def to_api_dict(self) -> dict[str, Any]:
+        """Serialize exit plan for API responses."""
+        result: dict[str, Any] = {
+            "profit_target": self.profit_target,
+            "stop_loss": self.stop_loss,
+            "time_exit": self.time_exit,
+            "take_profits": [
+                {
+                    "tier": tp.tier,
+                    "option_pnl_pct": tp.option_pnl_pct,
+                    "underlying_price": tp.underlying_price,
+                    "rationale": tp.rationale,
+                }
+                for tp in self.take_profits
+            ],
+            "stop_loss_level": {
+                "option_pnl_pct": self.stop_loss_level.option_pnl_pct,
+                "underlying_price": self.stop_loss_level.underlying_price,
+                "rationale": self.stop_loss_level.rationale,
+            } if self.stop_loss_level else None,
+            "time_exit_level": {
+                "dte_threshold": self.time_exit_level.dte_threshold,
+                "rationale": self.time_exit_level.rationale,
+            } if self.time_exit_level else None,
+        }
+        return result
 
 
 class TradeThesis(OSSBaseModel):
