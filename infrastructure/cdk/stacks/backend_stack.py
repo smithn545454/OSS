@@ -58,6 +58,13 @@ class BackendStack(Stack):
             secret_name=f"{project_name}/{env_name}/finnhub-api-key",
         )
 
+        # Import existing Anthropic secret (for LLM thesis generation)
+        self.anthropic_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "AnthropicApiKey",
+            secret_name="anthropic",
+        )
+
         # CloudWatch Log Group for Lambda
         log_group = logs.LogGroup(
             self,
@@ -103,6 +110,7 @@ class BackendStack(Stack):
         # Grant Secrets Manager access
         self.polygon_secret.grant_read(lambda_role)
         self.finnhub_secret.grant_read(lambda_role)
+        self.anthropic_secret.grant_read(lambda_role)
 
         # Grant S3 permissions for backtest data bucket
         lambda_role.add_to_policy(
@@ -165,6 +173,7 @@ class BackendStack(Stack):
                 "DYNAMODB_TABLE_PREFIX": table_prefix,
                 "POLYGON_SECRET_ARN": self.polygon_secret.secret_arn,
                 "FINNHUB_SECRET_ARN": self.finnhub_secret.secret_arn,
+                "ANTHROPIC_SECRET_ARN": self.anthropic_secret.secret_arn,
                 # Chunked processing configuration
                 "USE_CHUNKED_PROCESSING": "true",
                 "SCANNER_CHUNK_SIZE": "100",  # Process 100 tickers per worker
