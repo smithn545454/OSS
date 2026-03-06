@@ -379,10 +379,8 @@ class TestListTrades:
 # ============================================================================
 
 
-def _seed_completed_run(run_id: str = "results-run-1"):
+async def _seed_completed_run(run_id: str = "results-run-1"):
     """Helper to seed a completed run with trades for results tests."""
-    import asyncio
-
     from app.db.backtest_tables import BacktestRunTable, BacktestTradeTable
 
     trades_data = [
@@ -506,33 +504,30 @@ def _seed_completed_run(run_id: str = "results-run-1"):
         )
     ]
 
-    async def _seed():
-        await BacktestRunTable.put(
-            {
-                "run_id": run_id,
-                "name": "Results Test Run",
-                "status": "COMPLETED",
-                "config": {
-                    "starting_capital": 10000.0,
-                    "start_date": "2026-01-05",
-                    "end_date": "2026-02-10",
-                },
-                "summary": {
-                    "total_trades": 6,
-                    "sharpe_ratio": 1.8,
-                    "profit_factor": 2.1,
-                    "max_drawdown_pct": 8.5,
-                    "net_pnl": 710.0,
-                    "win_rate": 66.7,
-                },
-                "progress": {"days_completed": 25, "days_total": 25, "trades_found": 6},
-                "created_at": "2026-01-15T12:00:00+00:00",
-            }
-        )
-        for t in trades_data:
-            await BacktestTradeTable.put(t)
-
-    asyncio.get_event_loop().run_until_complete(_seed())
+    await BacktestRunTable.put(
+        {
+            "run_id": run_id,
+            "name": "Results Test Run",
+            "status": "COMPLETED",
+            "config": {
+                "starting_capital": 10000.0,
+                "start_date": "2026-01-05",
+                "end_date": "2026-02-10",
+            },
+            "summary": {
+                "total_trades": 6,
+                "sharpe_ratio": 1.8,
+                "profit_factor": 2.1,
+                "max_drawdown_pct": 8.5,
+                "net_pnl": 710.0,
+                "win_rate": 66.7,
+            },
+            "progress": {"days_completed": 25, "days_total": 25, "trades_found": 6},
+            "created_at": "2026-01-15T12:00:00+00:00",
+        }
+    )
+    for t in trades_data:
+        await BacktestTradeTable.put(t)
 
 
 class TestSummaryEndpoint:
@@ -541,8 +536,9 @@ class TestSummaryEndpoint:
         response = client.get("/api/backtest/runs/nonexistent/summary")
         assert response.status_code == 404
 
-    def test_summary_completed_with_stored_summary(self, client, moto_dynamodb):
-        _seed_completed_run()
+    @pytest.mark.asyncio
+    async def test_summary_completed_with_stored_summary(self, client, moto_dynamodb):
+        await _seed_completed_run()
         response = client.get("/api/backtest/runs/results-run-1/summary")
         assert response.status_code == 200
         data = response.json()
@@ -570,8 +566,9 @@ class TestSummaryEndpoint:
 
 
 class TestEquityCurveEndpoint:
-    def test_equity_curve_completed(self, client, moto_dynamodb):
-        _seed_completed_run("ec-run-1")
+    @pytest.mark.asyncio
+    async def test_equity_curve_completed(self, client, moto_dynamodb):
+        await _seed_completed_run("ec-run-1")
         response = client.get("/api/backtest/runs/ec-run-1/equity-curve")
         assert response.status_code == 200
         data = response.json()
@@ -599,8 +596,9 @@ class TestEquityCurveEndpoint:
 
 
 class TestMonthlyPnlEndpoint:
-    def test_monthly_pnl_completed(self, client, moto_dynamodb):
-        _seed_completed_run("mp-run-1")
+    @pytest.mark.asyncio
+    async def test_monthly_pnl_completed(self, client, moto_dynamodb):
+        await _seed_completed_run("mp-run-1")
         response = client.get("/api/backtest/runs/mp-run-1/monthly-pnl")
         assert response.status_code == 200
         data = response.json()
@@ -611,21 +609,24 @@ class TestMonthlyPnlEndpoint:
 
 
 class TestSegmentsEndpoint:
-    def test_segments_by_scanner(self, client, moto_dynamodb):
-        _seed_completed_run("seg-run-1")
+    @pytest.mark.asyncio
+    async def test_segments_by_scanner(self, client, moto_dynamodb):
+        await _seed_completed_run("seg-run-1")
         response = client.get("/api/backtest/runs/seg-run-1/segments/scanner")
         assert response.status_code == 200
         data = response.json()
         assert data["segment_type"] == "scanner"
         assert data["total_segments"] >= 2  # breakout, compression, cheap_options
 
-    def test_segments_invalid_type(self, client, moto_dynamodb):
-        _seed_completed_run("seg-run-2")
+    @pytest.mark.asyncio
+    async def test_segments_invalid_type(self, client, moto_dynamodb):
+        await _seed_completed_run("seg-run-2")
         response = client.get("/api/backtest/runs/seg-run-2/segments/invalid_type")
         assert response.status_code == 400
 
-    def test_segments_by_regime(self, client, moto_dynamodb):
-        _seed_completed_run("seg-run-3")
+    @pytest.mark.asyncio
+    async def test_segments_by_regime(self, client, moto_dynamodb):
+        await _seed_completed_run("seg-run-3")
         response = client.get("/api/backtest/runs/seg-run-3/segments/regime")
         assert response.status_code == 200
         data = response.json()
@@ -638,8 +639,9 @@ class TestSegmentsEndpoint:
 
 
 class TestReadinessEndpoint:
-    def test_readiness_completed(self, client, moto_dynamodb):
-        _seed_completed_run("ready-run-1")
+    @pytest.mark.asyncio
+    async def test_readiness_completed(self, client, moto_dynamodb):
+        await _seed_completed_run("ready-run-1")
         response = client.get("/api/backtest/runs/ready-run-1/readiness")
         assert response.status_code == 200
         data = response.json()
