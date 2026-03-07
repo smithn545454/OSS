@@ -330,7 +330,8 @@ async def get_summary_metrics(
                 "last_updated": summary.get("last_updated"),
             },
             "by_scanner": {
-                s.get("scanner_type", "?"): s for s in scanners_data
+                _normalize_scanner(s.get("scanner_type", "?")) or "?": s
+                for s in scanners_data
             } if scanners_data else {},
             "by_verdict": {
                 v.get("verdict", "?"): v for v in verdicts_data
