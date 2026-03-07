@@ -437,6 +437,119 @@ async def _exhaust_paginated(
 
 
 # ============================================================================
+# Performance Breakdown (Date-Range-Filtered Slices)
+# ============================================================================
+
+
+@router.get("/performance-breakdown")
+async def get_performance_breakdown(
+    days: int = 5,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict[str, Any]:
+    """Get performance metrics broken down by option_type, scanner, and score bucket.
+
+    Args:
+        days: Number of trading days to look back (default 5). Ignored if
+              start_date/end_date provided.
+        start_date: Explicit start date (YYYY-MM-DD). Overrides days.
+        end_date: Explicit end date (YYYY-MM-DD). Overrides days.
+
+    Returns:
+        Breakdown by option_type, scanner_source, and conviction score bucket.
+    """
+    from datetime import datetime as dt, timedelta, timezone as tz
+    import math
+
+    now = dt.now(tz.utc)
+
+    if start_date and end_date:
+        cutoff = start_date
+        period_end = end_date
+        trading_days = days
+    else:
+        # Convert trading days to calendar days (approx: trading_days * 7/5)
+        calendar_days = math.ceil(days * 7 / 5)
+        cutoff = (now - timedelta(days=calendar_days)).strftime("%Y-%m-%d")
+        period_end = now.strftime("%Y-%m-%d")
+        trading_days = days
+
+    sk_condition = {"gte": cutoff}
+
+    # Fetch all positions in the date range
+    all_positions: list = []
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_open_paginated,
+        None, None, None, sk_condition,
+    ))
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_closed_paginated,
+        None, None, None, sk_condition,
+    ))
+
+    closed = [p for p in all_positions if _enum_val(p.status) == "CLOSED"]
+
+    def _bucket_metrics(positions: list) -> dict[str, Any]:
+        """Compute win rate and avg return for a group of positions."""
+        closed_in_group = [p for p in positions if _enum_val(p.status) == "CLOSED"]
+        wins = sum(1 for p in closed_in_group if p.current_pnl_pct > 0)
+        total_return = sum(p.current_pnl_pct for p in closed_in_group)
+        closed_count = len(closed_in_group)
+        return {
+            "count": len(positions),
+            "closed": closed_count,
+            "win_rate": round(wins / closed_count * 100, 1) if closed_count > 0 else None,
+            "avg_return": round(total_return / closed_count, 2) if closed_count > 0 else None,
+        }
+
+    # By option_type
+    by_option_type: dict[str, list] = {}
+    for p in all_positions:
+        opt_type = p.option_type or "UNKNOWN"
+        by_option_type.setdefault(opt_type, []).append(p)
+
+    # By scanner_source
+    by_scanner: dict[str, list] = {}
+    for p in all_positions:
+        scanner = p.scanner_source or "UNKNOWN"
+        by_scanner.setdefault(scanner, []).append(p)
+
+    # By conviction score bucket
+    def _score_bucket(score: Any) -> str:
+        if score is None:
+            return "UNKNOWN"
+        s = float(score)
+        if s < 65:
+            return "<65"
+        elif s < 70:
+            return "65-69"
+        elif s < 75:
+            return "70-74"
+        elif s < 80:
+            return "75-79"
+        else:
+            return "80+"
+
+    by_score: dict[str, list] = {}
+    for p in all_positions:
+        bucket = _score_bucket(p.conviction_score)
+        by_score.setdefault(bucket, []).append(p)
+
+    return {
+        "period": {
+            "start": cutoff,
+            "end": period_end,
+            "trading_days": trading_days,
+        },
+        "total_positions": len(all_positions),
+        "total_closed": len(closed),
+        "by_option_type": {k: _bucket_metrics(v) for k, v in sorted(by_option_type.items())},
+        "by_scanner": {k: _bucket_metrics(v) for k, v in sorted(by_scanner.items())},
+        "by_score_bucket": {k: _bucket_metrics(v) for k, v in sorted(by_score.items())},
+    }
+
+
+# ============================================================================
 # Metrics Endpoints (Legacy — Computed on Read)
 # ============================================================================
 

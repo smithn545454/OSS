@@ -13,9 +13,9 @@ Calculates:
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Sequence
 
-from app.core.schemas import PaperPosition, PositionStatus, Verdict
+from app.core.schemas import PaperPosition, PositionStatus
 from app.db.tables import PaperPositionTable
 from app.paper_trading.models import PerformanceMetrics, TierPerformance
 

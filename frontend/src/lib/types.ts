@@ -253,6 +253,23 @@ export interface SummaryMetricsResponse {
   }>
 }
 
+// Performance breakdown by option_type, scanner, score bucket
+export interface PerformanceBreakdownBucket {
+  count: number
+  closed: number
+  win_rate: number | null
+  avg_return: number | null
+}
+
+export interface PerformanceBreakdownResponse {
+  period: { start: string; end: string; trading_days: number }
+  total_positions: number
+  total_closed: number
+  by_option_type: Record<string, PerformanceBreakdownBucket>
+  by_scanner: Record<string, PerformanceBreakdownBucket>
+  by_score_bucket: Record<string, PerformanceBreakdownBucket>
+}
+
 // Equity curve / snapshots / analysis response types
 export interface PaperEquityCurveResponse {
   curve: Array<{ date: string; daily_pnl: number; equity: number }>

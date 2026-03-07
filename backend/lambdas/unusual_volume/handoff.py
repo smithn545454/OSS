@@ -189,6 +189,22 @@ def _process_candidate(candidate: dict) -> dict:
             "filter_reasons": filter_reasons,
         }
 
+    # Apply contract quality validation
+    contract_rejections = _validate_contract_quality(candidate)
+    if contract_rejections:
+        _update_candidate_status(
+            scan_id=scan_id,
+            option_ticker=option_ticker,
+            status="FILTERED",
+            filter_reason=",".join(contract_rejections),
+        )
+        logger.info(f"Candidate {option_ticker} rejected (contract quality): {contract_rejections}")
+        return {
+            "status": "FILTERED",
+            "option_ticker": option_ticker,
+            "filter_reasons": contract_rejections,
+        }
+
     # Candidate passed - create evaluation
     evaluation_id = _create_evaluation(candidate)
 
@@ -243,6 +259,43 @@ def _apply_stage2_filters(candidate: dict) -> list[str]:
         # Don't filter on missing stats, let it pass
 
     return filter_reasons
+
+
+def _validate_contract_quality(candidate: dict) -> list[str]:
+    """Validate contract quality before creating an evaluation.
+
+    Rejects contracts with insufficient DTE, deep OTM delta, or penny premiums
+    that are unlikely to be tradeable at recorded prices.
+
+    Args:
+        candidate: Candidate record
+
+    Returns:
+        List of rejection reason codes (empty if passed)
+    """
+    rejections = []
+
+    dte = int(candidate.get("dte", 0))
+    delta = float(candidate.get("delta", 0))
+    ask = float(candidate.get("ask", 0))
+
+    # Minimum DTE — matches policy DTE_RANGE gate (7 days minimum)
+    if dte < 7:
+        rejections.append("DTE_TOO_SHORT")
+
+    # Minimum delta — deep OTM options have low probability of profit
+    if 0 < abs(delta) < 0.15:
+        rejections.append("DELTA_TOO_LOW")
+
+    # Minimum premium — penny options have wide spreads
+    if 0 < ask < 0.10:
+        rejections.append("PREMIUM_TOO_LOW")
+
+    # Missing data — if key fields are zero/missing, reject
+    if ask <= 0 and float(candidate.get("mid", 0)) <= 0:
+        rejections.append("MISSING_PRICE_DATA")
+
+    return rejections
 
 
 def _get_underlying_stats(ticker: str) -> Optional[dict]:

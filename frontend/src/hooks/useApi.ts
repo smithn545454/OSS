@@ -610,6 +610,14 @@ export function usePaginatedPositions(params: {
   })
 }
 
+export function usePerformanceBreakdown(days: number = 5) {
+  return useQuery({
+    queryKey: ['paper-trading', 'performance-breakdown', days] as const,
+    queryFn: () => api.getPerformanceBreakdown({ days }),
+    staleTime: 60000,
+  })
+}
+
 // ============================================================================
 // Backtest Hooks
 // ============================================================================

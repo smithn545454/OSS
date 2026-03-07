@@ -19,6 +19,7 @@ import {
   Cell,
 } from 'recharts'
 import { useEquityCurve, useCalibrationReports } from '@/hooks/useApi'
+import PerformanceBreakdown from './PerformanceBreakdown'
 import type { EnrichedPosition, ScannerType } from '@/lib/types'
 
 interface PerformanceOverviewProps {
@@ -297,6 +298,9 @@ export default function PerformanceOverview({ positions, period }: PerformanceOv
           </div>
         )}
       </div>
+
+      {/* Row 4: Performance Breakdown */}
+      <PerformanceBreakdown />
     </div>
   )
 }

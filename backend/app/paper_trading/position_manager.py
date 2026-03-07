@@ -55,16 +55,18 @@ async def create_position_from_evaluation(
     # Check for duplicate by evaluation_id
     existing = await PaperPositionTable.get_by_evaluation_id(evaluation.evaluation_id)
     if existing:
-        logger.debug(
-            f"Position already exists for evaluation {evaluation.evaluation_id}"
+        logger.warning(
+            f"Skipping enrollment: position already exists for evaluation "
+            f"{evaluation.evaluation_id} ({evaluation.option_ticker})"
         )
         return None
 
     # Check for duplicate by option_ticker (same contract already has an open position)
     has_open = await PaperPositionTable.has_open_position(evaluation.option_ticker)
     if has_open:
-        logger.debug(
-            f"Open position already exists for contract {evaluation.option_ticker}"
+        logger.warning(
+            f"Skipping enrollment: open position already exists for contract "
+            f"{evaluation.option_ticker} (eval={evaluation.evaluation_id})"
         )
         return None
     
@@ -122,7 +124,14 @@ async def create_position_from_evaluation(
     )
     
     # Persist position
-    await PaperPositionTable.put(position)
+    try:
+        await PaperPositionTable.put(position)
+    except Exception as e:
+        logger.error(
+            f"Failed to persist paper position for {evaluation.option_ticker} "
+            f"(eval={evaluation.evaluation_id}): {e}"
+        )
+        return None
     logger.info(
         f"Created paper position for {evaluation.option_ticker} "
         f"(verdict={decision.verdict}, tier={quality_tier})"
@@ -159,21 +168,29 @@ async def create_positions_from_decisions(
         List of created PaperPositions
     """
     created_positions: list[PaperPosition] = []
-    
+    eligible_count = 0
+    skipped_count = 0
+
     for evaluation in evaluations:
         decision = decisions.get(evaluation.evaluation_id)
         if not decision:
             continue
-        
+
         # Only create positions for APPROVE and WATCH
         if decision.verdict not in (Verdict.APPROVE, Verdict.WATCH):
             continue
-        
+
+        eligible_count += 1
         position = await create_position_from_evaluation(evaluation, decision)
         if position:
             created_positions.append(position)
-    
-    logger.info(f"Created {len(created_positions)} paper positions")
+        else:
+            skipped_count += 1
+
+    logger.info(
+        f"Paper trading enrollment: {len(created_positions)}/{eligible_count} created, "
+        f"{skipped_count} skipped (dedup or error)"
+    )
     return created_positions
 
 
@@ -427,7 +444,18 @@ async def _update_position_from_chain(
                 exit_reason=ExitReason.EXPIRATION,
             )
         
-        # Not expired but missing - return error
+        # Not expired but missing — still increment days_held so position
+        # doesn't appear "never updated". Price stays at last known value.
+        new_days_held = position.days_held + 1
+        now = datetime.now(timezone.utc).isoformat()
+        await PaperPositionTable.update(position, {
+            "days_held": new_days_held,
+            "last_updated": now,
+        })
+        logger.info(
+            f"Contract not in chain for {position.option_ticker} "
+            f"(days_held={new_days_held}), keeping last price"
+        )
         return UpdateResult(
             position_id=position.position_id,
             option_ticker=position.option_ticker,

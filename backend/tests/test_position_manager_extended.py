@@ -207,9 +207,12 @@ class TestUpdatePositionFromChain:
         # Ticker indicates far future expiration
         position.option_ticker = "O:AAPL990320C00185000"
 
-        with patch("app.paper_trading.position_manager.calculate_dte_from_expiration", return_value=100):
+        with patch("app.paper_trading.position_manager.calculate_dte_from_expiration", return_value=100), \
+             patch("app.paper_trading.position_manager.PaperPositionTable") as mock_table:
+            mock_table.update = AsyncMock(return_value=None)
             result = await _update_position_from_chain(position, {})
         assert result.error == "Contract not found in chain"
+        assert result.exit_triggered is False
 
     @pytest.mark.asyncio
     async def test_contract_not_found_expired(self):

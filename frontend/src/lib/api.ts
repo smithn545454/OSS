@@ -47,6 +47,7 @@ import type {
   UpdatePositionsResponse,
   PaginatedPositionsResponse,
   SummaryMetricsResponse,
+  PerformanceBreakdownResponse,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -509,6 +510,19 @@ export async function getPaperTradingTiers(): Promise<PaperTradingTiersResponse>
 
 export async function getPaperTradingExits(): Promise<PaperTradingExitsResponse> {
   return fetchApi<PaperTradingExitsResponse>('/api/paper-trading/metrics/exits')
+}
+
+export async function getPerformanceBreakdown(params: {
+  days?: number
+  start_date?: string
+  end_date?: string
+} = {}): Promise<PerformanceBreakdownResponse> {
+  const qs = new URLSearchParams()
+  if (params.days != null) qs.set('days', String(params.days))
+  if (params.start_date) qs.set('start_date', params.start_date)
+  if (params.end_date) qs.set('end_date', params.end_date)
+  const suffix = qs.toString() ? `?${qs}` : ''
+  return fetchApi<PerformanceBreakdownResponse>(`/api/paper-trading/performance-breakdown${suffix}`)
 }
 
 export async function getAIInsights(): Promise<AIInsightsResponse> {

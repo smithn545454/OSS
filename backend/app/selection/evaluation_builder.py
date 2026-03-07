@@ -100,11 +100,18 @@ class EvaluationBuilder:
             else 0.0
         )
 
+        # Extract primary scanner source from opportunity
+        scanner_source = None
+        if opportunity.scanner_triggers:
+            st = opportunity.scanner_triggers[0].scanner_type
+            scanner_source = st.value if hasattr(st, "value") else str(st)
+
         # Build evaluation
         evaluation = Evaluation(
             opportunity_id=opportunity.opportunity_id,
             underlying_ticker=candidate.underlying_ticker,
             option_ticker=candidate.option_ticker,
+            scanner_source=scanner_source,
             option_type=candidate.option_type,
             expiration_date=candidate.expiration_date,
             dte=candidate.dte,
