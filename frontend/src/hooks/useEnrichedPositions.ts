@@ -95,23 +95,48 @@ export function useEnrichedPositions(
   // Compute raw metrics from pre-aggregated summary or from positions as fallback
   const rawMetrics = useMemo(() => {
     const global = metricsQuery.data?.global
+    const positions = enrichedPositions
+
     if (global) {
+      // Compute avgScore from loaded positions when backend counters aren't populated
+      let avgScore = global.avg_score
+      if (avgScore == null && positions.length > 0) {
+        const scored = positions.filter((p) => p.conviction_score != null)
+        if (scored.length > 0) {
+          avgScore =
+            scored.reduce((s, p) => s + (p.conviction_score ?? 0), 0) /
+            scored.length
+        }
+      }
+
+      // Compute bestTrade from loaded positions when backend hasn't tracked it yet
+      let bestTrade: { ticker: string; pnl: number } | null = null
+      if (global.best_trade_pnl != null) {
+        bestTrade = { ticker: '', pnl: global.best_trade_pnl }
+      } else if (positions.length > 0) {
+        const best = positions.reduce((best, p) =>
+          p.current_pnl_pct > (best?.current_pnl_pct ?? -Infinity) ? p : best
+        )
+        if (best && best.current_pnl_pct !== 0) {
+          bestTrade = {
+            ticker: best.underlying_ticker ?? '',
+            pnl: best.current_pnl_pct,
+          }
+        }
+      }
+
       return {
         totalPnl: global.total_pnl,
         winRate: global.closed_count > 0 ? global.win_rate : null,
         avgReturn: global.avg_return,
-        avgScore: global.avg_score ?? null,
-        bestTrade:
-          global.best_trade_pnl != null
-            ? { ticker: '', pnl: global.best_trade_pnl }
-            : null,
+        avgScore,
+        bestTrade,
         activeCount: global.open_count,
         closedCount: global.closed_count,
       }
     }
 
     // Fallback: compute from current page of positions
-    const positions = enrichedPositions
     const closed = positions.filter((p) => p.status === 'CLOSED')
     const open = positions.filter((p) => p.status === 'OPEN')
 

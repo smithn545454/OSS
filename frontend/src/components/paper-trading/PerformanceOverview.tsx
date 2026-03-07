@@ -42,6 +42,7 @@ const SCANNER_NAMES: Record<string, string> = {
   UNUSUAL_VOLUME: 'Unusual Volume',
   COMPRESSION_EXPANSION: 'Compression',
   CHEAP_OPTIONS: 'Cheap Options',
+  UNKNOWN: 'Other Scanners',
 }
 
 const SCANNER_KEYS: ScannerType[] = [
@@ -70,57 +71,68 @@ export default function PerformanceOverview({
 
   const curve = equityData?.curve ?? []
 
-  // Scanner performance: prefer server-side pre-aggregated data, fallback to client-side
-  const scannerPerf = SCANNER_KEYS.map((key) => {
-    const serverData = byScanner?.[key]
-    if (serverData && (serverData.count ?? 0) > 0) {
-      const count = Number(serverData.count ?? 0)
-      const closedCount = Number(serverData.closed_count ?? 0)
-      const winCount = Number(serverData.win_count ?? 0)
-      const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : null
-      const totalPnl = Number(serverData.total_pnl ?? 0)
-      return {
-        key,
-        name: SCANNER_NAMES[key] || key,
-        count,
-        winRate,
-        avgReturn: closedCount > 0 ? totalPnl / closedCount : 0,
-        avgScore: null as number | null,
-        totalPnl,
-      }
+  // Scanner performance: build from all server-side keys that have data
+  const scannerPerf = (() => {
+    // Collect all scanner keys: standard ones + any from server data
+    const allKeys = new Set<string>(SCANNER_KEYS as readonly string[])
+    if (byScanner) {
+      Object.keys(byScanner).forEach((k) => allKeys.add(k))
     }
 
-    // Fallback: client-side computation
-    const group = positions.filter((p) => p.scanner_source === key)
-    const closed = group.filter((p) => p.status === 'CLOSED')
-    const wins = closed.filter((p) => p.current_pnl_pct > 0)
-    const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : null
-    const avgReturn =
-      group.length > 0
-        ? group.reduce((s, p) => s + p.current_pnl_pct, 0) / group.length
-        : 0
-    const scored = group.filter((p) => p.conviction_score != null)
-    const avgScore =
-      scored.length > 0
-        ? scored.reduce((s, p) => s + (p.conviction_score ?? 0), 0) / scored.length
-        : null
-    const totalPnl = group.reduce((s, p) => {
-      const price = p.status === 'CLOSED' && p.exit_price != null ? p.exit_price : p.current_price
-      return s + (price - p.entry_price) * 100
-    }, 0)
+    return Array.from(allKeys)
+      .map((key) => {
+        const serverData = byScanner?.[key]
+        if (serverData && (serverData.count ?? 0) > 0) {
+          const count = Number(serverData.count ?? 0)
+          const closedCount = Number(serverData.closed_count ?? 0)
+          const winCount = Number(serverData.win_count ?? 0)
+          const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : null
+          const totalPnl = Number(serverData.total_pnl ?? 0)
+          return {
+            key,
+            name: SCANNER_NAMES[key] || key,
+            count,
+            winRate,
+            avgReturn: closedCount > 0 ? totalPnl / closedCount : 0,
+            avgScore: null as number | null,
+            totalPnl,
+          }
+        }
 
-    return {
-      key,
-      name: SCANNER_NAMES[key] || key,
-      count: group.length,
-      winRate,
-      avgReturn,
-      avgScore,
-      totalPnl,
-    }
-  })
+        // Fallback: client-side computation
+        const group = positions.filter((p) => p.scanner_source === key)
+        if (group.length === 0) return null
+        const closed = group.filter((p) => p.status === 'CLOSED')
+        const wins = closed.filter((p) => p.current_pnl_pct > 0)
+        const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : null
+        const avgReturn =
+          group.reduce((s, p) => s + p.current_pnl_pct, 0) / group.length
+        const scored = group.filter((p) => p.conviction_score != null)
+        const avgScore =
+          scored.length > 0
+            ? scored.reduce((s, p) => s + (p.conviction_score ?? 0), 0) / scored.length
+            : null
+        const totalPnl = group.reduce((s, p) => {
+          const price = p.status === 'CLOSED' && p.exit_price != null ? p.exit_price : p.current_price
+          return s + (price - p.entry_price) * 100
+        }, 0)
+
+        return {
+          key,
+          name: SCANNER_NAMES[key] || key,
+          count: group.length,
+          winRate,
+          avgReturn,
+          avgScore,
+          totalPnl,
+        }
+      })
+      .filter((s): s is NonNullable<typeof s> => s != null)
+      .sort((a, b) => b.count - a.count)
+  })()
 
   // Score band analysis computed from positions (no calibration report dependency)
+  // Uses "profitable %" — positions with positive current P&L — to include open positions
   const scoreBands = SCORE_BANDS.map((band) => {
     const inBand = positions.filter(
       (p) =>
@@ -128,12 +140,11 @@ export default function PerformanceOverview({
         p.conviction_score >= band.min &&
         p.conviction_score < band.max
     )
-    const closed = inBand.filter((p) => p.status === 'CLOSED')
-    const wins = closed.filter((p) => p.current_pnl_pct > 0)
+    const profitable = inBand.filter((p) => p.current_pnl_pct > 0)
     return {
       band: band.label,
       count: inBand.length,
-      win_rate: closed.length > 0 ? (wins.length / closed.length) * 100 : 0,
+      win_rate: inBand.length > 0 ? (profitable.length / inBand.length) * 100 : 0,
     }
   }).filter((b) => b.count > 0)
 
@@ -272,7 +283,7 @@ export default function PerformanceOverview({
         </div>
 
         <div className="rounded-lg border border-oss-border bg-oss-surface p-4">
-          <h3 className="text-sm font-medium text-oss-text mb-3">Score Band Analysis</h3>
+          <h3 className="text-sm font-medium text-oss-text mb-3">Score Band Analysis <span className="text-oss-muted font-normal">(% profitable)</span></h3>
           {scoreBands.length > 0 ? (
             <div className="space-y-3">
               {scoreBands.map((band, i) => (
