@@ -103,6 +103,7 @@ class AnthropicProvider(LLMProvider):
         self,
         prompt: str,
         max_tokens: int = 1000,
+        system_prompt: Optional[str] = None,
     ) -> LLMResponse:
         """Generate completion using Claude."""
         if not self.is_available():
@@ -116,11 +117,14 @@ class AnthropicProvider(LLMProvider):
 
         try:
             client = self._get_client()
-            response = await client.messages.create(
-                model=self.MODEL,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            kwargs: dict = {
+                "model": self.MODEL,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if system_prompt:
+                kwargs["system"] = system_prompt
+            response = await client.messages.create(**kwargs)
 
             # Extract content from response
             content = ""

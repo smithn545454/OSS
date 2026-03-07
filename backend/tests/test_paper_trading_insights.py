@@ -112,34 +112,41 @@ def sample_calibration_report() -> dict:
 class TestBuildInsightsPrompt:
 
     def test_includes_all_sections(self, sample_metrics_dict, sample_tier_data, sample_exit_data):
-        prompt = build_insights_prompt(sample_metrics_dict, sample_tier_data, sample_exit_data)
-        assert "Overall Performance" in prompt
-        assert "Verdict Performance" in prompt
-        assert "Tier Performance" in prompt
-        assert "Exit Strategy Analysis" in prompt
-        assert "60.0%" in prompt  # win rate
-        assert "TIER_1" in prompt
+        system_prompt, user_prompt = build_insights_prompt(
+            sample_metrics_dict, sample_tier_data, sample_exit_data
+        )
+        assert "quantitative trading" in system_prompt
+        assert "Overall Performance" in user_prompt
+        assert "Verdict Performance" in user_prompt
+        assert "Tier Performance" in user_prompt
+        assert "Exit Strategy Analysis" in user_prompt
+        assert "60.0%" in user_prompt  # win rate
+        assert "TIER_1" in user_prompt
 
     def test_includes_calibration_when_provided(
         self, sample_metrics_dict, sample_tier_data, sample_exit_data, sample_calibration_report
     ):
-        prompt = build_insights_prompt(
+        _system, user_prompt = build_insights_prompt(
             sample_metrics_dict, sample_tier_data, sample_exit_data, sample_calibration_report
         )
-        assert "Latest Calibration Report" in prompt
-        assert "GATE_MIN_OPEN_INTEREST" in prompt
-        assert "Score Band Analysis" in prompt
+        assert "Latest Calibration Report" in user_prompt
+        assert "GATE_MIN_OPEN_INTEREST" in user_prompt
+        assert "Score Band Analysis" in user_prompt
 
     def test_no_calibration_section_when_none(
         self, sample_metrics_dict, sample_tier_data, sample_exit_data
     ):
-        prompt = build_insights_prompt(sample_metrics_dict, sample_tier_data, sample_exit_data, None)
-        assert "Latest Calibration Report" not in prompt
+        _system, user_prompt = build_insights_prompt(
+            sample_metrics_dict, sample_tier_data, sample_exit_data, None
+        )
+        assert "Latest Calibration Report" not in user_prompt
 
     def test_includes_output_schema(self, sample_metrics_dict, sample_tier_data, sample_exit_data):
-        prompt = build_insights_prompt(sample_metrics_dict, sample_tier_data, sample_exit_data)
-        assert "GATE_TUNING" in prompt
-        assert "estimated_impact" in prompt
+        _system, user_prompt = build_insights_prompt(
+            sample_metrics_dict, sample_tier_data, sample_exit_data
+        )
+        assert "GATE_TUNING" in user_prompt
+        assert "estimated_impact" in user_prompt
 
 
 # ============================================================================

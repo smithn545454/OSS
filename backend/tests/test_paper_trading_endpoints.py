@@ -209,23 +209,16 @@ class TestEquityCurveComputation:
 
     @pytest.mark.asyncio
     async def test_equity_curve_computation(self, app):
-        """Verify equity curve math with deterministic mock data."""
-        pos = _make_pos("pos-eq-1", entry_price=10.0, entry_date="2026-01-10")
-
-        # Snapshots: price goes 10 -> 11 -> 12 over two days
-        mock_snapshots = [
-            {"snapshot_date": "2026-01-11", "price": 11.0},
-            {"snapshot_date": "2026-01-12", "price": 12.0},
+        """Verify equity curve math with pre-aggregated daily data."""
+        mock_daily = [
+            {"date": "2026-01-11", "daily_pnl": 100.0},
+            {"date": "2026-01-12", "daily_pnl": 100.0},
         ]
 
         with patch(
-            "app.db.tables.PaperPositionTable.list_all",
+            "app.paper_trading.metrics_aggregator.MetricsAggregator.get_daily_equity",
             new_callable=AsyncMock,
-            return_value=[pos],
-        ), patch(
-            "app.db.tables.PaperSnapshotTable.list_by_position_range",
-            new_callable=AsyncMock,
-            return_value=mock_snapshots,
+            return_value=mock_daily,
         ):
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
@@ -239,14 +232,10 @@ class TestEquityCurveComputation:
             curve = data["curve"]
             assert len(curve) == 2
 
-            # Day 1: price goes from entry_price=10.0 to 11.0
-            # daily_change = (11.0 - 10.0) * 100 = 100.0
             assert curve[0]["date"] == "2026-01-11"
             assert curve[0]["daily_pnl"] == 100.0
             assert curve[0]["equity"] == 10100.0  # 10000 + 100
 
-            # Day 2: price goes from 11.0 to 12.0
-            # daily_change = (12.0 - 11.0) * 100 = 100.0
             assert curve[1]["date"] == "2026-01-12"
             assert curve[1]["daily_pnl"] == 100.0
             assert curve[1]["equity"] == 10200.0  # 10100 + 100
@@ -263,7 +252,7 @@ class TestEquityCurveEmpty:
     async def test_equity_curve_empty(self, app):
         """No data returns empty curve."""
         with patch(
-            "app.db.tables.PaperPositionTable.list_all",
+            "app.paper_trading.metrics_aggregator.MetricsAggregator.get_daily_equity",
             new_callable=AsyncMock,
             return_value=[],
         ):

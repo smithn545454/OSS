@@ -18,13 +18,23 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { useEquityCurve, useCalibrationReports } from '@/hooks/useApi'
+import { useEquityCurve } from '@/hooks/useApi'
 import PerformanceBreakdown from './PerformanceBreakdown'
 import type { EnrichedPosition, ScannerType } from '@/lib/types'
 
 interface PerformanceOverviewProps {
   positions: EnrichedPosition[]
   period: string
+  byScanner?: Record<string, ScannerMetrics>
+}
+
+interface ScannerMetrics {
+  scanner_type?: string
+  count?: number
+  closed_count?: number
+  win_count?: number
+  loss_count?: number
+  total_pnl?: number
 }
 
 const SCANNER_NAMES: Record<string, string> = {
@@ -41,14 +51,46 @@ const SCANNER_KEYS: ScannerType[] = [
   'CHEAP_OPTIONS',
 ]
 
-export default function PerformanceOverview({ positions, period }: PerformanceOverviewProps) {
+const SCORE_BANDS = [
+  { label: '60-64', min: 60, max: 65 },
+  { label: '65-69', min: 65, max: 70 },
+  { label: '70-74', min: 70, max: 75 },
+  { label: '75-79', min: 75, max: 80 },
+  { label: '80-84', min: 80, max: 85 },
+  { label: '85-89', min: 85, max: 90 },
+  { label: '90+', min: 90, max: 101 },
+]
+
+export default function PerformanceOverview({
+  positions,
+  period,
+  byScanner,
+}: PerformanceOverviewProps) {
   const { data: equityData } = useEquityCurve(period)
-  const { data: calReports } = useCalibrationReports(1)
 
   const curve = equityData?.curve ?? []
 
-  // Scanner performance computed client-side
+  // Scanner performance: prefer server-side pre-aggregated data, fallback to client-side
   const scannerPerf = SCANNER_KEYS.map((key) => {
+    const serverData = byScanner?.[key]
+    if (serverData && (serverData.count ?? 0) > 0) {
+      const count = Number(serverData.count ?? 0)
+      const closedCount = Number(serverData.closed_count ?? 0)
+      const winCount = Number(serverData.win_count ?? 0)
+      const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : null
+      const totalPnl = Number(serverData.total_pnl ?? 0)
+      return {
+        key,
+        name: SCANNER_NAMES[key] || key,
+        count,
+        winRate,
+        avgReturn: closedCount > 0 ? totalPnl / closedCount : 0,
+        avgScore: null as number | null,
+        totalPnl,
+      }
+    }
+
+    // Fallback: client-side computation
     const group = positions.filter((p) => p.scanner_source === key)
     const closed = group.filter((p) => p.status === 'CLOSED')
     const wins = closed.filter((p) => p.current_pnl_pct > 0)
@@ -78,9 +120,22 @@ export default function PerformanceOverview({ positions, period }: PerformanceOv
     }
   })
 
-  // Score band analysis from calibration report
-  const latestReport = calReports?.reports?.[0]
-  const scoreBands = latestReport?.score_band_analysis ?? []
+  // Score band analysis computed from positions (no calibration report dependency)
+  const scoreBands = SCORE_BANDS.map((band) => {
+    const inBand = positions.filter(
+      (p) =>
+        p.conviction_score != null &&
+        p.conviction_score >= band.min &&
+        p.conviction_score < band.max
+    )
+    const closed = inBand.filter((p) => p.status === 'CLOSED')
+    const wins = closed.filter((p) => p.current_pnl_pct > 0)
+    return {
+      band: band.label,
+      count: inBand.length,
+      win_rate: closed.length > 0 ? (wins.length / closed.length) * 100 : 0,
+    }
+  }).filter((b) => b.count > 0)
 
   // Scatter plot data
   const scatterData = positions
@@ -218,37 +273,33 @@ export default function PerformanceOverview({ positions, period }: PerformanceOv
 
         <div className="rounded-lg border border-oss-border bg-oss-surface p-4">
           <h3 className="text-sm font-medium text-oss-text mb-3">Score Band Analysis</h3>
-          {Array.isArray(scoreBands) && scoreBands.length > 0 ? (
+          {scoreBands.length > 0 ? (
             <div className="space-y-3">
-              {scoreBands.map((band: any, i: number) => {
-                const label = String(band.band ?? band.range ?? `Band ${i + 1}`)
-                const winRateVal = Number(band.win_rate ?? 0)
-                return (
-                  <div key={i} className="rounded border border-oss-border p-2">
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-oss-text font-medium">{label}</span>
-                      <span className="text-oss-muted">
-                        {String(band.count ?? 0)} trades
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 rounded-full bg-oss-border overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-oss-accent"
-                          style={{ width: `${Math.min(winRateVal, 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-oss-text w-10 text-right">
-                        {winRateVal.toFixed(0)}%
-                      </span>
-                    </div>
+              {scoreBands.map((band, i) => (
+                <div key={i} className="rounded border border-oss-border p-2">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-oss-text font-medium">{band.band}</span>
+                    <span className="text-oss-muted">
+                      {band.count} trade{band.count !== 1 ? 's' : ''}
+                    </span>
                   </div>
-                )
-              })}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-oss-border overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-oss-accent"
+                        style={{ width: `${Math.min(band.win_rate, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-oss-text w-10 text-right">
+                      {band.win_rate.toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="h-[200px] flex items-center justify-center text-oss-muted text-sm">
-              Run a calibration report to see score band analysis.
+              No scored positions to analyze.
             </div>
           )}
         </div>

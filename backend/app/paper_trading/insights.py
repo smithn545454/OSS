@@ -63,7 +63,9 @@ async def generate_ai_insights() -> dict[str, Any]:
 
     # 4. Build prompt and call LLM
     metrics_dict = metrics.to_dict()
-    prompt = build_insights_prompt(metrics_dict, tier_data, exit_data, calibration)
+    system_prompt, user_prompt = build_insights_prompt(
+        metrics_dict, tier_data, exit_data, calibration
+    )
 
     try:
         provider = get_provider("anthropic")
@@ -85,20 +87,39 @@ async def generate_ai_insights() -> dict[str, Any]:
             "tokens_used": 0,
         }
 
-    response = await provider.generate(prompt, max_tokens=2000)
+    response = await provider.generate(
+        user_prompt, max_tokens=4000, system_prompt=system_prompt
+    )
 
     # 5. Parse and return
-    insights = parse_insights_response(response.content) if response.success else []
+    now = datetime.now(timezone.utc).isoformat()
+    data_summary = {
+        "positions_analyzed": metrics.total_positions,
+        "win_rate": metrics.win_rate,
+        "closed_positions": metrics.closed_positions,
+        "calibration_report_used": calibration.get("report_id") if calibration else None,
+    }
 
-    return {
+    if not response.success:
+        return {
+            "insights": [],
+            "generated_at": now,
+            "data_summary": data_summary,
+            "llm_provider": provider.name,
+            "tokens_used": response.tokens_used,
+            "error": response.error or "LLM call failed",
+        }
+
+    insights = parse_insights_response(response.content)
+
+    result: dict[str, Any] = {
         "insights": insights,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "data_summary": {
-            "positions_analyzed": metrics.total_positions,
-            "win_rate": metrics.win_rate,
-            "closed_positions": metrics.closed_positions,
-            "calibration_report_used": calibration.get("report_id") if calibration else None,
-        },
+        "generated_at": now,
+        "data_summary": data_summary,
         "llm_provider": provider.name,
         "tokens_used": response.tokens_used,
     }
+    if not insights and response.content:
+        result["error"] = "Failed to parse LLM response"
+
+    return result

@@ -138,7 +138,11 @@ export default function PaperTrading() {
         <>
           {/* Tab Content */}
           {activeTab === 'overview' && (
-            <PerformanceOverview positions={enrichedPositions} period={filters.period} />
+            <PerformanceOverview
+              positions={enrichedPositions}
+              period={filters.period}
+              byScanner={summaryMetrics.data?.by_scanner}
+            />
           )}
           {activeTab === 'positions' && <PositionTracker positions={enrichedPositions} />}
           {activeTab === 'calibration' && <ScoreCalibration positions={enrichedPositions} />}

@@ -48,6 +48,13 @@ def _enum_val(v: Any) -> Any:
     return v.value if hasattr(v, "value") else v
 
 
+def _normalize_scanner(scanner_source: Optional[str]) -> Optional[str]:
+    """Normalize scanner_source values (strip _SCANNER suffix from UV Lambda)."""
+    if scanner_source and scanner_source.endswith("_SCANNER"):
+        return scanner_source[: -len("_SCANNER")]
+    return scanner_source
+
+
 def _position_to_dict(pos: Any) -> dict[str, Any]:
     """Convert a PaperPosition to a JSON-safe dict including enrichment fields."""
     return {
@@ -71,7 +78,7 @@ def _position_to_dict(pos: Any) -> dict[str, Any]:
         "last_updated": pos.last_updated,
         # Enrichment fields (may be None for legacy positions)
         "underlying_ticker": pos.underlying_ticker,
-        "scanner_source": pos.scanner_source,
+        "scanner_source": _normalize_scanner(pos.scanner_source),
         "convergence_count": pos.convergence_count,
         "conviction_score": pos.conviction_score,
         "pillar_directional": pos.pillar_directional,
@@ -299,6 +306,15 @@ async def get_summary_metrics(
         win_rate = (wins / closed * 100) if closed > 0 else 0
         avg_return = (total_pnl / closed) if closed > 0 else 0
 
+        # Avg score from pre-aggregated counters
+        score_sum = float(summary.get("score_sum", 0))
+        score_count = int(summary.get("score_count", 0))
+        avg_score = round(score_sum / score_count, 1) if score_count > 0 else None
+
+        # Best trade P&L
+        best_trade_pnl_raw = summary.get("best_trade_pnl")
+        best_trade_pnl = round(float(best_trade_pnl_raw), 1) if best_trade_pnl_raw is not None else None
+
         return {
             "global": {
                 "open_count": summary.get("open_count", 0),
@@ -309,16 +325,18 @@ async def get_summary_metrics(
                 "total_pnl": round(float(total_pnl), 2),
                 "win_rate": round(win_rate, 2),
                 "avg_return": round(float(avg_return), 2),
+                "avg_score": avg_score,
+                "best_trade_pnl": best_trade_pnl,
                 "last_updated": summary.get("last_updated"),
             },
             "by_scanner": {
-                s.pop("SK", s.get("scanner_type", "?")): s for s in scanners_data
+                s.get("scanner_type", "?"): s for s in scanners_data
             } if scanners_data else {},
             "by_verdict": {
-                v.pop("SK", v.get("verdict", "?")): v for v in verdicts_data
+                v.get("verdict", "?"): v for v in verdicts_data
             } if verdicts_data else {},
             "by_tier": {
-                t.pop("SK", t.get("tier", "?")): t for t in tiers
+                t.get("tier", "?"): t for t in tiers
             } if tiers else {},
             "equity_curve": equity_curve,
         }
@@ -778,50 +796,24 @@ async def analyze_position(position_id: str) -> dict[str, Any]:
 
 @router.get("/equity-curve")
 async def get_equity_curve(period: str = "30d") -> dict[str, Any]:
-    """Get equity curve data for paper trading positions."""
-    from datetime import datetime, timezone, timedelta
+    """Get equity curve data from pre-aggregated daily metrics."""
+    from app.paper_trading.metrics_aggregator import MetricsAggregator
 
-    from app.db.tables import PaperSnapshotTable
-
-    # Parse period
-    period_days = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+    period_days = {"7d": 7, "14d": 14, "30d": 30, "90d": 90, "all": 365}
     days = period_days.get(period, 30)
 
-    positions = await PaperPositionTable.list_all()
-    if not positions:
-        return {"curve": [], "period": period}
+    daily_points = await MetricsAggregator.get_daily_equity(days=days)
 
-    # Calculate date range
-    now = datetime.now(timezone.utc)
-    if period == "all":
-        start_date = min(p.entry_date for p in positions)
-    else:
-        start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    end_date = now.strftime("%Y-%m-%d")
-
-    # Collect snapshots per position and build daily curve
-    daily_pnl: dict[str, float] = {}
-    for pos in positions:
-        snapshots = await PaperSnapshotTable.list_by_position_range(
-            pos.position_id, start_date, end_date
-        )
-        prev_price = pos.entry_price
-        for snap in snapshots:
-            date = snap["snapshot_date"]
-            price = snap.get("price", prev_price)
-            change = (price - prev_price) * 100  # 1 contract = 100 shares
-            daily_pnl[date] = daily_pnl.get(date, 0) + change
-            prev_price = price
-
-    # Build equity curve
+    # Build cumulative equity curve
     curve = []
     equity = 10000.0
-    for date in sorted(daily_pnl.keys()):
-        equity += daily_pnl[date]
+    for point in daily_points:
+        pnl = float(point.get("daily_pnl", 0))
+        equity += pnl
         curve.append({
-            "date": date,
-            "daily_pnl": daily_pnl[date],
-            "equity": equity,
+            "date": point.get("date", ""),
+            "daily_pnl": round(pnl, 2),
+            "equity": round(equity, 2),
         })
 
     return {"curve": curve, "period": period}

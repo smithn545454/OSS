@@ -224,6 +224,8 @@ export interface SummaryMetricsResponse {
     total_pnl: number
     win_rate: number
     avg_return: number
+    avg_score: number | null
+    best_trade_pnl: number | null
     last_updated: string | null
   }
   by_scanner: Record<string, {

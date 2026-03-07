@@ -32,17 +32,24 @@ class MetricsAggregator:
         db = get_dynamodb()
         table = db.get_table(MetricsAggregator.TABLE)
 
-        # Global summary
+        # Global summary — counts + optional score tracking
+        update_expr = "ADD open_count :inc, total_count :inc SET last_updated = :now"
+        expr_values: dict[str, Any] = {
+            ":inc": 1,
+            ":now": datetime.now(timezone.utc).isoformat(),
+        }
+        if position.conviction_score is not None:
+            update_expr = (
+                "ADD open_count :inc, total_count :inc, "
+                "score_sum :score, score_count :sinc "
+                "SET last_updated = :now"
+            )
+            expr_values[":score"] = _decimal_safe(position.conviction_score)
+            expr_values[":sinc"] = 1
         table.update_item(
             Key={"PK": "METRICS#GLOBAL", "SK": "SUMMARY"},
-            UpdateExpression=(
-                "ADD open_count :inc, total_count :inc "
-                "SET last_updated = :now"
-            ),
-            ExpressionAttributeValues={
-                ":inc": 1,
-                ":now": datetime.now(timezone.utc).isoformat(),
-            },
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
         )
 
         # Per-scanner
@@ -100,6 +107,19 @@ class MetricsAggregator:
                 ":now": datetime.now(timezone.utc).isoformat(),
             },
         )
+
+        # Track best trade (conditional update — only if this PnL exceeds current best)
+        try:
+            table.update_item(
+                Key={"PK": "METRICS#GLOBAL", "SK": "SUMMARY"},
+                UpdateExpression="SET best_trade_pnl = :pnl",
+                ConditionExpression=(
+                    "attribute_not_exists(best_trade_pnl) OR best_trade_pnl < :pnl"
+                ),
+                ExpressionAttributeValues={":pnl": _decimal_safe(pnl)},
+            )
+        except Exception:
+            pass  # ConditionalCheckFailed — current best is higher
 
         # Per-scanner
         scanner = position.scanner_source or "UNKNOWN"
@@ -183,6 +203,7 @@ class MetricsAggregator:
             limit=20, scan_forward=True,
         )
         for item in items:
+            item["scanner_type"] = item.get("SK", "UNKNOWN")
             item.pop("PK", None)
             item.pop("SK", None)
         return items
@@ -196,6 +217,7 @@ class MetricsAggregator:
             limit=10, scan_forward=True,
         )
         for item in items:
+            item["verdict"] = item.get("SK", "UNKNOWN")
             item.pop("PK", None)
             item.pop("SK", None)
         return items
@@ -209,6 +231,7 @@ class MetricsAggregator:
             limit=10, scan_forward=True,
         )
         for item in items:
+            item["tier"] = item.get("SK", "UNKNOWN")
             item.pop("PK", None)
             item.pop("SK", None)
         return items
@@ -222,6 +245,7 @@ class MetricsAggregator:
             limit=days, scan_forward=False,
         )
         for item in items:
+            item["date"] = item.get("SK", "")
             item.pop("PK", None)
             item.pop("SK", None)
         # Reverse to chronological order

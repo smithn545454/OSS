@@ -100,8 +100,11 @@ export function useEnrichedPositions(
         totalPnl: global.total_pnl,
         winRate: global.closed_count > 0 ? global.win_rate : null,
         avgReturn: global.avg_return,
-        avgScore: null, // Not available in summary metrics
-        bestTrade: null, // Not available in summary metrics
+        avgScore: global.avg_score ?? null,
+        bestTrade:
+          global.best_trade_pnl != null
+            ? { ticker: '', pnl: global.best_trade_pnl }
+            : null,
         activeCount: global.open_count,
         closedCount: global.closed_count,
       }

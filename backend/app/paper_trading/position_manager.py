@@ -82,8 +82,10 @@ async def create_position_from_evaluation(
     now = datetime.now(timezone.utc).isoformat()
     entry_date = now[:10]  # YYYY-MM-DD
 
-    # Extract scanner source from evaluation
+    # Extract scanner source from evaluation (normalize _SCANNER suffix from UV Lambda)
     scanner_source = getattr(evaluation, "scanner_source", None)
+    if scanner_source and scanner_source.endswith("_SCANNER"):
+        scanner_source = scanner_source[: -len("_SCANNER")]
 
     # Count convergence (number of scanner triggers from the opportunity)
     convergence_count = 1  # At least the primary scanner

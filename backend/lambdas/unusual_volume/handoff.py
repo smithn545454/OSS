@@ -428,7 +428,7 @@ def _create_evaluation(candidate: dict) -> str:
         "policy_version": "1.0.0",
         "policy_hash": "scanner-direct",
         # Scanner source fields
-        "scanner_source": "UNUSUAL_VOLUME_SCANNER",
+        "scanner_source": "UNUSUAL_VOLUME",
         "scanner_metrics": scanner_metrics,
         "trigger_reasons": candidate.get("trigger_reasons", []),
         "evaluated_at": now.isoformat(),

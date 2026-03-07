@@ -47,7 +47,7 @@ def build_insights_prompt(
     tier_data: dict[str, Any],
     exit_data: dict[str, Any],
     calibration_report: dict[str, Any] | None = None,
-) -> str:
+) -> tuple[str, str]:
     """Build the prompt for AI insights generation.
 
     Args:
@@ -57,7 +57,7 @@ def build_insights_prompt(
         calibration_report: Optional latest calibration report
 
     Returns:
-        Formatted prompt string
+        Tuple of (system_prompt, user_prompt)
     """
     metrics_text = f"""
 **Overall Performance**
@@ -152,11 +152,7 @@ def build_insights_prompt(
                     f"avg_return={band.get('avg_return', 0):.1f}%\n"
                 )
 
-    prompt = f"""{INSIGHTS_SYSTEM_PROMPT}
-
----
-
-## Paper Trading Data
+    user_prompt = f"""## Paper Trading Data
 
 {metrics_text}
 {verdict_text}
@@ -178,7 +174,7 @@ Generate 3-6 insights, prioritized by severity (HIGH first). Each insight must r
 
 Generate the insights now:"""
 
-    return prompt
+    return INSIGHTS_SYSTEM_PROMPT, user_prompt
 
 
 def parse_insights_response(response: str) -> list[dict[str, Any]]:
@@ -205,11 +201,14 @@ def parse_insights_response(response: str) -> list[dict[str, Any]]:
     try:
         data = json.loads(response)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse LLM insights response as JSON")
+        logger.warning(
+            "Failed to parse LLM insights response as JSON. First 500 chars: %s",
+            response[:500],
+        )
         return []
 
     if not isinstance(data, list):
-        logger.warning("LLM insights response is not a JSON array")
+        logger.warning("LLM insights response is not a JSON array, got %s", type(data).__name__)
         return []
 
     valid_categories = {
