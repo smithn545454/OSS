@@ -15,7 +15,10 @@ interface KPIStripProps {
 
 function fmt(val: number | null, decimals: number = 1): string {
   if (val == null) return '--'
-  return val.toFixed(decimals)
+  return val.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
 }
 
 interface StatCardProps {
@@ -84,7 +87,7 @@ export default function KPIStrip({
       />
       <StatCard
         label="Active"
-        value={String(activeCount)}
+        value={activeCount.toLocaleString()}
         sub="Open positions"
         color="cyan"
       />
