@@ -152,9 +152,11 @@ async def list_positions(
         filter_values[":verdict"] = verdict
 
     if scanner:
-        filter_parts.append("#scanner = :scanner")
+        # Match both normalized (UNUSUAL_VOLUME) and raw (UNUSUAL_VOLUME_SCANNER) values
+        filter_parts.append("(#scanner = :scanner OR #scanner = :scanner_alt)")
         filter_names["#scanner"] = "scanner_source"
         filter_values[":scanner"] = scanner
+        filter_values[":scanner_alt"] = scanner + "_SCANNER"
 
     filter_expr = " AND ".join(filter_parts) if filter_parts else None
 
@@ -429,9 +431,11 @@ async def _query_filtered_positions(
         filter_values[":verdict"] = verdict
 
     if scanner:
-        filter_parts.append("#scanner = :scanner")
+        # Match both normalized (UNUSUAL_VOLUME) and raw (UNUSUAL_VOLUME_SCANNER) values
+        filter_parts.append("(#scanner = :scanner OR #scanner = :scanner_alt)")
         filter_names["#scanner"] = "scanner_source"
         filter_values[":scanner"] = scanner
+        filter_values[":scanner_alt"] = scanner + "_SCANNER"
 
     filter_expr = " AND ".join(filter_parts) if filter_parts else None
 

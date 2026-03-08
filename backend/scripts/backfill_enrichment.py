@@ -6,9 +6,10 @@ Usage:
 
 What it does:
 1. Scan all positions (open + closed)
-2. For positions missing scanner_source: look up matching evaluation
-3. For positions missing option_type/strike/expiration_date: parse OCC ticker
-4. Write updated fields back to DynamoDB
+2. Normalize scanner_source values (strip _SCANNER suffix from UV Lambda)
+3. For positions missing scanner_source: look up matching evaluation, then opportunity
+4. For positions missing option_type/strike/expiration_date: parse OCC ticker
+5. Write updated fields back to DynamoDB
 """
 
 from __future__ import annotations
@@ -97,7 +98,45 @@ async def run(dry_run: bool = True) -> None:
 
     logger.info(f"Found {len(all_positions)} total positions")
 
-    # --- Step 2: Identify positions needing backfill ---
+    # --- Step 2: Normalize _SCANNER suffix on existing positions ---
+    needs_normalize = [
+        p for p in all_positions
+        if p.get("scanner_source") and p["scanner_source"].endswith("_SCANNER")
+    ]
+    logger.info(f"Positions with _SCANNER suffix to normalize: {len(needs_normalize)}")
+
+    normalize_updates = 0
+    for pos in needs_normalize:
+        raw = pos["scanner_source"]
+        normalized = raw[: -len("_SCANNER")]
+        pk = pos["_pk"]
+        sk = pos["_sk"]
+
+        if dry_run:
+            normalize_updates += 1
+            if normalize_updates <= 5:
+                logger.info(
+                    f"[DRY RUN] Would normalize {raw} -> {normalized} on "
+                    f"{pos.get('option_ticker')}"
+                )
+        else:
+            try:
+                table.update_item(
+                    Key={"PK": pk, "SK": sk},
+                    UpdateExpression="SET scanner_source = :ss",
+                    ExpressionAttributeValues={":ss": normalized},
+                )
+                normalize_updates += 1
+            except Exception as e:
+                logger.error(
+                    f"Failed to normalize scanner_source for {pos.get('option_ticker')}: {e}"
+                )
+        # Update in-memory value so subsequent steps see the normalized value
+        pos["scanner_source"] = normalized
+
+    logger.info(f"Scanner normalization: {normalize_updates} updated")
+
+    # --- Step 3: Identify positions still needing backfill ---
     needs_scanner = [p for p in all_positions if not p.get("scanner_source")]
     needs_option_type = [p for p in all_positions if not p.get("option_type")]
     needs_underlying = [p for p in all_positions if not p.get("underlying_ticker")]
@@ -106,7 +145,7 @@ async def run(dry_run: bool = True) -> None:
     logger.info(f"Missing option_type: {len(needs_option_type)}")
     logger.info(f"Missing underlying_ticker: {len(needs_underlying)}")
 
-    # --- Step 3: Backfill from OCC ticker parsing ---
+    # --- Step 4: Backfill from OCC ticker parsing ---
     ticker_updates = 0
     ticker_failures = 0
 
@@ -167,12 +206,12 @@ async def run(dry_run: bool = True) -> None:
         f"OCC ticker backfill: {ticker_updates} updated, {ticker_failures} failures"
     )
 
-    # --- Step 4: Backfill scanner_source from evaluations ---
-    # Build lookup of evaluation_id -> scanner_source from evaluations table
+    # --- Step 5: Backfill scanner_source from evaluations + opportunities ---
+    # Build lookup of evaluation_id -> {scanner_source, opportunity_id, underlying_ticker}
     logger.info("Scanning evaluations for scanner_source backfill...")
 
     eval_table = db.get_table("evaluations")
-    eval_scanner_map: dict[str, str] = {}
+    eval_map: dict[str, dict[str, Any]] = {}
     scan_kwargs: dict[str, Any] = {}
 
     try:
@@ -182,28 +221,43 @@ async def run(dry_run: bool = True) -> None:
             for item in items:
                 converted = db.convert_from_dynamodb(dict(item))
                 eval_id = converted.get("evaluation_id")
-                scanner = converted.get("scanner_source")
-                if eval_id and scanner:
-                    eval_scanner_map[eval_id] = scanner
+                if eval_id:
+                    scanner = converted.get("scanner_source")
+                    # Normalize _SCANNER suffix from evaluations too
+                    if scanner and scanner.endswith("_SCANNER"):
+                        scanner = scanner[: -len("_SCANNER")]
+                    eval_map[eval_id] = {
+                        "scanner_source": scanner,
+                        "opportunity_id": converted.get("opportunity_id"),
+                        "underlying_ticker": converted.get("underlying_ticker"),
+                    }
             if "LastEvaluatedKey" not in response:
                 break
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
     except Exception as e:
         logger.warning(f"Could not scan evaluations table: {e}")
 
-    logger.info(f"Found {len(eval_scanner_map)} evaluations with scanner_source")
+    evals_with_scanner = sum(1 for v in eval_map.values() if v.get("scanner_source"))
+    logger.info(
+        f"Found {len(eval_map)} evaluations total, "
+        f"{evals_with_scanner} with scanner_source"
+    )
 
+    # Step 5a: Resolve scanner_source from evaluations
     scanner_updates = 0
     scanner_not_found = 0
+    still_needs_scanner: list[dict[str, Any]] = []
 
     for pos in needs_scanner:
         eval_id = pos.get("evaluation_id")
         if not eval_id:
+            scanner_not_found += 1
             continue
 
-        scanner = eval_scanner_map.get(eval_id)
+        eval_info = eval_map.get(eval_id)
+        scanner = eval_info.get("scanner_source") if eval_info else None
         if not scanner:
-            scanner_not_found += 1
+            still_needs_scanner.append(pos)
             continue
 
         pk = pos["_pk"]
@@ -214,7 +268,7 @@ async def run(dry_run: bool = True) -> None:
             if scanner_updates <= 5:
                 logger.info(
                     f"[DRY RUN] Would set scanner_source={scanner} on "
-                    f"{pos.get('option_ticker')}"
+                    f"{pos.get('option_ticker')} (from evaluation)"
                 )
         else:
             try:
@@ -230,15 +284,97 @@ async def run(dry_run: bool = True) -> None:
                 )
 
     logger.info(
-        f"Scanner source backfill: {scanner_updates} updated, "
-        f"{scanner_not_found} evals had no scanner_source"
+        f"Scanner source from evaluations: {scanner_updates} updated, "
+        f"{len(still_needs_scanner)} still need scanner_source"
     )
+
+    # Step 5b: Resolve remaining scanner_source from opportunities table
+    if still_needs_scanner:
+        logger.info("Looking up opportunities for remaining positions...")
+        opp_table = db.get_table("opportunities")
+        opp_updates = 0
+        opp_not_found = 0
+
+        for pos in still_needs_scanner:
+            eval_id = pos.get("evaluation_id")
+            eval_info = eval_map.get(eval_id, {}) if eval_id else {}
+            opp_id = eval_info.get("opportunity_id")
+            ticker = eval_info.get("underlying_ticker") or pos.get("underlying_ticker")
+
+            if not opp_id or not ticker:
+                opp_not_found += 1
+                continue
+
+            # Query opportunity: PK=OPP#{ticker}, SK contains opportunity_id
+            try:
+                opp_resp = opp_table.query(
+                    KeyConditionExpression="PK = :pk",
+                    ExpressionAttributeValues={":pk": f"OPP#{ticker}"},
+                    Limit=50,
+                    ScanIndexForward=False,
+                )
+                scanner = None
+                for opp_item in opp_resp.get("Items", []):
+                    opp_conv = db.convert_from_dynamodb(dict(opp_item))
+                    if opp_conv.get("opportunity_id") == opp_id:
+                        triggers = opp_conv.get("scanner_triggers", [])
+                        if triggers:
+                            st = triggers[0]
+                            if isinstance(st, dict):
+                                scanner = st.get("scanner_type")
+                            elif hasattr(st, "scanner_type"):
+                                scanner = st.scanner_type
+                            # Normalize
+                            if scanner and hasattr(scanner, "value"):
+                                scanner = scanner.value
+                            if scanner and scanner.endswith("_SCANNER"):
+                                scanner = scanner[: -len("_SCANNER")]
+                        break
+
+                if not scanner:
+                    opp_not_found += 1
+                    continue
+
+                pk = pos["_pk"]
+                sk = pos["_sk"]
+
+                if dry_run:
+                    opp_updates += 1
+                    if opp_updates <= 5:
+                        logger.info(
+                            f"[DRY RUN] Would set scanner_source={scanner} on "
+                            f"{pos.get('option_ticker')} (from opportunity)"
+                        )
+                else:
+                    table.update_item(
+                        Key={"PK": pk, "SK": sk},
+                        UpdateExpression="SET scanner_source = :ss",
+                        ExpressionAttributeValues={":ss": scanner},
+                    )
+                    opp_updates += 1
+
+            except Exception as e:
+                logger.error(
+                    f"Failed opportunity lookup for {pos.get('option_ticker')}: {e}"
+                )
+                opp_not_found += 1
+
+        logger.info(
+            f"Scanner source from opportunities: {opp_updates} updated, "
+            f"{opp_not_found} could not be resolved"
+        )
+        scanner_updates += opp_updates
+        scanner_not_found = opp_not_found
+    else:
+        scanner_not_found = 0
 
     # --- Summary ---
     logger.info("=== BACKFILL SUMMARY ===")
     logger.info(f"Total positions scanned: {len(all_positions)}")
+    logger.info(f"Scanner normalization (_SCANNER suffix): {normalize_updates}")
     logger.info(f"OCC ticker fields updated: {ticker_updates}")
-    logger.info(f"Scanner source updated: {scanner_updates}")
+    logger.info(f"Scanner source populated: {scanner_updates}")
+    logger.info(f"Scanner source unresolvable: {scanner_not_found}")
     if dry_run:
         logger.info("[DRY RUN] No changes written. Run without --dry-run to apply.")
 
