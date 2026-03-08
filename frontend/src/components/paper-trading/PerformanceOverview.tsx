@@ -169,17 +169,17 @@ export default function PerformanceOverview({
               <AreaChart data={curve}>
                 <defs>
                   <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-oss-accent)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--color-oss-accent)" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-oss-border)" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'var(--color-oss-muted)' }} />
-                <YAxis tick={{ fontSize: 11, fill: 'var(--color-oss-muted)' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
                 <Tooltip
                   contentStyle={{
-                    background: 'var(--color-oss-surface)',
-                    border: '1px solid var(--color-oss-border)',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: 8,
                     fontSize: 12,
                   }}
@@ -187,7 +187,7 @@ export default function PerformanceOverview({
                 <Area
                   type="monotone"
                   dataKey="equity"
-                  stroke="var(--color-oss-accent)"
+                  stroke="var(--accent-primary)"
                   fill="url(#equityGrad)"
                   strokeWidth={2}
                 />
@@ -205,13 +205,13 @@ export default function PerformanceOverview({
           {curve.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={curve}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-oss-border)" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--color-oss-muted)' }} />
-                <YAxis tick={{ fontSize: 11, fill: 'var(--color-oss-muted)' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
                 <Tooltip
                   contentStyle={{
-                    background: 'var(--color-oss-surface)',
-                    border: '1px solid var(--color-oss-border)',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: 8,
                     fontSize: 12,
                   }}
@@ -220,7 +220,7 @@ export default function PerformanceOverview({
                   {curve.map((entry, i) => (
                     <Cell
                       key={i}
-                      fill={entry.daily_pnl >= 0 ? 'var(--color-oss-approve)' : 'var(--color-oss-reject)'}
+                      fill={entry.daily_pnl >= 0 ? 'var(--color-success)' : 'var(--color-error)'}
                     />
                   ))}
                 </Bar>
@@ -322,24 +322,24 @@ export default function PerformanceOverview({
         {scatterData.length > 0 ? (
           <ResponsiveContainer width="100%" height={300}>
             <ScatterChart>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-oss-border)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" />
               <XAxis
                 dataKey="x"
                 name="Score"
-                tick={{ fontSize: 11, fill: 'var(--color-oss-muted)' }}
-                label={{ value: 'Conviction Score', position: 'insideBottom', offset: -5, fontSize: 11, fill: 'var(--color-oss-muted)' }}
+                tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                label={{ value: 'Conviction Score', position: 'insideBottom', offset: -5, fontSize: 11, fill: 'var(--text-muted)' }}
               />
               <YAxis
                 dataKey="y"
                 name="P&L %"
-                tick={{ fontSize: 11, fill: 'var(--color-oss-muted)' }}
-                label={{ value: 'P&L %', angle: -90, position: 'insideLeft', fontSize: 11, fill: 'var(--color-oss-muted)' }}
+                tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                label={{ value: 'P&L %', angle: -90, position: 'insideLeft', fontSize: 11, fill: 'var(--text-muted)' }}
               />
               <Tooltip
                 cursor={{ strokeDasharray: '3 3' }}
                 contentStyle={{
-                  background: 'var(--color-oss-surface)',
-                  border: '1px solid var(--color-oss-border)',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   fontSize: 12,
                 }}
@@ -348,10 +348,10 @@ export default function PerformanceOverview({
                   name === 'x' ? 'Score' : 'P&L',
                 ]}
               />
-              <ReferenceLine y={0} stroke="var(--color-oss-reject)" strokeDasharray="4 4" />
-              <ReferenceLine x={75} stroke="var(--color-oss-accent)" strokeDasharray="4 4" />
-              <Scatter data={scatterData.filter((d) => d.winner)} fill="var(--color-oss-approve)" />
-              <Scatter data={scatterData.filter((d) => !d.winner)} fill="var(--color-oss-reject)" />
+              <ReferenceLine y={0} stroke="var(--color-error)" strokeDasharray="4 4" />
+              <ReferenceLine x={75} stroke="var(--accent-primary)" strokeDasharray="4 4" />
+              <Scatter data={scatterData.filter((d) => d.winner)} fill="var(--color-success)" />
+              <Scatter data={scatterData.filter((d) => !d.winner)} fill="var(--color-error)" />
             </ScatterChart>
           </ResponsiveContainer>
         ) : (
