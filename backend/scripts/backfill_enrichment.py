@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+from collections import defaultdict
 from typing import Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -64,6 +65,28 @@ def parse_occ_ticker(ticker: str) -> Optional[dict[str, Any]]:
         "option_type": opt_type,
         "strike": strike,
     }
+
+
+def _apply_scanner_update(table: Any, pos: dict[str, Any], scanner: str, dry_run: bool) -> None:
+    """Apply a scanner_source update to a position."""
+    pk = pos["_pk"]
+    sk = pos["_sk"]
+    if dry_run:
+        logger.info(
+            f"[DRY RUN] Would set scanner_source={scanner} on "
+            f"{pos.get('option_ticker')}"
+        )
+    else:
+        try:
+            table.update_item(
+                Key={"PK": pk, "SK": sk},
+                UpdateExpression="SET scanner_source = :ss",
+                ExpressionAttributeValues={":ss": scanner},
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to update scanner_source for {pos.get('option_ticker')}: {e}"
+            )
 
 
 async def run(dry_run: bool = True) -> None:
@@ -172,6 +195,10 @@ async def run(dry_run: bool = True) -> None:
             pk = pos["_pk"]
             sk = pos["_sk"]
 
+            # Update in-memory dict so Step 5 can use the parsed values
+            for key, val in updates.items():
+                pos[key] = val
+
             if dry_run:
                 ticker_updates += 1
                 if ticker_updates <= 5:
@@ -206,174 +233,195 @@ async def run(dry_run: bool = True) -> None:
         f"OCC ticker backfill: {ticker_updates} updated, {ticker_failures} failures"
     )
 
-    # --- Step 5: Backfill scanner_source from evaluations + opportunities ---
-    # Build lookup of evaluation_id -> {scanner_source, opportunity_id, underlying_ticker}
-    logger.info("Scanning evaluations for scanner_source backfill...")
-
-    eval_table = db.get_table("evaluations")
-    eval_map: dict[str, dict[str, Any]] = {}
-    scan_kwargs: dict[str, Any] = {}
-
-    try:
-        while True:
-            response = eval_table.scan(**scan_kwargs)
-            items = response.get("Items", [])
-            for item in items:
-                converted = db.convert_from_dynamodb(dict(item))
-                eval_id = converted.get("evaluation_id")
-                if eval_id:
-                    scanner = converted.get("scanner_source")
-                    # Normalize _SCANNER suffix from evaluations too
-                    if scanner and scanner.endswith("_SCANNER"):
-                        scanner = scanner[: -len("_SCANNER")]
-                    eval_map[eval_id] = {
-                        "scanner_source": scanner,
-                        "opportunity_id": converted.get("opportunity_id"),
-                        "underlying_ticker": converted.get("underlying_ticker"),
-                    }
-            if "LastEvaluatedKey" not in response:
-                break
-            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-    except Exception as e:
-        logger.warning(f"Could not scan evaluations table: {e}")
-
-    evals_with_scanner = sum(1 for v in eval_map.values() if v.get("scanner_source"))
+    # --- Step 5: Backfill scanner_source via batched evaluation + opportunity lookups ---
+    # Focus on OPEN positions only (user's requirement for scanner performance analysis).
+    # Group by ticker to minimize DynamoDB queries, and paginate fully to avoid missing data.
+    open_needs_scanner = [p for p in needs_scanner if p["_status"] == "OPEN"]
     logger.info(
-        f"Found {len(eval_map)} evaluations total, "
-        f"{evals_with_scanner} with scanner_source"
+        f"Resolving scanner_source for {len(open_needs_scanner)} OPEN positions "
+        f"(skipping {len(needs_scanner) - len(open_needs_scanner)} CLOSED positions)"
     )
 
-    # Step 5a: Resolve scanner_source from evaluations
     scanner_updates = 0
     scanner_not_found = 0
-    still_needs_scanner: list[dict[str, Any]] = []
+    unknown_updates = 0
 
-    for pos in needs_scanner:
-        eval_id = pos.get("evaluation_id")
-        if not eval_id:
-            scanner_not_found += 1
-            continue
-
-        eval_info = eval_map.get(eval_id)
-        scanner = eval_info.get("scanner_source") if eval_info else None
-        if not scanner:
-            still_needs_scanner.append(pos)
-            continue
-
-        pk = pos["_pk"]
-        sk = pos["_sk"]
-
-        if dry_run:
-            scanner_updates += 1
-            if scanner_updates <= 5:
-                logger.info(
-                    f"[DRY RUN] Would set scanner_source={scanner} on "
-                    f"{pos.get('option_ticker')} (from evaluation)"
-                )
-        else:
-            try:
-                table.update_item(
-                    Key={"PK": pk, "SK": sk},
-                    UpdateExpression="SET scanner_source = :ss",
-                    ExpressionAttributeValues={":ss": scanner},
-                )
-                scanner_updates += 1
-            except Exception as e:
-                logger.error(
-                    f"Failed to update scanner_source for {pos.get('option_ticker')}: {e}"
-                )
-
-    logger.info(
-        f"Scanner source from evaluations: {scanner_updates} updated, "
-        f"{len(still_needs_scanner)} still need scanner_source"
-    )
-
-    # Step 5b: Resolve remaining scanner_source from opportunities table
-    if still_needs_scanner:
-        logger.info("Looking up opportunities for remaining positions...")
+    if open_needs_scanner:
+        eval_table = db.get_table("evaluations")
         opp_table = db.get_table("opportunities")
-        opp_updates = 0
-        opp_not_found = 0
 
-        for pos in still_needs_scanner:
+        # Step 5a: Group positions by underlying_ticker
+        positions_by_ticker: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        no_eval_id: list[dict[str, Any]] = []
+        for pos in open_needs_scanner:
             eval_id = pos.get("evaluation_id")
-            eval_info = eval_map.get(eval_id, {}) if eval_id else {}
-            opp_id = eval_info.get("opportunity_id")
-            ticker = eval_info.get("underlying_ticker") or pos.get("underlying_ticker")
-
-            if not opp_id or not ticker:
-                opp_not_found += 1
+            ticker = pos.get("underlying_ticker")
+            if not eval_id or not ticker:
+                no_eval_id.append(pos)
                 continue
-
-            # Query opportunity: PK=OPP#{ticker}, SK contains opportunity_id
-            try:
-                opp_resp = opp_table.query(
-                    KeyConditionExpression="PK = :pk",
-                    ExpressionAttributeValues={":pk": f"OPP#{ticker}"},
-                    Limit=50,
-                    ScanIndexForward=False,
-                )
-                scanner = None
-                for opp_item in opp_resp.get("Items", []):
-                    opp_conv = db.convert_from_dynamodb(dict(opp_item))
-                    if opp_conv.get("opportunity_id") == opp_id:
-                        triggers = opp_conv.get("scanner_triggers", [])
-                        if triggers:
-                            st = triggers[0]
-                            if isinstance(st, dict):
-                                scanner = st.get("scanner_type")
-                            elif hasattr(st, "scanner_type"):
-                                scanner = st.scanner_type
-                            # Normalize
-                            if scanner and hasattr(scanner, "value"):
-                                scanner = scanner.value
-                            if scanner and scanner.endswith("_SCANNER"):
-                                scanner = scanner[: -len("_SCANNER")]
-                        break
-
-                if not scanner:
-                    opp_not_found += 1
-                    continue
-
-                pk = pos["_pk"]
-                sk = pos["_sk"]
-
-                if dry_run:
-                    opp_updates += 1
-                    if opp_updates <= 5:
-                        logger.info(
-                            f"[DRY RUN] Would set scanner_source={scanner} on "
-                            f"{pos.get('option_ticker')} (from opportunity)"
-                        )
-                else:
-                    table.update_item(
-                        Key={"PK": pk, "SK": sk},
-                        UpdateExpression="SET scanner_source = :ss",
-                        ExpressionAttributeValues={":ss": scanner},
-                    )
-                    opp_updates += 1
-
-            except Exception as e:
-                logger.error(
-                    f"Failed opportunity lookup for {pos.get('option_ticker')}: {e}"
-                )
-                opp_not_found += 1
+            positions_by_ticker[ticker].append(pos)
 
         logger.info(
-            f"Scanner source from opportunities: {opp_updates} updated, "
-            f"{opp_not_found} could not be resolved"
+            f"Grouped into {len(positions_by_ticker)} unique tickers "
+            f"({len(no_eval_id)} positions have no evaluation_id/ticker)"
         )
-        scanner_updates += opp_updates
-        scanner_not_found = opp_not_found
-    else:
-        scanner_not_found = 0
+
+        # Step 5b: For each ticker, build evaluation index with FULL pagination
+        needs_opp_fallback: list[tuple[dict[str, Any], str, str]] = []
+
+        for ticker_idx, (ticker, positions) in enumerate(positions_by_ticker.items()):
+            if ticker_idx > 0 and ticker_idx % 20 == 0:
+                logger.info(
+                    f"  Ticker progress: {ticker_idx}/{len(positions_by_ticker)}, "
+                    f"{scanner_updates} resolved so far"
+                )
+
+            # Collect all eval_ids we need for this ticker
+            needed_eval_ids = {p["evaluation_id"] for p in positions}
+
+            # Query ALL evaluations for this ticker (paginated)
+            eval_index: dict[str, dict[str, Any]] = {}
+            query_kwargs: dict[str, Any] = {
+                "KeyConditionExpression": "PK = :pk",
+                "ExpressionAttributeValues": {":pk": f"EVAL#{ticker}"},
+                "ProjectionExpression": "SK, scanner_source, opportunity_id",
+                "ScanIndexForward": False,
+            }
+
+            try:
+                while True:
+                    response = eval_table.query(**query_kwargs)
+                    for eval_item in response.get("Items", []):
+                        eval_sk = eval_item.get("SK", "")
+                        if isinstance(eval_sk, dict):
+                            eval_sk = eval_sk.get("S", "")
+                        eval_sk = str(eval_sk)
+                        # SK format: "{timestamp}#{evaluation_id}"
+                        for eid in needed_eval_ids:
+                            if eval_sk.endswith(eid):
+                                conv = db.convert_from_dynamodb(dict(eval_item))
+                                eval_index[eid] = {
+                                    "scanner_source": conv.get("scanner_source"),
+                                    "opportunity_id": conv.get("opportunity_id"),
+                                }
+                                break
+
+                    # Early exit: if we found all needed eval_ids, stop paginating
+                    if needed_eval_ids.issubset(eval_index.keys()):
+                        break
+                    if "LastEvaluatedKey" not in response:
+                        break
+                    query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            except Exception as e:
+                logger.warning(f"Eval query failed for ticker {ticker}: {e}")
+
+            # Step 5c: Resolve positions from eval index
+            for pos in positions:
+                eid = pos["evaluation_id"]
+                eval_data = eval_index.get(eid)
+
+                if not eval_data:
+                    scanner_not_found += 1
+                    continue
+
+                scanner = eval_data.get("scanner_source")
+                if scanner and scanner.endswith("_SCANNER"):
+                    scanner = scanner[: -len("_SCANNER")]
+
+                if scanner:
+                    _apply_scanner_update(table, pos, scanner, dry_run)
+                    scanner_updates += 1
+                else:
+                    # Need opportunity fallback
+                    opp_id = eval_data.get("opportunity_id")
+                    if opp_id:
+                        needs_opp_fallback.append((pos, ticker, opp_id))
+                    else:
+                        scanner_not_found += 1
+
+        logger.info(
+            f"After evaluation lookup: {scanner_updates} resolved, "
+            f"{len(needs_opp_fallback)} need opportunity fallback, "
+            f"{scanner_not_found} not found"
+        )
+
+        # Step 5d: Opportunity fallback -- group by ticker again
+        if needs_opp_fallback:
+            opp_positions_by_ticker: dict[str, list[tuple[dict[str, Any], str]]] = (
+                defaultdict(list)
+            )
+            for pos, ticker, opp_id in needs_opp_fallback:
+                opp_positions_by_ticker[ticker].append((pos, opp_id))
+
+            for ticker, pos_opp_pairs in opp_positions_by_ticker.items():
+                needed_opp_ids = {opp_id for _, opp_id in pos_opp_pairs}
+
+                # Query ALL opportunities for this ticker (paginated)
+                opp_index: dict[str, str] = {}  # opp_id -> scanner_type
+                query_kwargs = {
+                    "KeyConditionExpression": "PK = :pk",
+                    "ExpressionAttributeValues": {":pk": f"OPP#{ticker}"},
+                    "ProjectionExpression": "SK, opportunity_id, scanner_triggers",
+                    "ScanIndexForward": False,
+                }
+
+                try:
+                    while True:
+                        response = opp_table.query(**query_kwargs)
+                        for opp_item in response.get("Items", []):
+                            opp_conv = db.convert_from_dynamodb(dict(opp_item))
+                            oid = opp_conv.get("opportunity_id")
+                            if oid and oid in needed_opp_ids:
+                                triggers = opp_conv.get("scanner_triggers", [])
+                                if triggers:
+                                    st = triggers[0]
+                                    scanner_type = None
+                                    if isinstance(st, dict):
+                                        scanner_type = st.get("scanner_type")
+                                    elif hasattr(st, "scanner_type"):
+                                        scanner_type = st.scanner_type
+                                    if scanner_type and hasattr(scanner_type, "value"):
+                                        scanner_type = scanner_type.value
+                                    if scanner_type and scanner_type.endswith("_SCANNER"):
+                                        scanner_type = scanner_type[: -len("_SCANNER")]
+                                    if scanner_type:
+                                        opp_index[oid] = scanner_type
+
+                        if needed_opp_ids.issubset(opp_index.keys()):
+                            break
+                        if "LastEvaluatedKey" not in response:
+                            break
+                        query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+                except Exception as e:
+                    logger.warning(f"Opp query failed for ticker {ticker}: {e}")
+
+                # Resolve from opportunity index
+                for pos, opp_id in pos_opp_pairs:
+                    scanner = opp_index.get(opp_id)
+                    if scanner:
+                        _apply_scanner_update(table, pos, scanner, dry_run)
+                        scanner_updates += 1
+                    else:
+                        scanner_not_found += 1
+
+        # Step 5e: Handle positions with no eval_id/ticker -- mark as UNKNOWN
+        for pos in no_eval_id:
+            _apply_scanner_update(table, pos, "UNKNOWN", dry_run)
+            unknown_updates += 1
+
+    logger.info(
+        f"Scanner source backfill: {scanner_updates} resolved, "
+        f"{unknown_updates} marked UNKNOWN (no eval_id/ticker), "
+        f"{scanner_not_found} could not be resolved"
+    )
 
     # --- Summary ---
     logger.info("=== BACKFILL SUMMARY ===")
     logger.info(f"Total positions scanned: {len(all_positions)}")
     logger.info(f"Scanner normalization (_SCANNER suffix): {normalize_updates}")
     logger.info(f"OCC ticker fields updated: {ticker_updates}")
-    logger.info(f"Scanner source populated: {scanner_updates}")
+    logger.info(f"Scanner source resolved (OPEN): {scanner_updates}")
+    logger.info(f"Scanner source marked UNKNOWN: {unknown_updates}")
     logger.info(f"Scanner source unresolvable: {scanner_not_found}")
     if dry_run:
         logger.info("[DRY RUN] No changes written. Run without --dry-run to apply.")
