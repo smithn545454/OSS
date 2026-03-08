@@ -234,26 +234,24 @@ async def run(dry_run: bool = True) -> None:
     )
 
     # --- Step 5: Backfill scanner_source via batched evaluation + opportunity lookups ---
-    # Focus on OPEN positions only (user's requirement for scanner performance analysis).
     # Group by ticker to minimize DynamoDB queries, and paginate fully to avoid missing data.
-    open_needs_scanner = [p for p in needs_scanner if p["_status"] == "OPEN"]
     logger.info(
-        f"Resolving scanner_source for {len(open_needs_scanner)} OPEN positions "
-        f"(skipping {len(needs_scanner) - len(open_needs_scanner)} CLOSED positions)"
+        f"Resolving scanner_source for {len(needs_scanner)} positions "
+        "via batched evaluation/opportunity queries..."
     )
 
     scanner_updates = 0
     scanner_not_found = 0
     unknown_updates = 0
 
-    if open_needs_scanner:
+    if needs_scanner:
         eval_table = db.get_table("evaluations")
         opp_table = db.get_table("opportunities")
 
         # Step 5a: Group positions by underlying_ticker
         positions_by_ticker: dict[str, list[dict[str, Any]]] = defaultdict(list)
         no_eval_id: list[dict[str, Any]] = []
-        for pos in open_needs_scanner:
+        for pos in needs_scanner:
             eval_id = pos.get("evaluation_id")
             ticker = pos.get("underlying_ticker")
             if not eval_id or not ticker:
@@ -420,7 +418,7 @@ async def run(dry_run: bool = True) -> None:
     logger.info(f"Total positions scanned: {len(all_positions)}")
     logger.info(f"Scanner normalization (_SCANNER suffix): {normalize_updates}")
     logger.info(f"OCC ticker fields updated: {ticker_updates}")
-    logger.info(f"Scanner source resolved (OPEN): {scanner_updates}")
+    logger.info(f"Scanner source resolved: {scanner_updates}")
     logger.info(f"Scanner source marked UNKNOWN: {unknown_updates}")
     logger.info(f"Scanner source unresolvable: {scanner_not_found}")
     if dry_run:
