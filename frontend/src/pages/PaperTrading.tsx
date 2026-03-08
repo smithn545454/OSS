@@ -47,7 +47,7 @@ export default function PaperTrading() {
   const [filters, setFilters] = useFilterParams()
   const [activeTab, setActiveTab] = useState<TabId>('overview')
 
-  const { enrichedPositions, isLoading, error, rawMetrics } = useEnrichedPositions({
+  const { enrichedPositions, isLoading, error, rawMetrics, byScoreBand } = useEnrichedPositions({
     period: filters.period,
     verdict: filters.verdict,
     scanner: filters.scanner,
@@ -142,6 +142,7 @@ export default function PaperTrading() {
               positions={enrichedPositions}
               period={filters.period}
               byScanner={summaryMetrics.data?.by_scanner}
+              byScoreBand={byScoreBand}
             />
           )}
           {activeTab === 'positions' && <PositionTracker positions={enrichedPositions} />}
