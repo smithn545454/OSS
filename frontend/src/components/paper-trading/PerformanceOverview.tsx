@@ -26,6 +26,7 @@ interface PerformanceOverviewProps {
   positions: EnrichedPosition[]
   period: string
   byScanner?: Record<string, ScannerMetrics>
+  byScoreBand?: Record<string, { count: number; profitable: number }>
 }
 
 interface ScannerMetrics {
@@ -66,6 +67,7 @@ export default function PerformanceOverview({
   positions,
   period,
   byScanner,
+  byScoreBand,
 }: PerformanceOverviewProps) {
   const { data: equityData } = useEquityCurve(period)
 
@@ -131,22 +133,37 @@ export default function PerformanceOverview({
       .sort((a, b) => b.count - a.count)
   })()
 
-  // Score band analysis computed from positions (no calibration report dependency)
-  // Uses "profitable %" — positions with positive current P&L — to include open positions
-  const scoreBands = SCORE_BANDS.map((band) => {
-    const inBand = positions.filter(
-      (p) =>
-        p.conviction_score != null &&
-        p.conviction_score >= band.min &&
-        p.conviction_score < band.max
-    )
-    const profitable = inBand.filter((p) => p.current_pnl_pct > 0)
-    return {
-      band: band.label,
-      count: inBand.length,
-      win_rate: inBand.length > 0 ? (profitable.length / inBand.length) * 100 : 0,
+  // Score band analysis: prefer server-side data (computed from ALL matching positions),
+  // fall back to client-side computation from paginated positions
+  const scoreBands = (() => {
+    const hasServerData = byScoreBand && Object.keys(byScoreBand).length > 0
+    if (hasServerData) {
+      return SCORE_BANDS.map((band) => {
+        const server = byScoreBand[band.label]
+        if (!server || server.count === 0) return null
+        return {
+          band: band.label,
+          count: server.count,
+          win_rate: (server.profitable / server.count) * 100,
+        }
+      }).filter((b): b is NonNullable<typeof b> => b != null)
     }
-  }).filter((b) => b.count > 0)
+    // Fallback: client-side from loaded positions
+    return SCORE_BANDS.map((band) => {
+      const inBand = positions.filter(
+        (p) =>
+          p.conviction_score != null &&
+          p.conviction_score >= band.min &&
+          p.conviction_score < band.max
+      )
+      const profitable = inBand.filter((p) => p.current_pnl_pct > 0)
+      return {
+        band: band.label,
+        count: inBand.length,
+        win_rate: inBand.length > 0 ? (profitable.length / inBand.length) * 100 : 0,
+      }
+    }).filter((b) => b.count > 0)
+  })()
 
   // Scatter plot data
   const scatterData = positions

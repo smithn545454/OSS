@@ -253,6 +253,7 @@ export interface SummaryMetricsResponse {
     daily_pnl: number
     updated_at?: string
   }>
+  by_score_band?: Record<string, { count: number; profitable: number }>
 }
 
 // Performance breakdown by option_type, scanner, score bucket

@@ -48,6 +48,24 @@ def _enum_val(v: Any) -> Any:
     return v.value if hasattr(v, "value") else v
 
 
+def _score_band_label(score: float) -> str:
+    """Map a conviction score to a display band label matching frontend SCORE_BANDS."""
+    if score < 65:
+        return "60-64"
+    elif score < 70:
+        return "65-69"
+    elif score < 75:
+        return "70-74"
+    elif score < 80:
+        return "75-79"
+    elif score < 85:
+        return "80-84"
+    elif score < 90:
+        return "85-89"
+    else:
+        return "90+"
+
+
 def _normalize_scanner(scanner_source: Optional[str]) -> Optional[str]:
     """Normalize scanner_source values (strip _SCANNER suffix from UV Lambda)."""
     if scanner_source and scanner_source.endswith("_SCANNER"):
@@ -340,6 +358,7 @@ async def get_summary_metrics(
                 t.get("tier", "?"): t for t in tiers
             } if tiers else {},
             "equity_curve": equity_curve,
+            "by_score_band": {},
         }
 
     # Filtered path: compute from matching positions
@@ -361,6 +380,18 @@ async def get_summary_metrics(
     win_rate = (wins / closed_count * 100) if closed_count > 0 else 0
     avg_return = (total_pnl / closed_count) if closed_count > 0 else 0
 
+    # Score band analysis: group positions by conviction score band
+    by_score_band: dict[str, dict[str, int]] = {}
+    for p in positions:
+        score = p.conviction_score
+        if score is None:
+            continue
+        band = _score_band_label(float(score))
+        entry = by_score_band.setdefault(band, {"count": 0, "profitable": 0})
+        entry["count"] += 1
+        if p.current_pnl_pct > 0:
+            entry["profitable"] += 1
+
     return {
         "global": {
             "open_count": len(open_positions),
@@ -377,6 +408,7 @@ async def get_summary_metrics(
         "by_verdict": {},
         "by_tier": {},
         "equity_curve": [],
+        "by_score_band": by_score_band,
     }
 
 

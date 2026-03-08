@@ -31,6 +31,7 @@ export interface EnrichedPositionsResult {
     activeCount: number
     closedCount: number
   }
+  byScoreBand?: Record<string, { count: number; profitable: number }>
 }
 
 /** Map short scanner filter codes to backend values. */
@@ -175,5 +176,6 @@ export function useEnrichedPositions(
     error: (positionsQuery.error ?? metricsQuery.error) as Error | null,
     nextCursor: positionsQuery.data?.next_cursor ?? null,
     rawMetrics,
+    byScoreBand: metricsQuery.data?.by_score_band,
   }
 }
