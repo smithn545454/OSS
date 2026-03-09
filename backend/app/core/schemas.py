@@ -374,6 +374,7 @@ class PaperPosition(OSSBaseModel):
     exit_reason: Optional[ExitReason] = None
     current_price: float
     current_pnl_pct: float
+    dollar_pnl: Optional[float] = None
     max_favorable_excursion: float = 0.0
     max_adverse_excursion: float = 0.0
     days_held: int = 0

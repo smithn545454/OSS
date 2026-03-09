@@ -79,6 +79,16 @@ class MetricsAggregator:
             ExpressionAttributeValues={":inc": 1},
         )
 
+        # Per-score-band
+        if position.conviction_score is not None:
+            band = _score_band_label(position.conviction_score)
+            table.update_item(
+                Key={"PK": "METRICS#SCOREBAND", "SK": band},
+                UpdateExpression="ADD #cnt :inc",
+                ExpressionAttributeNames={"#cnt": "count"},
+                ExpressionAttributeValues={":inc": 1},
+            )
+
     @staticmethod
     async def on_position_closed(position: PaperPosition) -> None:
         """Update counters when a position is closed."""
@@ -183,6 +193,23 @@ class MetricsAggregator:
             },
         )
 
+        # Per-score-band
+        if position.conviction_score is not None:
+            band = _score_band_label(position.conviction_score)
+            table.update_item(
+                Key={"PK": "METRICS#SCOREBAND", "SK": band},
+                UpdateExpression=(
+                    "ADD closed_count :inc, win_count :win, "
+                    "loss_count :loss, total_pnl_dollars :dollar_pnl"
+                ),
+                ExpressionAttributeValues={
+                    ":inc": 1,
+                    ":win": is_win,
+                    ":loss": is_loss,
+                    ":dollar_pnl": _decimal_safe(dollar_pnl),
+                },
+            )
+
     @staticmethod
     async def write_daily_equity(date: str, daily_pnl: float) -> None:
         """Write or update a daily equity point."""
@@ -251,6 +278,20 @@ class MetricsAggregator:
         return items
 
     @staticmethod
+    async def get_scoreband_metrics() -> list[dict[str, Any]]:
+        """Fetch per-score-band breakdown."""
+        db = get_dynamodb()
+        items = await db.query(
+            MetricsAggregator.TABLE, "METRICS#SCOREBAND",
+            limit=20, scan_forward=True,
+        )
+        for item in items:
+            item["band"] = item.get("SK", "UNKNOWN")
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
+
+    @staticmethod
     async def get_daily_equity(days: int = 90) -> list[dict[str, Any]]:
         """Fetch daily equity points."""
         db = get_dynamodb()
@@ -265,6 +306,24 @@ class MetricsAggregator:
         # Reverse to chronological order
         items.reverse()
         return items
+
+
+def _score_band_label(score: float) -> str:
+    """Map a conviction score to a display band label."""
+    if score < 65:
+        return "60-64"
+    elif score < 70:
+        return "65-69"
+    elif score < 75:
+        return "70-74"
+    elif score < 80:
+        return "75-79"
+    elif score < 85:
+        return "80-84"
+    elif score < 90:
+        return "85-89"
+    else:
+        return "90+"
 
 
 def _enum_val(v: Any) -> str:

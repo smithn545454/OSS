@@ -253,6 +253,10 @@ async def update_position(
     exit_reason = check_exit_conditions(position, current_price, current_dte, config)
     
     if exit_reason:
+        # Apply MFE/MAE updates to position before close so they're persisted
+        position.max_favorable_excursion = new_mfe
+        position.max_adverse_excursion = new_mae
+
         # Close the position
         closed_position = await PaperPositionTable.close(
             position=position,

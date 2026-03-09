@@ -694,6 +694,7 @@ class PaperPositionTable:
 
         # Calculate final P&L
         final_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+        final_dollar_pnl = (exit_price - position.entry_price) * position.quantity * 100
 
         # Create closed position, preserving enrichment fields
         now = datetime.now(timezone.utc).isoformat()
@@ -713,6 +714,7 @@ class PaperPositionTable:
             "exit_reason": ExitReason(exit_reason),
             "current_price": exit_price,
             "current_pnl_pct": final_pnl_pct,
+            "dollar_pnl": round(final_dollar_pnl, 2),
             "max_favorable_excursion": position.max_favorable_excursion,
             "max_adverse_excursion": position.max_adverse_excursion,
             "days_held": position.days_held,

@@ -316,6 +316,7 @@ async def get_summary_metrics(
         scanners_data = await MetricsAggregator.get_scanner_metrics()
         verdicts_data = await MetricsAggregator.get_verdict_metrics()
         tiers = await MetricsAggregator.get_tier_metrics()
+        scorebands_data = await MetricsAggregator.get_scoreband_metrics()
         equity_curve = await MetricsAggregator.get_daily_equity(days=90)
 
         closed = summary.get("closed_count", 0)
@@ -363,7 +364,17 @@ async def get_summary_metrics(
                 t.get("tier", "?"): t for t in tiers
             } if tiers else {},
             "equity_curve": equity_curve,
-            "by_score_band": {},
+            "by_score_band": {
+                s.get("band", "?"): {
+                    "count": int(s.get("count", 0)),
+                    "profitable": int(s.get("win_count", 0)),
+                    "profitable_pct": round(
+                        int(s.get("win_count", 0)) / int(s.get("closed_count", 1)) * 100, 1
+                    ) if int(s.get("closed_count", 0)) > 0 else 0,
+                    "closed_count": int(s.get("closed_count", 0)),
+                }
+                for s in scorebands_data
+            } if scorebands_data else {},
         }
 
     # Filtered path: compute from matching positions
@@ -408,7 +419,7 @@ async def get_summary_metrics(
     win_rate = (wins / closed_count * 100) if closed_count > 0 else 0
 
     # Score band analysis: group positions by conviction score band
-    by_score_band: dict[str, dict[str, int]] = {}
+    by_score_band: dict[str, dict[str, Any]] = {}
     for p in positions:
         score = p.conviction_score
         if score is None:
@@ -418,6 +429,40 @@ async def get_summary_metrics(
         entry["count"] += 1
         if p.current_pnl_pct > 0:
             entry["profitable"] += 1
+
+    # Scanner / verdict / tier breakdowns from loaded positions
+    by_scanner: dict[str, dict[str, Any]] = {}
+    by_verdict_map: dict[str, dict[str, Any]] = {}
+    by_tier_map: dict[str, dict[str, Any]] = {}
+    for p in positions:
+        _bucket = {"count": 0, "closed_count": 0, "win_count": 0,
+                   "loss_count": 0, "total_pnl_dollars": 0.0}
+
+        scanner_key = _normalize_scanner(
+            getattr(p, "scanner_source", None)
+        ) or "UNKNOWN"
+        s = by_scanner.setdefault(scanner_key, {**_bucket})
+        s["count"] += 1
+
+        verdict_key = str(_enum_val(p.verdict_at_entry))
+        v = by_verdict_map.setdefault(verdict_key, {**_bucket})
+        v["count"] += 1
+
+        tier_key = str(_enum_val(p.quality_tier_at_entry) or "NONE")
+        t = by_tier_map.setdefault(tier_key, {**_bucket})
+        t["count"] += 1
+
+        if _enum_val(p.status) == "CLOSED":
+            is_win = p.current_pnl_pct > 0
+            dollar = (
+                ((p.exit_price if p.exit_price is not None else p.current_price)
+                 - p.entry_price) * p.quantity * 100
+            )
+            for bucket in (s, v, t):
+                bucket["closed_count"] += 1
+                bucket["win_count"] += int(is_win)
+                bucket["loss_count"] += int(not is_win)
+                bucket["total_pnl_dollars"] += dollar
 
     return {
         "global": {
@@ -432,9 +477,9 @@ async def get_summary_metrics(
             "best_trade_pnl": round(float(best_trade_pnl), 1) if best_trade_pnl is not None else None,
             "last_updated": None,
         },
-        "by_scanner": {},
-        "by_verdict": {},
-        "by_tier": {},
+        "by_scanner": by_scanner,
+        "by_verdict": by_verdict_map,
+        "by_tier": by_tier_map,
         "equity_curve": [],
         "by_score_band": by_score_band,
     }
