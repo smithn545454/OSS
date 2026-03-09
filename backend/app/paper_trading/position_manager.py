@@ -624,6 +624,13 @@ async def close_position_manually(
         exit_price=final_exit_price,
         exit_reason=ExitReason.MANUAL.value,
     )
-    
+
+    # Update pre-aggregated metrics counters
+    try:
+        from app.paper_trading.metrics_aggregator import MetricsAggregator
+        await MetricsAggregator.on_position_closed(closed)
+    except Exception as e:
+        logger.warning(f"Failed to update metrics on manual close: {e}")
+
     logger.info(f"Manually closed position {position_id} at {final_exit_price}")
     return closed

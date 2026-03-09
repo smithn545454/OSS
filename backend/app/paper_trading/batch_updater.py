@@ -97,15 +97,18 @@ async def update_position_chunk(
                     if update_result.exit_triggered:
                         result.exits_triggered += 1
 
-                    # Write daily equity point
+                    # Write daily equity point (dollar P&L change, not percentage)
                     from datetime import datetime, timezone
 
                     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    pnl_change = update_result.current_pnl_pct - update_result.previous_pnl_pct
-                    if abs(pnl_change) > 0.001:
+                    # Dollar change = price delta * 100 (option multiplier); quantity=1
+                    dollar_change = (
+                        (update_result.current_price - update_result.previous_price) * 100
+                    )
+                    if abs(dollar_change) > 0.01:
                         try:
                             await MetricsAggregator.write_daily_equity(
-                                today, pnl_change
+                                today, dollar_change
                             )
                         except Exception as e:
                             logger.warning(f"Failed to write equity point: {e}")

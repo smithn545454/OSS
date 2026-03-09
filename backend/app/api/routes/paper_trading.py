@@ -321,10 +321,13 @@ async def get_summary_metrics(
         closed = summary.get("closed_count", 0)
         wins = summary.get("win_count", 0)
         losses = summary.get("loss_count", 0)
-        total_pnl = summary.get("total_pnl", 0)
+        # total_pnl stores sum of current_pnl_pct (percentages) — used for avg_return
+        sum_pnl_pct = summary.get("total_pnl", 0)
+        # total_pnl_dollars stores actual dollar P&L — used for Paper P&L display
+        total_pnl_dollars = summary.get("total_pnl_dollars", 0)
 
         win_rate = (wins / closed * 100) if closed > 0 else 0
-        avg_return = (total_pnl / closed) if closed > 0 else 0
+        avg_return = (sum_pnl_pct / closed) if closed > 0 else 0
 
         # Avg score from pre-aggregated counters
         score_sum = float(summary.get("score_sum", 0))
@@ -342,7 +345,7 @@ async def get_summary_metrics(
                 "total_count": summary.get("total_count", 0),
                 "win_count": wins,
                 "loss_count": losses,
-                "total_pnl": round(float(total_pnl), 2),
+                "total_pnl": round(float(total_pnl_dollars), 2),
                 "win_rate": round(win_rate, 2),
                 "avg_return": round(float(avg_return), 2),
                 "avg_score": avg_score,
@@ -372,15 +375,26 @@ async def get_summary_metrics(
     wins = sum(1 for p in closed_positions if p.current_pnl_pct > 0)
     losses = sum(1 for p in closed_positions if p.current_pnl_pct < 0)
     closed_count = len(closed_positions)
-    total_pnl = sum(
-        (p.exit_price - p.entry_price) * 100
-        if p.exit_price is not None
-        else (p.current_price - p.entry_price) * 100
+
+    # Dollar P&L across all positions (for Paper P&L display)
+    total_pnl_dollars = sum(
+        ((p.exit_price if p.exit_price is not None else p.current_price) - p.entry_price)
+        * p.quantity * 100
         for p in positions
     )
 
+    # Average percentage return (closed positions only)
+    avg_return_pct = (
+        sum(p.current_pnl_pct for p in closed_positions) / closed_count
+        if closed_count > 0 else 0
+    )
+
+    # Best trade percentage
+    best_trade_pnl = max(
+        (p.current_pnl_pct for p in positions), default=None
+    )
+
     win_rate = (wins / closed_count * 100) if closed_count > 0 else 0
-    avg_return = (total_pnl / closed_count) if closed_count > 0 else 0
 
     # Score band analysis: group positions by conviction score band
     by_score_band: dict[str, dict[str, int]] = {}
@@ -401,9 +415,10 @@ async def get_summary_metrics(
             "total_count": len(positions),
             "win_count": wins,
             "loss_count": losses,
-            "total_pnl": round(float(total_pnl), 2),
+            "total_pnl": round(float(total_pnl_dollars), 2),
             "win_rate": round(win_rate, 2),
-            "avg_return": round(float(avg_return), 2),
+            "avg_return": round(float(avg_return_pct), 2),
+            "best_trade_pnl": round(float(best_trade_pnl), 1) if best_trade_pnl is not None else None,
             "last_updated": None,
         },
         "by_scanner": {},

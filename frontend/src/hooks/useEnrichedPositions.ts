@@ -154,9 +154,8 @@ export function useEnrichedPositions(
       closed.length > 0 ? (wins.length / closed.length) * 100 : null
 
     const avgReturn =
-      positions.length > 0
-        ? positions.reduce((s, p) => s + p.current_pnl_pct, 0) /
-          positions.length
+      closed.length > 0
+        ? closed.reduce((s, p) => s + p.current_pnl_pct, 0) / closed.length
         : 0
 
     return {

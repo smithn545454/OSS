@@ -36,6 +36,7 @@ interface ScannerMetrics {
   win_count?: number
   loss_count?: number
   total_pnl?: number
+  total_pnl_dollars?: number
 }
 
 const SCANNER_NAMES: Record<string, string> = {
@@ -89,15 +90,18 @@ export default function PerformanceOverview({
           const closedCount = Number(serverData.closed_count ?? 0)
           const winCount = Number(serverData.win_count ?? 0)
           const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : null
-          const totalPnl = Number(serverData.total_pnl ?? 0)
+          // total_pnl = sum of pnl percentages (for avg return)
+          const sumPnlPct = Number(serverData.total_pnl ?? 0)
+          // total_pnl_dollars = actual dollar P&L (for $ display)
+          const totalPnlDollars = Number(serverData.total_pnl_dollars ?? serverData.total_pnl ?? 0)
           return {
             key,
             name: SCANNER_NAMES[key] || key,
             count,
             winRate,
-            avgReturn: closedCount > 0 ? totalPnl / closedCount : 0,
+            avgReturn: closedCount > 0 ? sumPnlPct / closedCount : 0,
             avgScore: null as number | null,
-            totalPnl,
+            totalPnl: totalPnlDollars,
           }
         }
 

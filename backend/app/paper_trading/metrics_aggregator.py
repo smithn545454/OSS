@@ -89,13 +89,20 @@ class MetricsAggregator:
         is_win = 1 if pnl > 0 else 0
         is_loss = 1 if pnl < 0 else 0
 
+        # Dollar P&L: (exit_or_current - entry) * quantity * 100 (option multiplier)
+        exit_price = (
+            position.exit_price if position.exit_price is not None else position.current_price
+        )
+        dollar_pnl = (exit_price - position.entry_price) * position.quantity * 100
+
         # Global summary
         table.update_item(
             Key={"PK": "METRICS#GLOBAL", "SK": "SUMMARY"},
             UpdateExpression=(
                 "ADD open_count :dec, closed_count :inc, "
                 "win_count :win, loss_count :loss, "
-                "total_pnl :pnl, sum_returns :pnl "
+                "total_pnl :pnl, sum_returns :pnl, "
+                "total_pnl_dollars :dollar_pnl "
                 "SET last_updated = :now"
             ),
             ExpressionAttributeValues={
@@ -104,6 +111,7 @@ class MetricsAggregator:
                 ":win": is_win,
                 ":loss": is_loss,
                 ":pnl": _decimal_safe(pnl),
+                ":dollar_pnl": _decimal_safe(dollar_pnl),
                 ":now": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -127,13 +135,15 @@ class MetricsAggregator:
             Key={"PK": "METRICS#SCANNER", "SK": scanner},
             UpdateExpression=(
                 "ADD closed_count :inc, win_count :win, "
-                "loss_count :loss, total_pnl :pnl"
+                "loss_count :loss, total_pnl :pnl, "
+                "total_pnl_dollars :dollar_pnl"
             ),
             ExpressionAttributeValues={
                 ":inc": 1,
                 ":win": is_win,
                 ":loss": is_loss,
                 ":pnl": _decimal_safe(pnl),
+                ":dollar_pnl": _decimal_safe(dollar_pnl),
             },
         )
 
@@ -143,13 +153,15 @@ class MetricsAggregator:
             Key={"PK": "METRICS#VERDICT", "SK": verdict},
             UpdateExpression=(
                 "ADD closed_count :inc, win_count :win, "
-                "loss_count :loss, total_pnl :pnl"
+                "loss_count :loss, total_pnl :pnl, "
+                "total_pnl_dollars :dollar_pnl"
             ),
             ExpressionAttributeValues={
                 ":inc": 1,
                 ":win": is_win,
                 ":loss": is_loss,
                 ":pnl": _decimal_safe(pnl),
+                ":dollar_pnl": _decimal_safe(dollar_pnl),
             },
         )
 
@@ -159,13 +171,15 @@ class MetricsAggregator:
             Key={"PK": "METRICS#TIER", "SK": tier},
             UpdateExpression=(
                 "ADD closed_count :inc, win_count :win, "
-                "loss_count :loss, total_pnl :pnl"
+                "loss_count :loss, total_pnl :pnl, "
+                "total_pnl_dollars :dollar_pnl"
             ),
             ExpressionAttributeValues={
                 ":inc": 1,
                 ":win": is_win,
                 ":loss": is_loss,
                 ":pnl": _decimal_safe(pnl),
+                ":dollar_pnl": _decimal_safe(dollar_pnl),
             },
         )
 
@@ -273,6 +287,7 @@ def _empty_summary() -> dict[str, Any]:
         "win_count": 0,
         "loss_count": 0,
         "total_pnl": 0,
+        "total_pnl_dollars": 0,
         "sum_returns": 0,
         "last_updated": None,
     }
