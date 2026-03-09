@@ -173,26 +173,29 @@ async def list_positions(
     resolved_status = (status or "open").lower()
 
     if resolved_status == "open":
-        positions, next_cursor = await PaperPositionTable.list_open_paginated(
+        positions, next_cursor = await _query_positions(
+            PaperPositionTable.list_open_paginated,
             limit=limit, cursor=cursor,
-            filter_expression=filter_expr,
+            filter_expr=filter_expr,
             filter_values=filter_values or None,
             filter_names=filter_names or None,
             sk_condition=sk_condition,
         )
     elif resolved_status == "closed":
-        positions, next_cursor = await PaperPositionTable.list_closed_paginated(
+        positions, next_cursor = await _query_positions(
+            PaperPositionTable.list_closed_paginated,
             limit=limit, cursor=cursor,
-            filter_expression=filter_expr,
+            filter_expr=filter_expr,
             filter_values=filter_values or None,
             filter_names=filter_names or None,
             sk_condition=sk_condition,
         )
     else:
         # "all" — query both partitions sequentially
-        open_pos, open_cursor = await PaperPositionTable.list_open_paginated(
+        open_pos, open_cursor = await _query_positions(
+            PaperPositionTable.list_open_paginated,
             limit=limit, cursor=cursor,
-            filter_expression=filter_expr,
+            filter_expr=filter_expr,
             filter_values=filter_values or None,
             filter_names=filter_names or None,
             sk_condition=sk_condition,
@@ -201,9 +204,10 @@ async def list_positions(
         closed_pos: list = []
         closed_cursor = None
         if remaining > 0:
-            closed_pos, closed_cursor = await PaperPositionTable.list_closed_paginated(
-                limit=remaining,
-                filter_expression=filter_expr,
+            closed_pos, closed_cursor = await _query_positions(
+                PaperPositionTable.list_closed_paginated,
+                limit=remaining, cursor=None,
+                filter_expr=filter_expr,
                 filter_values=filter_values or None,
                 filter_names=filter_names or None,
                 sk_condition=sk_condition,
@@ -534,6 +538,48 @@ async def _query_filtered_positions(
         ))
 
     return all_positions
+
+
+async def _query_positions(
+    query_fn,
+    limit: int,
+    cursor,
+    filter_expr,
+    filter_values,
+    filter_names,
+    sk_condition,
+) -> tuple[list, Any]:
+    """Query positions, accumulating pages when filters are active.
+
+    DynamoDB's Limit caps items *scanned* (before FilterExpression), not items
+    *returned*. A single query with Limit=200 and a selective filter can return
+    0 results even when matching items exist deeper in the partition. When a
+    filter is active, this function scans multiple DynamoDB pages until the
+    requested number of filtered results is found.
+    """
+    if not filter_expr:
+        # No filter — single DynamoDB query is sufficient
+        return await query_fn(
+            limit=limit, cursor=cursor, sk_condition=sk_condition,
+        )
+
+    # Accumulate filtered results across multiple DynamoDB pages
+    accumulated: list = []
+    db_cursor = cursor
+    max_pages = 50  # Safety cap: 50 * 200 = 10,000 items scanned
+    while len(accumulated) < limit and max_pages > 0:
+        batch, db_cursor = await query_fn(
+            limit=200, cursor=db_cursor,
+            filter_expression=filter_expr,
+            filter_values=filter_values,
+            filter_names=filter_names,
+            sk_condition=sk_condition,
+        )
+        accumulated.extend(batch)
+        max_pages -= 1
+        if not db_cursor:
+            break
+    return accumulated, db_cursor
 
 
 async def _exhaust_paginated(

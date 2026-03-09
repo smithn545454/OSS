@@ -177,6 +177,21 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
+        # 6b. Paper snapshots table (daily position tracking)
+        self.paper_snapshots_table = dynamodb.Table(
+            self,
+            "PaperSnapshotsTable",
+            table_name=f"{self.table_prefix}-paper-snapshots",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+
         # 7. Feature values table
         self.feature_values_table = dynamodb.Table(
             self,
@@ -422,6 +437,7 @@ class DatabaseStack(Stack):
             self.pipeline_runs_table,
             self.stage_events_table,
             self.paper_positions_table,
+            self.paper_snapshots_table,
             self.feature_values_table,
             self.pillar_scores_table,
             self.gate_results_table,
