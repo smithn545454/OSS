@@ -376,12 +376,23 @@ async def get_summary_metrics(
     losses = sum(1 for p in closed_positions if p.current_pnl_pct < 0)
     closed_count = len(closed_positions)
 
-    # Dollar P&L across all positions (for Paper P&L display)
-    total_pnl_dollars = sum(
-        ((p.exit_price if p.exit_price is not None else p.current_price) - p.entry_price)
-        * p.quantity * 100
-        for p in positions
-    )
+    # Portfolio-wide P&L for the period (matches equity curve).
+    # When only a period filter is active (no scanner/verdict), use the same daily equity
+    # data that feeds the equity curve so KPI and chart tell the same story.
+    has_position_filters = any([verdict, scanner])
+    if not has_position_filters and period and period != "all":
+        period_days_map = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+        days = period_days_map.get(period, 30)
+        daily_points = await MetricsAggregator.get_daily_equity(days=365)
+        window_points = daily_points[-days:]
+        total_pnl_dollars = sum(float(p.get("daily_pnl", 0)) for p in window_points)
+    else:
+        # Position-cohort P&L when scanner/verdict filters narrow the population
+        total_pnl_dollars = sum(
+            ((p.exit_price if p.exit_price is not None else p.current_price) - p.entry_price)
+            * p.quantity * 100
+            for p in positions
+        )
 
     # Average percentage return (closed positions only)
     avg_return_pct = (
@@ -848,29 +859,31 @@ async def analyze_position(position_id: str) -> dict[str, Any]:
 
 @router.get("/equity-curve")
 async def get_equity_curve(period: str = "30d") -> dict[str, Any]:
-    """Get equity curve data from pre-aggregated daily metrics."""
+    """Get equity curve data from pre-aggregated daily metrics.
+
+    Returns relative performance starting at 0 for the selected period.
+    The equity value represents cumulative P&L during the window, not absolute portfolio value.
+    """
     from app.paper_trading.metrics_aggregator import MetricsAggregator
 
     period_days = {"7d": 7, "14d": 14, "30d": 30, "90d": 90, "all": 365}
     days = period_days.get(period, 30)
 
-    # Fetch all history to compute correct starting equity for windowed views
     all_points = await MetricsAggregator.get_daily_equity(days=365)
 
-    # Build cumulative equity from full history
-    equity = 10000.0
-    full_curve = []
-    for point in all_points:
+    # Slice to the requested window first, then build cumulative from 0
+    window_points = all_points[-days:] if period != "all" else all_points
+
+    equity = 0.0
+    curve = []
+    for point in window_points:
         pnl = float(point.get("daily_pnl", 0))
         equity += pnl
-        full_curve.append({
+        curve.append({
             "date": point.get("date", ""),
             "daily_pnl": round(pnl, 2),
             "equity": round(equity, 2),
         })
-
-    # Return only the last N points (with correct cumulative equity)
-    curve = full_curve[-days:] if period != "all" else full_curve
 
     return {"curve": curve, "period": period}
 

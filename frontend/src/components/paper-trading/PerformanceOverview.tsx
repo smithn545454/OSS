@@ -184,7 +184,7 @@ export default function PerformanceOverview({
       {/* Row 1: Equity Curve + Daily P&L */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 rounded-lg border border-oss-border bg-oss-surface p-4">
-          <h3 className="text-sm font-medium text-oss-text mb-3">Equity Curve</h3>
+          <h3 className="text-sm font-medium text-oss-text mb-3">Portfolio P&L</h3>
           {curve.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <AreaChart data={curve}>

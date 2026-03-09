@@ -234,11 +234,11 @@ class TestEquityCurveComputation:
 
             assert curve[0]["date"] == "2026-01-11"
             assert curve[0]["daily_pnl"] == 100.0
-            assert curve[0]["equity"] == 10100.0  # 10000 + 100
+            assert curve[0]["equity"] == 100.0  # 0 + 100
 
             assert curve[1]["date"] == "2026-01-12"
             assert curve[1]["daily_pnl"] == 100.0
-            assert curve[1]["equity"] == 10200.0  # 10100 + 100
+            assert curve[1]["equity"] == 200.0  # 100 + 100
 
 
 # ---------------------------------------------------------------------------

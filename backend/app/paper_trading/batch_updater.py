@@ -101,9 +101,10 @@ async def update_position_chunk(
                     from datetime import datetime, timezone
 
                     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    # Dollar change = price delta * 100 (option multiplier); quantity=1
+                    # Dollar change = price delta * quantity * 100 (option multiplier)
                     dollar_change = (
-                        (update_result.current_price - update_result.previous_price) * 100
+                        (update_result.current_price - update_result.previous_price)
+                        * pos.quantity * 100
                     )
                     if abs(dollar_change) > 0.01:
                         try:
