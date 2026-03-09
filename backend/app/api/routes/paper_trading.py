@@ -854,19 +854,23 @@ async def get_equity_curve(period: str = "30d") -> dict[str, Any]:
     period_days = {"7d": 7, "14d": 14, "30d": 30, "90d": 90, "all": 365}
     days = period_days.get(period, 30)
 
-    daily_points = await MetricsAggregator.get_daily_equity(days=days)
+    # Fetch all history to compute correct starting equity for windowed views
+    all_points = await MetricsAggregator.get_daily_equity(days=365)
 
-    # Build cumulative equity curve
-    curve = []
+    # Build cumulative equity from full history
     equity = 10000.0
-    for point in daily_points:
+    full_curve = []
+    for point in all_points:
         pnl = float(point.get("daily_pnl", 0))
         equity += pnl
-        curve.append({
+        full_curve.append({
             "date": point.get("date", ""),
             "daily_pnl": round(pnl, 2),
             "equity": round(equity, 2),
         })
+
+    # Return only the last N points (with correct cumulative equity)
+    curve = full_curve[-days:] if period != "all" else full_curve
 
     return {"curve": curve, "period": period}
 
