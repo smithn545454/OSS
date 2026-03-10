@@ -202,9 +202,11 @@ class TestCheckIVPercentileMax:
         result = check_iv_percentile_max(_make_ctx(iv_percentile=95), _config())
         assert result.passed is False
 
-    def test_none_fails(self):
+    def test_none_passes(self):
+        """IV percentile gate passes (fail open) when data is missing."""
         result = check_iv_percentile_max(_make_ctx(iv_percentile=None), _config())
-        assert result.passed is False
+        assert result.passed is True
+        assert result.reason_code == "GATE_PASS_IV_PERCENTILE_MISSING"
 
 
 class TestCheckThetaBurdenMax:

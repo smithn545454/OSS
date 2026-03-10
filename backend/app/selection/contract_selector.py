@@ -561,8 +561,15 @@ class ContractSelector:
             vega = greeks.get("vega", 0) or 0
 
             # Fallback: compute greeks via Black-Scholes when Polygon
-            # doesn't provide them (becomes no-op once Polygon returns greeks)
-            if delta == 0 and iv == 0 and mid > 0 and dte > 0:
+            # doesn't provide complete greeks.  Polygon often returns IV
+            # but not the full set (delta/gamma/theta/vega), especially on
+            # the basic tier.  Trigger the fallback whenever ANY critical
+            # Greek is missing so the evaluation has complete data for the
+            # Greeks Coherence gate in Stage 6.
+            greeks_incomplete = (
+                delta == 0 or gamma == 0 or theta == 0 or vega == 0 or iv == 0
+            )
+            if greeks_incomplete and mid > 0 and dte > 0:
                 from app.selection.greeks import compute_greeks
 
                 computed = compute_greeks(

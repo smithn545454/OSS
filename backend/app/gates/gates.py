@@ -219,19 +219,23 @@ def check_iv_percentile_max(ctx: GateContext, config: GateConfig) -> GateResult:
     threshold = config.iv_percentile_max
     measured = ctx.iv_percentile
     
-    # Fail when IV percentile data is missing — insufficient data to evaluate
+    # Pass when IV percentile data is missing — missing data is not
+    # evidence of high IV.  The gate's purpose is to reject options with
+    # KNOWN elevated IV (>85th percentile).  Tickers that haven't yet
+    # accumulated 20 days of IV history simply lack the data; pillar
+    # scoring already defaults to neutral (50) for missing features.
     if measured is None:
         return GateResult(
             evaluation_id=ctx.evaluation_id,
             gate_id="GATE_IV_PERCENTILE_MAX",
             enabled=True,
-            passed=False,
+            passed=True,
             measured_value=0.0,
             threshold_value=float(threshold),
             operator=GateOperator.LTE,
             units="percent",
-            reason_code="GATE_FAIL_IV_PERCENTILE_MISSING",
-            notes="IV percentile not available — insufficient data to evaluate",
+            reason_code="GATE_PASS_IV_PERCENTILE_MISSING",
+            notes="IV percentile not available — passing (missing data is not evidence of high IV)",
         )
     
     passed = measured <= threshold

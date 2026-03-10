@@ -44,7 +44,7 @@ from app.core.schemas import (
     TradeThesis,
 )
 from app.core.watchlist import WatchlistManager
-from app.db.tables import EvaluationTable, OpportunityTable, PolicyTable
+from app.db.tables import EvaluationTable, IVHistoryTable, OpportunityTable, PolicyTable
 from app.filters.underlying import UnderlyingFilter
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
 from app.scanners.breakout import BreakoutScanner
@@ -1536,6 +1536,32 @@ class ScannerOrchestrator:
                     # Cache broad chain for scanners (NOT for Contract Selection)
                     # Contract Selection will fetch its own full chain for triggered tickers
                     context.cached_data["options_chains"][ticker] = chain
+
+                    # Store IV history for ALL tickers before scanners run.
+                    # This is independent of which scanner triggers (or early
+                    # exits), so IV percentile data accumulates for every
+                    # ticker in the watchlist.
+                    if polygon:
+                        try:
+                            from app.core.schemas import IVHistory
+                            from app.scanners.utils import calculate_iv_proxy
+
+                            iv_result = calculate_iv_proxy(
+                                chain, underlying_price,
+                                min_dte=7, max_dte=90,
+                                as_of_date=effective_date,
+                            )
+                            if iv_result:
+                                today_str = effective_date.isoformat()
+                                await IVHistoryTable.put(IVHistory(
+                                    ticker=ticker,
+                                    date=today_str,
+                                    atm_iv=iv_result.iv_proxy,
+                                    atm_call_iv=iv_result.atm_call_iv,
+                                    atm_put_iv=iv_result.atm_put_iv,
+                                ))
+                        except Exception as e:
+                            logger.debug(f"IV history storage skipped for {ticker}: {e}")
 
                     # Compute aggregated volume from cached chain
                     # Broader than ATM but sufficient for trigger detection

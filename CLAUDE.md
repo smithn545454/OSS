@@ -350,9 +350,14 @@ After any rollback, tell the user:
 - Stage mapper: aggregate sums events correctly; fan-out stages (3, 8) don't trigger false anomalies
 - All 8 stages flow data end-to-end; Stage 6 currently rejects all (gates working, thresholds may need tuning)
 
+### Pipeline Audit Fixes (Mar 10, 2026)
+- **Greeks Coherence gate was rejecting 91% of evaluations** — root cause: Black-Scholes fallback only triggered when BOTH delta=0 AND iv=0, but Polygon basic tier often returns IV without the other Greeks. Fixed: fallback now triggers when ANY critical Greek is zero.
+- **IV Percentile gate hard-failed on missing data** — was rejecting evaluations where IV history hadn't accumulated (needs 20 days). Fixed: gate now fails open (passes) when data is missing, since missing data is not evidence of high IV.
+- **IV history only written by Cheap Options scanner** — due to early exit optimization (Breakout/Compression trigger first → CheapOptions skipped), many tickers never accumulated IV history. Fixed: orchestrator now stores IV history for ALL tickers before scanners run.
+- **Dead GateConfig fields**: `combined_score_min`, `pillar_minimum`, `pillar_spread_max` are defined in GateConfig but no production gate uses them (only backtest). The "relaxations" noted previously had zero effect on production.
+- `breakout_volume_min` stays at 1.5x (intentional)
+
 ### Pending Verification
 - Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
 - AI Trade Thesis generation should work on next pipeline run (PillarResult→PillarScore conversion was fixed)
-- Gate threshold relaxations applied: breakout_volume_min 1.5→1.0, combined_score_min 75→60, pillar_minimum 60→45, pillar_spread_max 30→40
-- Stage 6 rejecting 100% of evaluations — investigate which gates are failing (likely spread/liquidity from fallback pricing)
 - FinnhubClient "not initialized" errors (needs async context manager usage) — fails open, noisy but non-blocking

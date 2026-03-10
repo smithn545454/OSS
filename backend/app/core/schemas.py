@@ -583,7 +583,8 @@ class GateConfig(OSSBaseModel):
     delta_max: float = 0.70
     max_premium: float = 20.0
 
-    # Composite threshold gate thresholds
+    # Composite threshold gate thresholds (used by backtest only — no
+    # production gate implements these; decision logic uses DecisionConfig)
     combined_score_min: float = 75.0
     pillar_minimum: float = 60.0
     pillar_spread_max: float = 30.0

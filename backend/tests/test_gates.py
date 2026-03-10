@@ -402,14 +402,14 @@ class TestGateIVPercentileMax:
         assert result.passed is False
         assert result.reason_code == "GATE_FAIL_IV_PERCENTILE"
     
-    def test_fail_when_none(self, passing_call_context, default_config):
-        """Should fail when IV percentile is None (insufficient data)."""
+    def test_pass_when_none(self, passing_call_context, default_config):
+        """Should pass (fail open) when IV percentile is None — missing data is not evidence of high IV."""
         ctx = GateContext(
             **{**passing_call_context.__dict__, "iv_percentile": None}
         )
         result = check_iv_percentile_max(ctx, default_config)
-        assert result.passed is False
-        assert result.reason_code == "GATE_FAIL_IV_PERCENTILE_MISSING"
+        assert result.passed is True
+        assert result.reason_code == "GATE_PASS_IV_PERCENTILE_MISSING"
         assert "not available" in result.notes
 
 
