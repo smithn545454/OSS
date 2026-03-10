@@ -724,7 +724,7 @@ class PaperPositionTable:
 
         # Carry over enrichment fields if present
         enrichment_fields = [
-            "underlying_ticker", "scanner_source", "convergence_count",
+            "underlying_ticker", "scanner_source", "scanner_list", "convergence_count",
             "conviction_score", "pillar_directional", "pillar_volatility",
             "pillar_structure", "strike", "option_type", "expiration_date",
             "dte_at_entry", "dte_bucket", "entry_delta", "entry_iv",

@@ -177,6 +177,7 @@ export interface PaperPosition {
   // Denormalized enrichment fields (may be null for legacy positions)
   underlying_ticker: string | null
   scanner_source: ScannerType | null
+  scanner_list: string[] | null
   convergence_count: number | null
   conviction_score: number | null
   pillar_directional: number | null
@@ -1569,4 +1570,95 @@ export interface BacktestChatResponse {
   tokens_used?: number
   model?: string
   error?: string
+}
+
+// ============================================================================
+// Scanner Intelligence types
+// ============================================================================
+
+export interface ScannerPerformanceData {
+  total: number
+  closed: number
+  win_count: number
+  loss_count: number
+  win_rate: number
+  avg_return: number
+  total_pnl_dollars: number
+  avg_days_held: number
+  best_trade: { ticker: string; return_pct: number; position_id: string } | null
+  weekly_win_rates: Array<{ week: string; closed: number; wins: number; win_rate: number }>
+}
+
+export interface ScannerPerformanceResponse {
+  scanners: Record<string, ScannerPerformanceData>
+  period: string
+  generated_at: string
+}
+
+// ============================================================================
+// Trade Library types (browse endpoint)
+// ============================================================================
+
+export interface BrowsePositionsResponse {
+  positions: PaperPosition[]
+  total_count: number
+  page: number
+  page_size: number
+  total_pages: number
+  sort_by: string
+  sort_order: string
+}
+
+// ============================================================================
+// Pattern Discovery types
+// ============================================================================
+
+export interface ArchetypePerformance {
+  win_rate: number
+  avg_return: number
+  median_return: number
+  sample_size: number
+  avg_days_held: number
+}
+
+export interface ArchetypeResult {
+  name: string
+  criteria: Record<string, unknown>
+  performance: ArchetypePerformance
+  matching_trade_indices?: number[]
+  reasoning?: string
+  confidence: string
+  confidence_label: string
+}
+
+export interface PatternAnalysis {
+  analysis_id: string
+  status: string
+  created_at?: string
+  positions_analyzed: number
+  context?: Record<string, unknown>
+  archetypes: ArchetypeResult[]
+  message?: string
+}
+
+export interface PatternAnalysisSummary {
+  analysis_id: string
+  created_at: string
+  positions_analyzed: number
+  archetype_count: number
+  period: string
+}
+
+// ============================================================================
+// Setup Rules types
+// ============================================================================
+
+export interface SetupRule {
+  rule_id: string
+  name: string
+  criteria: Record<string, unknown>
+  is_active: boolean
+  created_at: string
+  source_analysis_id: string | null
+  performance_at_creation: ArchetypePerformance
 }

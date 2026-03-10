@@ -24,7 +24,7 @@ from app.core.schemas import (
     TrackingConfig,
     Verdict,
 )
-from app.db.tables import PaperPositionTable, PaperSnapshotTable
+from app.db.tables import OpportunityTable, PaperPositionTable, PaperSnapshotTable
 from app.paper_trading.exit_checker import (
     calculate_dte_from_expiration,
     check_exit_conditions,
@@ -87,8 +87,28 @@ async def create_position_from_evaluation(
     if scanner_source and scanner_source.endswith("_SCANNER"):
         scanner_source = scanner_source[: -len("_SCANNER")]
 
-    # Count convergence (number of scanner triggers from the opportunity)
-    convergence_count = 1  # At least the primary scanner
+    # Look up the opportunity to get all scanner triggers (for confluence tracking)
+    scanner_list: list[str] = []
+    convergence_count = 1  # Default: at least the primary scanner
+    try:
+        opportunities = await OpportunityTable.list_by_ticker(
+            evaluation.underlying_ticker, limit=20
+        )
+        for opp in opportunities:
+            if opp.opportunity_id == evaluation.opportunity_id:
+                scanner_list = sorted(set(
+                    t.scanner_type.value
+                    if hasattr(t.scanner_type, "value") else str(t.scanner_type)
+                    for t in opp.scanner_triggers
+                ))
+                convergence_count = len(scanner_list)
+                break
+    except Exception as e:
+        logger.warning(f"Failed to look up opportunity for scanner_list: {e}")
+
+    # Fallback: if opportunity lookup failed, use primary scanner_source
+    if not scanner_list and scanner_source:
+        scanner_list = [scanner_source]
 
     # Entry price uses ask (what you'd actually pay to buy a long option)
     entry_price = evaluation.ask if evaluation.ask > 0 else evaluation.mid
@@ -110,6 +130,7 @@ async def create_position_from_evaluation(
         # Denormalized enrichment fields
         underlying_ticker=evaluation.underlying_ticker,
         scanner_source=scanner_source,
+        scanner_list=scanner_list or None,
         convergence_count=convergence_count,
         conviction_score=decision.final_score,
         pillar_directional=decision.directional_score,

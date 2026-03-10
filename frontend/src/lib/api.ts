@@ -688,5 +688,111 @@ export async function chatWithBacktest(
   )
 }
 
+// ============================================================================
+// Scanner Intelligence API
+// ============================================================================
+
+export async function getScannerPerformance(
+  period: string = 'all'
+): Promise<import('./types').ScannerPerformanceResponse> {
+  return fetchApi(`/api/paper-trading/scanner-performance?period=${encodeURIComponent(period)}`)
+}
+
+// ============================================================================
+// Trade Library API (Browse endpoint)
+// ============================================================================
+
+export async function browsePositions(params: {
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+  status?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+  min_score?: number
+  min_return?: number
+  confluence?: boolean
+} = {}): Promise<import('./types').BrowsePositionsResponse> {
+  const qs = new URLSearchParams()
+  if (params.sort_by) qs.set('sort_by', params.sort_by)
+  if (params.sort_order) qs.set('sort_order', params.sort_order)
+  if (params.page) qs.set('page', String(params.page))
+  if (params.page_size) qs.set('page_size', String(params.page_size))
+  if (params.status) qs.set('status', params.status)
+  if (params.verdict) qs.set('verdict', params.verdict)
+  if (params.scanner) qs.set('scanner', params.scanner)
+  if (params.period) qs.set('period', params.period)
+  if (params.min_score) qs.set('min_score', String(params.min_score))
+  if (params.min_return) qs.set('min_return', String(params.min_return))
+  if (params.confluence != null) qs.set('confluence', String(params.confluence))
+  const query = qs.toString()
+  return fetchApi(`/api/paper-trading/positions/browse${query ? `?${query}` : ''}`)
+}
+
+// ============================================================================
+// Pattern Discovery API
+// ============================================================================
+
+export async function runPatternDiscovery(params: {
+  period?: string
+  verdict?: string
+  scanner?: string
+  min_sample?: number
+  min_win_rate?: number
+} = {}): Promise<import('./types').PatternAnalysis> {
+  return fetchApi('/api/paper-trading/pattern-discovery', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function listPatternAnalyses(): Promise<import('./types').PatternAnalysisSummary[]> {
+  return fetchApi('/api/paper-trading/pattern-discovery')
+}
+
+export async function getPatternAnalysis(
+  analysisId: string
+): Promise<import('./types').PatternAnalysis> {
+  return fetchApi(`/api/paper-trading/pattern-discovery/${encodeURIComponent(analysisId)}`)
+}
+
+// ============================================================================
+// Setup Rules API
+// ============================================================================
+
+export async function listSetupRules(): Promise<import('./types').SetupRule[]> {
+  return fetchApi('/api/paper-trading/setup-rules')
+}
+
+export async function createSetupRule(data: {
+  name: string
+  criteria: Record<string, unknown>
+  source_analysis_id?: string
+  performance_at_creation?: Record<string, unknown>
+}): Promise<import('./types').SetupRule> {
+  return fetchApi('/api/paper-trading/setup-rules', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateSetupRule(
+  ruleId: string,
+  updates: { is_active?: boolean; name?: string }
+): Promise<import('./types').SetupRule> {
+  return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function deleteSetupRule(ruleId: string): Promise<{ success: boolean }> {
+  return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}`, {
+    method: 'DELETE',
+  })
+}
+
 // Export the ApiError for error handling
 export { ApiError }

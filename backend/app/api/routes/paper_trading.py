@@ -97,6 +97,7 @@ def _position_to_dict(pos: Any) -> dict[str, Any]:
         # Enrichment fields (may be None for legacy positions)
         "underlying_ticker": pos.underlying_ticker,
         "scanner_source": _normalize_scanner(pos.scanner_source),
+        "scanner_list": pos.scanner_list,
         "convergence_count": pos.convergence_count,
         "conviction_score": pos.conviction_score,
         "pillar_directional": pos.pillar_directional,
@@ -227,6 +228,96 @@ async def list_positions(
             "scanner": scanner,
             "period": period,
         },
+    }
+
+
+@router.get("/positions/browse")
+async def browse_positions(
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    sort_by: str = "entry_date",
+    sort_order: str = "desc",
+    verdict: Optional[str] = None,
+    scanner: Optional[str] = None,
+    period: Optional[str] = None,
+    min_score: Optional[float] = None,
+    min_return: Optional[float] = None,
+    confluence: Optional[bool] = None,
+) -> dict[str, Any]:
+    """Browse positions with server-side sorting and offset-based pagination.
+
+    Unlike /positions (cursor-based, DynamoDB-native ordering), this endpoint
+    loads all matching positions, sorts in-memory, and returns a page slice.
+    Designed for the Trade Library tab.
+
+    Args:
+        status: Filter by status (open, closed, all). Default: all.
+        page: Page number (1-indexed). Default: 1.
+        page_size: Items per page (default 50, max 200).
+        sort_by: Sort field (entry_date, current_pnl_pct, conviction_score,
+                 scanner_source, days_held, underlying_ticker, pillar_directional,
+                 pillar_structure).
+        sort_order: asc or desc. Default: desc.
+        verdict: Filter by verdict_at_entry (APPROVE, WATCH).
+        scanner: Filter by scanner_source.
+        period: Filter by entry_date (7d, 14d, 30d, 90d).
+        min_score: Minimum conviction score filter.
+        min_return: Minimum return % filter.
+        confluence: If true, only show positions with convergence_count >= 2.
+    """
+    page_size = min(max(page_size, 1), 200)
+    page = max(page, 1)
+
+    resolved_status = (status or "all").lower()
+    positions = await _query_filtered_positions(resolved_status, verdict, scanner, period)
+
+    # Apply additional Trade Library filters (not in DynamoDB filter expression)
+    if min_score is not None:
+        positions = [p for p in positions
+                     if p.conviction_score is not None and p.conviction_score >= min_score]
+    if min_return is not None:
+        positions = [p for p in positions if p.current_pnl_pct >= min_return]
+    if confluence:
+        positions = [p for p in positions
+                     if (p.convergence_count or 0) >= 2]
+
+    # Sort
+    valid_sort_fields = {
+        "entry_date", "current_pnl_pct", "conviction_score", "scanner_source",
+        "days_held", "underlying_ticker", "pillar_directional", "pillar_structure",
+    }
+    if sort_by not in valid_sort_fields:
+        sort_by = "entry_date"
+    reverse = sort_order.lower() != "asc"
+
+    def sort_key(p):
+        val = getattr(p, sort_by, None)
+        if val is None:
+            # Nulls sort last
+            return (1, "")
+        if isinstance(val, str):
+            return (0, val.lower())
+        return (0, val)
+
+    positions.sort(key=sort_key, reverse=reverse)
+
+    # Paginate
+    total_count = len(positions)
+    total_pages = max(1, -(-total_count // page_size))  # ceil division
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_positions = positions[start:end]
+
+    return {
+        "positions": [_position_to_dict(p) for p in page_positions],
+        "count": len(page_positions),
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
     }
 
 
@@ -487,6 +578,136 @@ async def get_summary_metrics(
         "equity_curve": [],
         "by_score_band": by_score_band,
     }
+
+
+@router.get("/scanner-performance")
+async def get_scanner_performance(
+    period: Optional[str] = None,
+    verdict: Optional[str] = None,
+) -> dict[str, Any]:
+    """Get detailed scanner performance data with weekly win rate trends.
+
+    Powers the Scanner Intelligence tab — one row per scanner with metrics
+    and sparkline data (weekly win rates for trend visualization).
+
+    Args:
+        period: Filter by entry_date (7d, 14d, 30d, 90d, all)
+        verdict: Filter by verdict_at_entry (APPROVE, WATCH)
+    """
+    from datetime import datetime as dt, timezone as tz
+
+    positions = await _query_filtered_positions(None, verdict, None, period)
+    closed = [p for p in positions if _enum_val(p.status) == "CLOSED"]
+
+    scanners: dict[str, dict[str, Any]] = {}
+
+    for p in positions:
+        key = _normalize_scanner(p.scanner_source) or "UNKNOWN"
+        if key not in scanners:
+            scanners[key] = {
+                "total": 0, "closed": 0, "open": 0,
+                "win_count": 0, "loss_count": 0,
+                "win_rate": 0, "avg_return": 0,
+                "total_pnl_dollars": 0.0,
+                "avg_days_held": 0.0,
+                "avg_conviction_score": None,
+                "best_trade": None,
+                "top_trades": [],
+                "weekly_win_rates": [],
+                "_score_sum": 0.0, "_score_count": 0,
+                "_return_sum": 0.0, "_days_sum": 0,
+                "_closed_positions": [],
+            }
+        s = scanners[key]
+        s["total"] += 1
+
+        if p.conviction_score is not None:
+            s["_score_sum"] += float(p.conviction_score)
+            s["_score_count"] += 1
+
+        if _enum_val(p.status) == "CLOSED":
+            s["closed"] += 1
+            s["_return_sum"] += p.current_pnl_pct
+            s["_days_sum"] += p.days_held
+            dollar_pnl = (
+                ((p.exit_price if p.exit_price is not None else p.current_price)
+                 - p.entry_price) * p.quantity * 100
+            )
+            s["total_pnl_dollars"] += dollar_pnl
+            if p.current_pnl_pct > 0:
+                s["win_count"] += 1
+            else:
+                s["loss_count"] += 1
+            s["_closed_positions"].append(p)
+        else:
+            s["open"] += 1
+
+    # Compute derived metrics and weekly trends
+    for key, s in scanners.items():
+        if s["closed"] > 0:
+            s["win_rate"] = round(s["win_count"] / s["closed"] * 100, 2)
+            s["avg_return"] = round(s["_return_sum"] / s["closed"], 2)
+            s["avg_days_held"] = round(s["_days_sum"] / s["closed"], 1)
+        if s["_score_count"] > 0:
+            s["avg_conviction_score"] = round(s["_score_sum"] / s["_score_count"], 1)
+        s["total_pnl_dollars"] = round(s["total_pnl_dollars"], 2)
+
+        # Best trade and top 5 trades
+        closed_sorted = sorted(
+            s["_closed_positions"], key=lambda p: p.current_pnl_pct, reverse=True
+        )
+        if closed_sorted:
+            best = closed_sorted[0]
+            s["best_trade"] = {
+                "ticker": best.underlying_ticker or best.option_ticker,
+                "return_pct": round(best.current_pnl_pct, 2),
+                "position_id": best.position_id,
+            }
+            s["top_trades"] = [
+                {
+                    "ticker": p.underlying_ticker or p.option_ticker,
+                    "return_pct": round(p.current_pnl_pct, 2),
+                    "conviction_score": p.conviction_score,
+                    "days_held": p.days_held,
+                    "position_id": p.position_id,
+                }
+                for p in closed_sorted[:5]
+            ]
+
+        # Weekly win rates for sparkline
+        weekly: dict[str, dict[str, int]] = {}
+        for p in s["_closed_positions"]:
+            date_str = p.exit_date or p.entry_date
+            try:
+                d = dt.fromisoformat(date_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            iso_year, iso_week, _ = d.isocalendar()
+            week_key = f"{iso_year}-W{iso_week:02d}"
+            w = weekly.setdefault(week_key, {"closed": 0, "wins": 0})
+            w["closed"] += 1
+            if p.current_pnl_pct > 0:
+                w["wins"] += 1
+
+        s["weekly_win_rates"] = sorted([
+            {
+                "week": wk,
+                "closed": data["closed"],
+                "wins": data["wins"],
+                "win_rate": round(data["wins"] / data["closed"] * 100, 1)
+                           if data["closed"] > 0 else 0,
+            }
+            for wk, data in weekly.items()
+        ], key=lambda x: x["week"])
+
+        # Clean up internal fields
+        del s["_score_sum"]
+        del s["_score_count"]
+        del s["_return_sum"]
+        del s["_days_sum"]
+        del s["_closed_positions"]
+
+    return {"scanners": scanners, "period": period or "all"}
 
 
 async def _query_filtered_positions(
@@ -1056,3 +1277,133 @@ async def get_summary() -> dict[str, Any]:
             for p in recent_closes
         ],
     }
+
+
+# ============================================================================
+# Pattern Discovery Endpoints
+# ============================================================================
+
+
+class PatternDiscoveryRequest(BaseModel):
+    """Request body for triggering pattern analysis."""
+
+    period: Optional[str] = None
+    verdict: Optional[str] = None
+    scanner: Optional[str] = None
+    min_sample: int = 5
+    min_win_rate: float = 0.55
+
+
+@router.post("/pattern-discovery")
+async def run_pattern_discovery(request: PatternDiscoveryRequest) -> dict[str, Any]:
+    """Run on-demand pattern discovery analysis using AI.
+
+    Sends closed trade data to Claude to identify statistically significant
+    archetypes. Results are stored and can be retrieved later.
+    """
+    from app.paper_trading.pattern_discovery import run_pattern_analysis
+
+    return await run_pattern_analysis(
+        period=request.period,
+        verdict=request.verdict,
+        scanner=request.scanner,
+        min_sample=request.min_sample,
+        min_win_rate=request.min_win_rate,
+    )
+
+
+@router.get("/pattern-discovery")
+async def list_pattern_analyses(limit: int = 10) -> dict[str, Any]:
+    """List previous pattern analysis runs."""
+    from app.paper_trading.pattern_discovery import list_analyses
+
+    analyses = await list_analyses(limit=min(limit, 50))
+    return {"analyses": analyses, "count": len(analyses)}
+
+
+@router.get("/pattern-discovery/{analysis_id}")
+async def get_pattern_analysis(analysis_id: str) -> dict[str, Any]:
+    """Get a specific pattern analysis with its archetypes."""
+    from app.paper_trading.pattern_discovery import get_analysis
+
+    result = await get_analysis(analysis_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Analysis not found: {analysis_id}")
+    return result
+
+
+# ============================================================================
+# Setup Rules CRUD
+# ============================================================================
+
+
+class SetupRuleRequest(BaseModel):
+    """Request body for creating a setup rule."""
+
+    name: str
+    criteria: dict[str, Any]
+    source_analysis_id: Optional[str] = None
+    performance_at_creation: Optional[dict[str, Any]] = None
+
+
+class SetupRuleUpdateRequest(BaseModel):
+    """Request body for updating a setup rule."""
+
+    is_active: Optional[bool] = None
+    name: Optional[str] = None
+
+
+@router.get("/setup-rules")
+async def get_setup_rules() -> dict[str, Any]:
+    """List all setup rules."""
+    from app.paper_trading.pattern_discovery import list_setup_rules
+
+    rules = await list_setup_rules()
+    return {"rules": rules, "count": len(rules)}
+
+
+@router.post("/setup-rules")
+async def create_setup_rule_endpoint(request: SetupRuleRequest) -> dict[str, Any]:
+    """Create a new setup rule (from archetype or manual)."""
+    from app.paper_trading.pattern_discovery import create_setup_rule
+
+    rule = await create_setup_rule({
+        "name": request.name,
+        "criteria": request.criteria,
+        "source_analysis_id": request.source_analysis_id,
+        "performance_at_creation": request.performance_at_creation or {},
+    })
+    return {"rule": rule, "message": "Setup rule created"}
+
+
+@router.put("/setup-rules/{rule_id}")
+async def update_setup_rule_endpoint(
+    rule_id: str, request: SetupRuleUpdateRequest
+) -> dict[str, Any]:
+    """Update a setup rule (e.g., toggle active/inactive)."""
+    from app.paper_trading.pattern_discovery import update_setup_rule
+
+    updates = {}
+    if request.is_active is not None:
+        updates["is_active"] = request.is_active
+    if request.name is not None:
+        updates["name"] = request.name
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    result = await update_setup_rule(rule_id, updates)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Setup rule not found: {rule_id}")
+    return {"rule": result, "message": "Setup rule updated"}
+
+
+@router.delete("/setup-rules/{rule_id}")
+async def delete_setup_rule_endpoint(rule_id: str) -> dict[str, Any]:
+    """Delete a setup rule."""
+    from app.paper_trading.pattern_discovery import delete_setup_rule
+
+    success = await delete_setup_rule(rule_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Setup rule not found: {rule_id}")
+    return {"message": f"Setup rule {rule_id} deleted"}

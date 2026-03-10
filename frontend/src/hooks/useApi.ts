@@ -760,3 +760,123 @@ export function useBacktestChat() {
       }),
   })
 }
+
+// ============================================================================
+// Scanner Intelligence Hooks
+// ============================================================================
+
+export function useScannerPerformance(period: string = 'all') {
+  return useQuery({
+    queryKey: ['paper-trading', 'scanner-performance', period] as const,
+    queryFn: () => api.getScannerPerformance(period),
+    staleTime: 30000,
+  })
+}
+
+// ============================================================================
+// Trade Library Hooks
+// ============================================================================
+
+export function useBrowsePositions(params: {
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+  status?: string
+  verdict?: string
+  scanner?: string
+  period?: string
+  min_score?: number
+  min_return?: number
+  confluence?: boolean
+} = {}) {
+  return useQuery({
+    queryKey: ['paper-trading', 'browse', params] as const,
+    queryFn: () => api.browsePositions(params),
+    staleTime: 15000,
+  })
+}
+
+// ============================================================================
+// Pattern Discovery Hooks
+// ============================================================================
+
+export function useRunPatternDiscovery() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: {
+      period?: string
+      verdict?: string
+      scanner?: string
+      min_sample?: number
+      min_win_rate?: number
+    }) => api.runPatternDiscovery(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading', 'pattern-discovery'] })
+    },
+  })
+}
+
+export function usePatternAnalyses() {
+  return useQuery({
+    queryKey: ['paper-trading', 'pattern-discovery', 'list'] as const,
+    queryFn: api.listPatternAnalyses,
+    staleTime: 30000,
+  })
+}
+
+export function usePatternAnalysis(analysisId: string) {
+  return useQuery({
+    queryKey: ['paper-trading', 'pattern-discovery', analysisId] as const,
+    queryFn: () => api.getPatternAnalysis(analysisId),
+    enabled: !!analysisId,
+  })
+}
+
+// ============================================================================
+// Setup Rules Hooks
+// ============================================================================
+
+export function useSetupRules() {
+  return useQuery({
+    queryKey: ['paper-trading', 'setup-rules'] as const,
+    queryFn: api.listSetupRules,
+    staleTime: 30000,
+  })
+}
+
+export function useCreateSetupRule() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: {
+      name: string
+      criteria: Record<string, unknown>
+      source_analysis_id?: string
+      performance_at_creation?: Record<string, unknown>
+    }) => api.createSetupRule(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })
+    },
+  })
+}
+
+export function useToggleSetupRule() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ruleId, isActive }: { ruleId: string; isActive: boolean }) =>
+      api.updateSetupRule(ruleId, { is_active: isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })
+    },
+  })
+}
+
+export function useDeleteSetupRule() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ruleId: string) => api.deleteSetupRule(ruleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })
+    },
+  })
+}

@@ -388,6 +388,7 @@ class PaperPosition(OSSBaseModel):
     # Denormalized enrichment fields (populated at creation, avoids eval join)
     underlying_ticker: Optional[str] = None
     scanner_source: Optional[str] = None
+    scanner_list: Optional[list[str]] = None  # All scanners that fired (for confluence)
     convergence_count: Optional[int] = None
     conviction_score: Optional[float] = None
     pillar_directional: Optional[float] = None

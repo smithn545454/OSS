@@ -1,27 +1,24 @@
 /**
- * Paper Trading Workstation page.
+ * Paper Trading page — Trade Intelligence view.
  *
- * Four tabs: Performance Overview, Position Tracker, Score Calibration, AI Strategy Advisor.
- * Uses server-side filtering and pre-aggregated metrics.
+ * Three tabs: Scanner Intelligence, Trade Library, Pattern Discovery.
+ * CompactSummaryBar replaces the old 6-card KPI strip.
  */
 
 import { useState } from 'react'
 import clsx from 'clsx'
 import { Clock, Sparkles, RefreshCw } from 'lucide-react'
 import FilterBar, { useFilterParams } from '@/components/paper-trading/FilterBar'
-import KPIStrip from '@/components/paper-trading/KPIStrip'
-import PerformanceOverview from '@/components/paper-trading/PerformanceOverview'
-import PositionTracker from '@/components/paper-trading/PositionTracker'
-import ScoreCalibration from '@/components/paper-trading/ScoreCalibration'
-import AIStrategyAdvisor from '@/components/paper-trading/AIStrategyAdvisor'
-import { useEnrichedPositions } from '@/hooks/useEnrichedPositions'
+import CompactSummaryBar from '@/components/paper-trading/CompactSummaryBar'
+import ScannerIntelligence from '@/components/paper-trading/ScannerIntelligence'
+import TradeLibrary from '@/components/paper-trading/TradeLibrary'
+import PatternDiscovery from '@/components/paper-trading/PatternDiscovery'
 import { useSummaryMetrics } from '@/hooks/useApi'
 
 const TABS = [
-  { id: 'overview', label: 'Performance Overview' },
-  { id: 'positions', label: 'Position Tracker' },
-  { id: 'calibration', label: 'Score Calibration' },
-  { id: 'advisor', label: 'AI Strategy Advisor' },
+  { id: 'scanners', label: 'Scanner Intelligence' },
+  { id: 'library', label: 'Trade Library' },
+  { id: 'patterns', label: 'Pattern Discovery' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -45,17 +42,21 @@ function formatLastSynced(iso: string | null | undefined): string {
 
 export default function PaperTrading() {
   const [filters, setFilters] = useFilterParams()
-  const [activeTab, setActiveTab] = useState<TabId>('overview')
+  const [activeTab, setActiveTab] = useState<TabId>('scanners')
 
-  const { enrichedPositions, isLoading, error, rawMetrics, byScoreBand } = useEnrichedPositions({
+  const summaryMetrics = useSummaryMetrics({
     period: filters.period,
     verdict: filters.verdict,
     scanner: filters.scanner,
     status: filters.status,
   })
 
-  const summaryMetrics = useSummaryMetrics()
-  const lastSynced = summaryMetrics.data?.global?.last_updated
+  const g = summaryMetrics.data?.global
+  const lastSynced = g?.last_updated
+  const totalTrades = (g?.open_count ?? 0) + (g?.closed_count ?? 0)
+  const winRate = g?.win_rate ?? null
+  const avgReturn = g?.avg_return ?? 0
+  const bestTradePnl = g?.best_trade_pnl ?? null
 
   return (
     <div className="space-y-6">
@@ -65,13 +66,10 @@ export default function PaperTrading() {
           <h1 className="text-2xl font-bold text-oss-text">Paper Trading</h1>
           <span className="inline-flex items-center gap-1 rounded-md bg-oss-accent/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-oss-accent border border-oss-accent/20">
             <Sparkles className="h-3 w-3" />
-            AI Workstation
+            Trade Intelligence
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-oss-muted">
-            {enrichedPositions.length} position{enrichedPositions.length !== 1 ? 's' : ''}
-          </span>
           <span className="flex items-center gap-1 text-xs text-oss-muted">
             <Clock className="h-3 w-3" />
             Synced: {formatLastSynced(lastSynced)}
@@ -81,26 +79,32 @@ export default function PaperTrading() {
 
       {/* Subtitle */}
       <p className="text-sm text-oss-muted -mt-4">
-        Track paper trading performance, analyze score calibration, and get AI-powered optimization insights.
+        Analyze scanner performance, browse your trade history, and discover winning patterns.
       </p>
 
       {/* Filter Bar */}
       <FilterBar values={filters} onChange={setFilters} />
 
-      {/* KPI Strip */}
-      <KPIStrip
-        totalPnl={rawMetrics.totalPnl}
-        winRate={rawMetrics.winRate}
-        avgReturn={rawMetrics.avgReturn}
-        avgScore={rawMetrics.avgScore}
-        bestTrade={rawMetrics.bestTrade}
-        activeCount={rawMetrics.activeCount}
+      {/* Compact Summary Bar */}
+      <CompactSummaryBar
+        totalTrades={totalTrades}
+        winRate={winRate}
+        avgReturn={avgReturn}
+        bestTrade={bestTradePnl != null ? { ticker: '', pnl: bestTradePnl } : null}
       />
 
+      {/* Loading State */}
+      {summaryMetrics.isLoading && (
+        <div className="rounded-lg border border-oss-border bg-oss-surface p-12 text-center">
+          <RefreshCw className="h-6 w-6 mx-auto mb-2 animate-spin text-oss-accent" />
+          <p className="text-sm text-oss-muted">Loading paper trading data...</p>
+        </div>
+      )}
+
       {/* Error State */}
-      {error && (
+      {summaryMetrics.error && (
         <div className="rounded-lg border border-oss-reject/30 bg-oss-reject/5 p-3 text-xs text-oss-reject">
-          Error loading data: {error.message}.{' '}
+          Error loading data: {summaryMetrics.error.message}.{' '}
           <button
             onClick={() => window.location.reload()}
             className="underline hover:no-underline"
@@ -128,26 +132,26 @@ export default function PaperTrading() {
         ))}
       </div>
 
-      {/* Loading State */}
-      {isLoading ? (
-        <div className="rounded-lg border border-oss-border bg-oss-surface p-12 text-center">
-          <RefreshCw className="h-6 w-6 mx-auto mb-2 animate-spin text-oss-accent" />
-          <p className="text-sm text-oss-muted">Loading paper trading data...</p>
-        </div>
-      ) : (
+      {/* Tab Content */}
+      {!summaryMetrics.isLoading && (
         <>
-          {/* Tab Content */}
-          {activeTab === 'overview' && (
-            <PerformanceOverview
-              positions={enrichedPositions}
+          {activeTab === 'scanners' && (
+            <ScannerIntelligence period={filters.period} />
+          )}
+          {activeTab === 'library' && (
+            <TradeLibrary
               period={filters.period}
-              byScanner={summaryMetrics.data?.by_scanner}
-              byScoreBand={byScoreBand}
+              verdict={filters.verdict}
+              scanner={filters.scanner}
             />
           )}
-          {activeTab === 'positions' && <PositionTracker positions={enrichedPositions} />}
-          {activeTab === 'calibration' && <ScoreCalibration positions={enrichedPositions} />}
-          {activeTab === 'advisor' && <AIStrategyAdvisor />}
+          {activeTab === 'patterns' && (
+            <PatternDiscovery
+              period={filters.period}
+              verdict={filters.verdict}
+              scanner={filters.scanner}
+            />
+          )}
         </>
       )}
     </div>
