@@ -492,7 +492,7 @@ class ContractSelector:
         try:
             details = contract_data.get("details", {})
             day = contract_data.get("day", {})
-            greeks = contract_data.get("greeks", {})
+            greeks = contract_data.get("greeks") or {}
 
             # Extract required fields
             option_ticker = details.get("ticker")
@@ -549,14 +549,39 @@ class ContractSelector:
             spread_abs = ask - bid
             spread_pct = (spread_abs / mid * 100) if mid > 0 else 999
 
-            # Extract Greeks — check both greeks dict and top-level
-            iv = greeks.get("implied_volatility", 0) or contract_data.get("implied_volatility", 0) or 0
+            # Extract Greeks — prefer Polygon, fallback to Black-Scholes
+            iv = (
+                greeks.get("implied_volatility", 0)
+                or contract_data.get("implied_volatility", 0)
+                or 0
+            )
             delta = greeks.get("delta", 0) or 0
             gamma = greeks.get("gamma", 0) or 0
             theta = greeks.get("theta", 0) or 0
             vega = greeks.get("vega", 0) or 0
 
-            # Skip contracts with no delta AND no IV (truly no data)
+            # Fallback: compute greeks via Black-Scholes when Polygon
+            # doesn't provide them (becomes no-op once Polygon returns greeks)
+            if delta == 0 and iv == 0 and mid > 0 and dte > 0:
+                from app.selection.greeks import compute_greeks
+
+                computed = compute_greeks(
+                    S=underlying_price,
+                    K=strike,
+                    T=dte / 365.0,
+                    option_type=(
+                        "call" if option_type == OptionType.CALL else "put"
+                    ),
+                    market_price=mid,
+                )
+                if computed:
+                    iv = computed["iv"]
+                    delta = computed["delta"]
+                    gamma = computed["gamma"]
+                    theta = computed["theta"]
+                    vega = computed["vega"]
+
+            # Skip contracts with no greeks even after fallback
             if delta == 0 and iv == 0:
                 return None
 
