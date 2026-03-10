@@ -147,12 +147,12 @@ async def list_positions(
     filter_values: dict[str, Any] = {}
     filter_names: dict[str, str] = {}
 
-    if verdict:
+    if verdict and verdict.upper() != "ALL":
         filter_parts.append("#verdict = :verdict")
         filter_names["#verdict"] = "verdict_at_entry"
         filter_values[":verdict"] = verdict
 
-    if scanner:
+    if scanner and scanner.lower() != "all":
         # Match both normalized (UNUSUAL_VOLUME) and raw (UNUSUAL_VOLUME_SCANNER) values
         filter_parts.append("(#scanner = :scanner OR #scanner = :scanner_alt)")
         filter_names["#scanner"] = "scanner_source"
@@ -721,12 +721,12 @@ async def _query_filtered_positions(
     filter_values: dict[str, Any] = {}
     filter_names: dict[str, str] = {}
 
-    if verdict:
+    if verdict and verdict.upper() != "ALL":
         filter_parts.append("#verdict = :verdict")
         filter_names["#verdict"] = "verdict_at_entry"
         filter_values[":verdict"] = verdict
 
-    if scanner:
+    if scanner and scanner.lower() != "all":
         # Match both normalized (UNUSUAL_VOLUME) and raw (UNUSUAL_VOLUME_SCANNER) values
         filter_parts.append("(#scanner = :scanner OR #scanner = :scanner_alt)")
         filter_names["#scanner"] = "scanner_source"
