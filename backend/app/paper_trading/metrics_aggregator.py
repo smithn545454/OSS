@@ -16,7 +16,7 @@ from typing import Any
 
 from app.core.schemas import PaperPosition
 from app.db.dynamodb import get_dynamodb
-from app.db.tables import PAPER_POSITIONS_TABLE
+from app.db.tables import PAPER_POSITIONS_TABLE, PaperPositionTable
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +321,6 @@ class MetricsAggregator:
         from decimal import Decimal
 
         db = get_dynamodb()
-        table = db.get_table(MetricsAggregator.TABLE)
 
         # Delete existing metric records (except DAILY equity)
         for pk in ["METRICS#GLOBAL", "METRICS#SCANNER", "METRICS#VERDICT",
