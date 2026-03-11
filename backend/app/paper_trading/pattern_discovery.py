@@ -80,12 +80,12 @@ async def run_pattern_analysis(
     all_positions = open_pos + closed_pos
 
     # Apply filters
-    if verdict:
+    if verdict and verdict.upper() != "ALL":
         all_positions = [
             p for p in all_positions
             if str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry)) == verdict
         ]
-    if scanner:
+    if scanner and scanner.lower() != "all":
         all_positions = [
             p for p in all_positions
             if p.scanner_source == scanner or p.scanner_source == scanner + "_SCANNER"
