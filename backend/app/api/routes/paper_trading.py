@@ -24,7 +24,10 @@ from app.paper_trading.metrics import (
     calculate_performance_metrics,
     compare_tiers,
 )
-from app.paper_trading.position_manager import close_position_manually
+from app.paper_trading.position_manager import (
+    close_position_manually,
+    extract_underlying_from_option_ticker,
+)
 
 router = APIRouter()
 
@@ -659,13 +662,15 @@ async def get_scanner_performance(
         if closed_sorted:
             best = closed_sorted[0]
             s["best_trade"] = {
-                "ticker": best.underlying_ticker or best.option_ticker,
+                "ticker": best.underlying_ticker
+                or extract_underlying_from_option_ticker(best.option_ticker),
                 "return_pct": round(best.current_pnl_pct, 2),
                 "position_id": best.position_id,
             }
             s["top_trades"] = [
                 {
-                    "ticker": p.underlying_ticker or p.option_ticker,
+                    "ticker": p.underlying_ticker
+                    or extract_underlying_from_option_ticker(p.option_ticker),
                     "return_pct": round(p.current_pnl_pct, 2),
                     "conviction_score": p.conviction_score,
                     "days_held": p.days_held,

@@ -104,9 +104,9 @@ function ScannerRow({ scanner, data, isExpanded, onToggle }: ScannerRowProps) {
         <span className="text-right font-mono text-sm text-oss-muted">
           {fmt(data.avg_days_held)}d
         </span>
-        <div className="text-right text-xs text-oss-approve">
+        <div className={clsx('text-right text-xs', data.best_trade && data.best_trade.return_pct >= 0 ? 'text-oss-approve' : 'text-oss-reject')}>
           {data.best_trade
-            ? `+${fmt(data.best_trade.return_pct)}% ${data.best_trade.ticker}`
+            ? `${data.best_trade.return_pct >= 0 ? '+' : ''}${fmt(data.best_trade.return_pct)}% ${data.best_trade.ticker}`
             : '--'}
         </div>
         <div className="flex justify-end">
