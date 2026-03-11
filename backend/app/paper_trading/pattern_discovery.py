@@ -116,43 +116,51 @@ async def run_pattern_analysis(
             "archetypes": [],
         }
 
-    # Limit to most recent 200 trades to stay within API Gateway timeout
-    closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)[:200]
-
-    # Build trade summaries for the LLM
-    trade_data = [_position_summary(p) for p in closed_sorted]
-
-    # Compute aggregate stats for context
-    wins = sum(1 for p in closed_sorted if p.current_pnl_pct > 0)
-    total = len(closed_sorted)
-    avg_return = sum(p.current_pnl_pct for p in closed_sorted) / total if total else 0
+    # Compute aggregate stats from ALL closed trades
+    total_closed = len(closed)
+    wins = sum(1 for p in closed if p.current_pnl_pct > 0)
+    avg_return = sum(p.current_pnl_pct for p in closed) / total_closed if total_closed else 0
 
     context = {
-        "total_trades": total,
-        "win_rate": round(wins / total * 100, 1) if total else 0,
+        "total_trades": total_closed,
+        "win_rate": round(wins / total_closed * 100, 1) if total_closed else 0,
         "avg_return": round(avg_return, 2),
         "min_sample_size": min_sample,
         "min_win_rate_pct": round(min_win_rate * 100, 1),
     }
 
+    # Sample most recent trades for LLM prompt (context window budget)
+    closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)[:1000]
+    trade_data = [_position_summary(p) for p in closed_sorted]
+
     # Build and send prompt
     prompt = build_discovery_prompt(trade_data, context)
 
     try:
-        provider = get_provider()
-        raw_response = await provider.generate(prompt, max_tokens=4000)
+        provider = get_provider("anthropic")
+        llm_response = await provider.generate(prompt, max_tokens=4000)
     except Exception as e:
         logger.error(f"Pattern discovery LLM call failed: {e}")
         return {
             "analysis_id": None,
             "status": "error",
             "message": f"AI analysis failed: {str(e)}",
-            "positions_analyzed": len(closed_sorted),
+            "positions_analyzed": total_closed,
+            "archetypes": [],
+        }
+
+    if not llm_response.success:
+        logger.error(f"Pattern discovery LLM returned error: {llm_response.error}")
+        return {
+            "analysis_id": None,
+            "status": "error",
+            "message": f"AI analysis failed: {llm_response.error}",
+            "positions_analyzed": total_closed,
             "archetypes": [],
         }
 
     # Parse response
-    archetypes = parse_discovery_response(raw_response)
+    archetypes = parse_discovery_response(llm_response.content)
 
     # Store results
     analysis_id = str(uuid4())
@@ -168,7 +176,7 @@ async def run_pattern_analysis(
             "SK": "META",
             "analysis_id": analysis_id,
             "created_at": now,
-            "positions_analyzed": len(closed_sorted),
+            "positions_analyzed": total_closed,
             "period": period or "all",
             "verdict_filter": verdict,
             "scanner_filter": scanner,
@@ -183,7 +191,7 @@ async def run_pattern_analysis(
             "SK": f"{now}#{analysis_id}",
             "analysis_id": analysis_id,
             "created_at": now,
-            "positions_analyzed": len(closed_sorted),
+            "positions_analyzed": total_closed,
             "archetype_count": len(archetypes),
             "period": period or "all",
         }
@@ -206,7 +214,7 @@ async def run_pattern_analysis(
         "analysis_id": analysis_id,
         "status": "complete",
         "created_at": now,
-        "positions_analyzed": len(closed_sorted),
+        "positions_analyzed": total_closed,
         "context": context,
         "archetypes": archetypes,
     }

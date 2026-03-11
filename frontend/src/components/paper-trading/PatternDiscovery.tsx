@@ -328,6 +328,12 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
             </div>
           )}
 
+          {displayResult.status === 'error' && (
+            <div className="rounded-lg border border-oss-reject/20 bg-oss-reject/5 p-3 text-xs text-oss-reject">
+              {displayResult.message}
+            </div>
+          )}
+
           {displayResult.archetypes.map((arch, i) => (
             <ArchetypeCard
               key={arch.name + i}
