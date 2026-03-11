@@ -619,7 +619,9 @@ def _write_candidate(
         ttl: TTL timestamp
     """
     details = contract.get("details", {})
-    option_ticker = details.get("ticker", "").replace("O:", "")
+    raw_ticker = details.get("ticker", "")
+    option_ticker = raw_ticker  # Keep O: prefix for downstream (paper trading needs it)
+    clean_ticker = raw_ticker.replace("O:", "")  # For internal UV DynamoDB keys
     day_data = contract.get("day", {})
     last_quote = contract.get("last_quote", {})
     greeks = contract.get("greeks", {})
@@ -651,7 +653,7 @@ def _write_candidate(
     candidates_table.put_item(
         Item={
             "PK": f"SCAN#{scan_id}",
-            "SK": f"CONTRACT#{option_ticker}",
+            "SK": f"CONTRACT#{clean_ticker}",
             "scan_id": scan_id,
             "scan_timestamp": now.isoformat(),
             "option_ticker": option_ticker,

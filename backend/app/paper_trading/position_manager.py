@@ -441,7 +441,10 @@ async def _update_position_from_chain(
         UpdateResult
     """
     contract = contract_data.get(position.option_ticker)
-    
+    # Fallback: UV positions may lack the O: prefix on option_ticker
+    if not contract and not position.option_ticker.startswith("O:"):
+        contract = contract_data.get(f"O:{position.option_ticker}")
+
     if not contract:
         # Contract not found - may be expired or delisted
         logger.warning(f"Contract not found in chain: {position.option_ticker}")

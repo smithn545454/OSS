@@ -308,6 +308,125 @@ class MetricsAggregator:
         return items
 
 
+    @staticmethod
+    async def rebuild_all_metrics() -> dict:
+        """Rebuild all atomic counters from actual position data.
+
+        Deletes existing METRICS records and recomputes from all positions.
+        Use after repairing corrupted positions to reconcile counters.
+
+        Returns:
+            Summary of rebuilt metrics
+        """
+        from decimal import Decimal
+
+        db = get_dynamodb()
+        table = db.get_table(MetricsAggregator.TABLE)
+
+        # Delete existing metric records (except DAILY equity)
+        for pk in ["METRICS#GLOBAL", "METRICS#SCANNER", "METRICS#VERDICT",
+                    "METRICS#TIER", "METRICS#SCOREBAND"]:
+            try:
+                items = await db.query(MetricsAggregator.TABLE, pk, limit=100)
+                for item in items:
+                    await db.delete_item(MetricsAggregator.TABLE, item["PK"], item["SK"])
+            except Exception as e:
+                logger.warning(f"Error deleting metrics for {pk}: {e}")
+
+        all_open = await PaperPositionTable.list_open()
+        all_closed = await PaperPositionTable.list_closed()
+
+        g = {
+            "open_count": Decimal(str(len(all_open))),
+            "closed_count": Decimal(str(len(all_closed))),
+            "total_count": Decimal(str(len(all_open) + len(all_closed))),
+            "win_count": Decimal("0"), "loss_count": Decimal("0"),
+            "total_pnl": Decimal("0"), "sum_returns": Decimal("0"),
+            "total_pnl_dollars": Decimal("0"), "score_sum": Decimal("0"),
+            "score_count": Decimal("0"),
+        }
+        best_pnl: float | None = None
+        scanner_c: dict[str, dict] = {}
+        verdict_c: dict[str, dict] = {}
+        tier_c: dict[str, dict] = {}
+        band_c: dict[str, dict] = {}
+
+        def _init_bucket(d: dict, key: str) -> dict:
+            return d.setdefault(key, {
+                "count": Decimal("0"), "closed_count": Decimal("0"),
+                "win_count": Decimal("0"), "loss_count": Decimal("0"),
+                "total_pnl": Decimal("0"), "total_pnl_dollars": Decimal("0"),
+            })
+
+        for pos in all_open + all_closed:
+            if pos.conviction_score is not None:
+                g["score_sum"] += Decimal(str(pos.conviction_score))
+                g["score_count"] += Decimal("1")
+
+            sc = _init_bucket(scanner_c, pos.scanner_source or "UNKNOWN")
+            sc["count"] += Decimal("1")
+            vc = _init_bucket(verdict_c, _enum_val(pos.verdict_at_entry))
+            vc["count"] += Decimal("1")
+            tc = _init_bucket(tier_c, _enum_val(pos.quality_tier_at_entry) or "NONE")
+            tc["count"] += Decimal("1")
+            if pos.conviction_score is not None:
+                bc = _init_bucket(band_c, _score_band_label(pos.conviction_score))
+                bc["count"] += Decimal("1")
+
+        for pos in all_closed:
+            pnl = pos.current_pnl_pct
+            is_win = pnl > 0
+            ep = pos.exit_price if pos.exit_price is not None else pos.current_price
+            dpnl = Decimal(str(round((ep - pos.entry_price) * pos.quantity * 100, 2)))
+
+            g["win_count"] += Decimal("1") if is_win else Decimal("0")
+            g["loss_count"] += Decimal("1") if pnl < 0 else Decimal("0")
+            g["total_pnl"] += Decimal(str(pnl))
+            g["sum_returns"] += Decimal(str(pnl))
+            g["total_pnl_dollars"] += dpnl
+            if best_pnl is None or pnl > best_pnl:
+                best_pnl = pnl
+
+            for bucket in [
+                scanner_c.get(pos.scanner_source or "UNKNOWN"),
+                verdict_c.get(_enum_val(pos.verdict_at_entry)),
+                tier_c.get(_enum_val(pos.quality_tier_at_entry) or "NONE"),
+            ]:
+                if bucket:
+                    bucket["closed_count"] += Decimal("1")
+                    bucket["win_count"] += Decimal("1") if is_win else Decimal("0")
+                    bucket["loss_count"] += Decimal("1") if pnl < 0 else Decimal("0")
+                    bucket["total_pnl"] += Decimal(str(pnl))
+                    bucket["total_pnl_dollars"] += dpnl
+
+            if pos.conviction_score is not None:
+                bc = band_c.get(_score_band_label(pos.conviction_score))
+                if bc:
+                    bc["closed_count"] += Decimal("1")
+                    bc["win_count"] += Decimal("1") if is_win else Decimal("0")
+                    bc["loss_count"] += Decimal("1") if pnl < 0 else Decimal("0")
+                    bc["total_pnl_dollars"] += dpnl
+
+        now = datetime.now(timezone.utc).isoformat()
+        gi = {"PK": "METRICS#GLOBAL", "SK": "SUMMARY", "last_updated": now, **g}
+        if best_pnl is not None:
+            gi["best_trade_pnl"] = Decimal(str(best_pnl))
+        await db.put_item(MetricsAggregator.TABLE, gi)
+
+        for store, pk in [(scanner_c, "METRICS#SCANNER"), (verdict_c, "METRICS#VERDICT"),
+                          (tier_c, "METRICS#TIER"), (band_c, "METRICS#SCOREBAND")]:
+            for sk, counts in store.items():
+                await db.put_item(MetricsAggregator.TABLE, {"PK": pk, "SK": sk, **counts})
+
+        summary = {
+            "open": len(all_open), "closed": len(all_closed),
+            "wins": int(g["win_count"]), "losses": int(g["loss_count"]),
+            "scanners": list(scanner_c.keys()),
+        }
+        logger.info(f"Metrics rebuilt: {summary}")
+        return summary
+
+
 def _score_band_label(score: float) -> str:
     """Map a conviction score to a display band label."""
     if score < 65:

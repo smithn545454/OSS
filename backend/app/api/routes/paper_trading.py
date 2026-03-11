@@ -1091,6 +1091,73 @@ async def trigger_update() -> dict[str, Any]:
 
 
 # ============================================================================
+# Repair & Maintenance Endpoints
+# ============================================================================
+
+
+@router.post("/repair-uv")
+async def repair_uv_positions(
+    dry_run: bool = True,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """Repair corrupted UV paper trading positions.
+
+    UV positions were created with option tickers missing the O: prefix,
+    so the batch updater could never find them in the Polygon chain.
+    This endpoint fetches historical prices and replays exit conditions.
+
+    Args:
+        dry_run: If True (default), report what would change without writing.
+                 Set to False to actually apply repairs.
+        limit: Max positions to process (for testing). None = all.
+    """
+    from app.paper_trading.repair_uv_positions import repair_corrupted_uv_positions
+    from app.services.polygon import PolygonClient
+
+    try:
+        async with PolygonClient() as polygon:
+            result = await repair_corrupted_uv_positions(
+                polygon_client=polygon,
+                dry_run=dry_run,
+                limit=limit,
+            )
+
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "total_corrupted": result.total_corrupted,
+            "repaired": result.repaired,
+            "no_historical_data": result.no_historical_data,
+            "errors": result.errors,
+            "error_details": result.error_details[:10],
+            "sample_repairs": result.sample_repairs,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error repairing UV positions: {str(e)}",
+        )
+
+
+@router.post("/rebuild-metrics")
+async def rebuild_metrics() -> dict[str, Any]:
+    """Rebuild all pre-aggregated metrics from actual position data.
+
+    Use after repairing positions to reconcile atomic counters.
+    """
+    from app.paper_trading.metrics_aggregator import MetricsAggregator
+
+    try:
+        summary = await MetricsAggregator.rebuild_all_metrics()
+        return {"success": True, **summary}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error rebuilding metrics: {str(e)}",
+        )
+
+
+# ============================================================================
 # Snapshots & Analysis Endpoints
 # ============================================================================
 

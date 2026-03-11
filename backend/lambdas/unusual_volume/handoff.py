@@ -165,6 +165,9 @@ def _process_candidate(candidate: dict) -> dict:
     """
     scan_id = candidate.get("scan_id", "")
     option_ticker = candidate.get("option_ticker", "")
+    # Ensure canonical O: prefix for downstream pipeline (paper trading needs it)
+    if option_ticker and not option_ticker.startswith("O:"):
+        option_ticker = f"O:{option_ticker}"
     underlying_ticker = candidate.get("underlying_ticker", "")
 
     logger.info(f"Processing candidate: {option_ticker} (scan: {scan_id})")
@@ -472,10 +475,12 @@ def _update_candidate_status(
         update_expr += ", evaluation_id = :eval_id"
         expr_values[":eval_id"] = evaluation_id
 
+    # Candidate table keys use stripped tickers (no O: prefix)
+    clean_ticker = option_ticker.replace("O:", "")
     candidates_table.update_item(
         Key={
             "PK": f"SCAN#{scan_id}",
-            "SK": f"CONTRACT#{option_ticker}",
+            "SK": f"CONTRACT#{clean_ticker}",
         },
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_values,
