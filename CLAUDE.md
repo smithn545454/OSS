@@ -344,7 +344,7 @@ After any rollback, tell the user:
 
 ### Pipeline Fixes Applied (Feb 12, 2026)
 - Stages 2, 6, 7 TypeError crashes fixed (earnings_cache kwarg, pillar_results kwarg, pillar→pillars typo)
-- Stage 3: Polygon basic tier has no bid/ask in snapshot — added day.close fallback with 5% spread estimate
+- Stage 3: Polygon snapshot bid/ask fallback — added day.close fallback with 5% spread estimate (now rarely needed with Advanced Options plan)
 - Stage 4: FeatureComputer positional arg bug (config passed as catalyst_service)
 - Worker run_id flow: workers now use orchestrator-created UUID (was invisible `worker-xxx` IDs)
 - Stage mapper: aggregate sums events correctly; fan-out stages (3, 8) don't trigger false anomalies
@@ -362,6 +362,11 @@ After any rollback, tell the user:
 - **CatalystDataService never wired up** — fully implemented but never instantiated in the pipeline. `days_to_earnings` was always `None`, catalyst subscore always defaulted to 50. Fixed: orchestrator now creates `CatalystDataService(earnings_cache=earnings_cache)` and passes it through `run_feature_computation()` to `FeatureComputer`.
 - **No visibility into data completeness** — added per-run data availability logging in `pillars/calculator.py` (logs counts of non-None values for iv_rv_ratio, iv_percentile, rv20, rs_20d, theta_adj_edge, days_to_earnings).
 - **IV history backfilled** — 278,701 records across 5,904 tickers (Dec 11, 2025 – Mar 9, 2026) loaded into `oss-dev-iv-history` from S3 parquet files. IV Percentile subscore now computes from real data immediately.
+
+### Polygon API Key Upgrade (Mar 12, 2026)
+- **Upgraded to Advanced Options plan** — Polygon now returns native Greeks (delta, gamma, theta, vega) and IV directly on snapshot endpoints. BS fallback (`greeks.py`) is retained but only triggers for edge cases (very low liquidity, newly listed contracts).
+- **IV field location**: `implied_volatility` is at the top level of each snapshot result, NOT inside `greeks` (where it's `None`). The contract selector already handles this correctly via `or` chain.
+- **Greeks source logging added** — contract selector now logs `polygon={N} bs_fallback={M}` counts per run for monitoring.
 
 ### Known Issues / Watch Items
 - **FinnhubClient "not initialized" errors** — needs async context manager usage. `CatalystDataService.get_days_to_earnings()` catches this and returns `None` (`catalyst.py:92-96`), so `days_to_earnings` may be `None` for some/all tickers. Catalyst subscore (3.5% of total) defaults to 50 — fails open, noisy but non-blocking.

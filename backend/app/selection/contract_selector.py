@@ -127,6 +127,9 @@ class ContractSelector:
             weight_spread=config.rank_weight_spread,
         )
         self._telemetry = SelectionTelemetry()
+        # Greeks source tracking
+        self._polygon_greeks_count = 0
+        self._bs_fallback_count = 0
 
     def set_polygon_client(self, client: PolygonClient) -> None:
         """Set the Polygon client for data fetching."""
@@ -263,7 +266,9 @@ class ContractSelector:
         total_selected = len(all_candidates)
         logger.info(
             f"Contract selection complete: {len(tickers)} tickers, "
-            f"{total_selected} contracts selected"
+            f"{total_selected} contracts selected, "
+            f"greeks_source: polygon={self._polygon_greeks_count} "
+            f"bs_fallback={self._bs_fallback_count}"
         )
 
         return SelectionResult(
@@ -549,7 +554,9 @@ class ContractSelector:
             spread_abs = ask - bid
             spread_pct = (spread_abs / mid * 100) if mid > 0 else 999
 
-            # Extract Greeks — prefer Polygon, fallback to Black-Scholes
+            # Extract Greeks — prefer Polygon, fallback to Black-Scholes.
+            # With Advanced Options plan, Polygon provides greeks directly.
+            # IV lives at the top level (not inside greeks).
             iv = (
                 greeks.get("implied_volatility", 0)
                 or contract_data.get("implied_volatility", 0)
@@ -561,17 +568,16 @@ class ContractSelector:
             vega = greeks.get("vega", 0) or 0
 
             # Fallback: compute greeks via Black-Scholes when Polygon
-            # doesn't provide complete greeks.  Polygon often returns IV
-            # but not the full set (delta/gamma/theta/vega), especially on
-            # the basic tier.  Trigger the fallback whenever ANY critical
-            # Greek is missing so the evaluation has complete data for the
-            # Greeks Coherence gate in Stage 6.
+            # doesn't provide complete greeks.  With the Advanced Options
+            # plan, most contracts have native Polygon greeks; fallback
+            # only triggers for very low-liquidity or newly listed contracts.
             greeks_incomplete = (
                 delta == 0 or gamma == 0 or theta == 0 or vega == 0 or iv == 0
             )
             if greeks_incomplete and mid > 0 and dte > 0:
                 from app.selection.greeks import compute_greeks
 
+                self._bs_fallback_count += 1
                 polygon_iv = iv  # Preserve Polygon IV before fallback
                 computed = compute_greeks(
                     S=underlying_price,
@@ -590,6 +596,8 @@ class ContractSelector:
                     vega = computed["vega"]
                     # Keep Polygon IV when available; only use BS IV as last resort
                     iv = polygon_iv if polygon_iv > 0 else computed["iv"]
+            else:
+                self._polygon_greeks_count += 1
 
             # Skip contracts with no greeks even after fallback
             if delta == 0 and iv == 0:
