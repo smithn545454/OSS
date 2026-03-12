@@ -45,17 +45,23 @@ def _opt_enum_str(val: Any) -> str | None:
 _ticker_name_cache: dict[str, Optional[str]] = {}
 
 
+async def _noop_list() -> list:
+    """Return empty list, used as a no-op coroutine in asyncio.gather()."""
+    return []
+
+
 async def _get_company_name(ticker: str) -> Optional[str]:
-    """Fetch company name from Polygon, with in-memory caching."""
+    """Fetch company name from Polygon, with in-memory caching and 5s timeout."""
     if ticker in _ticker_name_cache:
         return _ticker_name_cache[ticker]
 
     try:
-        async with PolygonClient() as client:
-            details = await client.get_ticker_details(ticker)
-            name = details.get("name") if details else None
-            _ticker_name_cache[ticker] = name
-            return name
+        async with asyncio.timeout(5):
+            async with PolygonClient() as client:
+                details = await client.get_ticker_details(ticker)
+                name = details.get("name") if details else None
+                _ticker_name_cache[ticker] = name
+                return name
     except Exception as e:
         logger.debug(f"Failed to fetch company name for {ticker}: {e}")
         _ticker_name_cache[ticker] = None
@@ -228,8 +234,28 @@ async def get_evaluation_detail_by_id(
             detail=f"Evaluation not found: {ticker}/{evaluation_id}",
         )
 
-    # Fetch all related data (same as get_evaluation_detail below)
-    pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+    opportunity_id = evaluation.get("opportunity_id")
+
+    # Fetch all related data in parallel
+    (
+        pillar_scores,
+        gate_results,
+        position,
+        opportunities,
+        features,
+        thesis,
+        company_name,
+    ) = await asyncio.gather(
+        PillarScoreTable.list_by_evaluation(evaluation_id),
+        GateResultTable.list_by_evaluation(evaluation_id),
+        PaperPositionTable.get_by_evaluation_id(evaluation_id),
+        OpportunityTable.list_by_ticker(ticker, limit=20) if opportunity_id else _noop_list(),
+        FeatureValueTable.list_by_evaluation(evaluation_id),
+        TradeThesisTable.get_by_evaluation_id(evaluation_id),
+        _get_company_name(ticker),
+    )
+
+    # Process pillar scores
     pillar_scores_dict = [
         {
             "pillar_id": _enum_str(ps.pillar_id),
@@ -250,7 +276,7 @@ async def get_evaluation_detail_by_id(
         for ps in pillar_scores
     ]
 
-    gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+    # Process gate results
     gate_results_dict = [
         {
             "gate_id": gr.gate_id,
@@ -266,7 +292,7 @@ async def get_evaluation_detail_by_id(
         for gr in gate_results
     ]
 
-    position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    # Process paper position
     position_dict = None
     if position:
         position_dict = {
@@ -289,10 +315,9 @@ async def get_evaluation_detail_by_id(
             "last_updated": position.last_updated,
         }
 
-    opportunity_id = evaluation.get("opportunity_id")
+    # Extract scanner triggers from opportunities
     scanner_triggers = []
     if opportunity_id:
-        opportunities = await OpportunityTable.list_by_ticker(ticker, limit=20)
         for opp in opportunities:
             if opp.opportunity_id == opportunity_id:
                 scanner_triggers = [
@@ -306,7 +331,7 @@ async def get_evaluation_detail_by_id(
                 ]
                 break
 
-    features = await FeatureValueTable.list_by_evaluation(evaluation_id)
+    # Process features
     features_dict = {
         f.feature_name: {
             "value": f.value,
@@ -316,7 +341,7 @@ async def get_evaluation_detail_by_id(
         for f in features
     }
 
-    thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    # Process thesis
     thesis_dict = None
     if thesis:
         has_api = hasattr(thesis.exit_plan, 'to_api_dict')
@@ -346,8 +371,6 @@ async def get_evaluation_detail_by_id(
 
     all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
     failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
-
-    company_name = await _get_company_name(ticker)
 
     theta_adjusted_ev = calculate_theta_adjusted_ev(
         delta=evaluation.get("delta", 0),
@@ -410,7 +433,6 @@ async def get_evaluation_detail(
         Evaluation + Decision + PillarScores (3) + GateResults (all) +
         PaperPosition (if exists) + Opportunity scanner triggers + Features
     """
-    # 1. Get base evaluation with decision
     evaluation = await EvaluationTable.get(ticker, timestamp, evaluation_id)
     if not evaluation:
         raise HTTPException(
@@ -418,8 +440,26 @@ async def get_evaluation_detail(
             detail=f"Evaluation not found: {ticker}/{timestamp}/{evaluation_id}",
         )
 
-    # 2. Fetch pillar scores (3 pillars: DIRECTIONAL, VOLATILITY, STRUCTURE)
-    pillar_scores = await PillarScoreTable.list_by_evaluation(evaluation_id)
+    opportunity_id = evaluation.get("opportunity_id")
+
+    # Fetch all related data in parallel
+    (
+        pillar_scores,
+        gate_results,
+        position,
+        opportunities,
+        features,
+        thesis,
+    ) = await asyncio.gather(
+        PillarScoreTable.list_by_evaluation(evaluation_id),
+        GateResultTable.list_by_evaluation(evaluation_id),
+        PaperPositionTable.get_by_evaluation_id(evaluation_id),
+        OpportunityTable.list_by_ticker(ticker, limit=20) if opportunity_id else _noop_list(),
+        FeatureValueTable.list_by_evaluation(evaluation_id),
+        TradeThesisTable.get_by_evaluation_id(evaluation_id),
+    )
+
+    # Process pillar scores
     pillar_scores_dict = [
         {
             "pillar_id": _enum_str(ps.pillar_id),
@@ -440,8 +480,7 @@ async def get_evaluation_detail(
         for ps in pillar_scores
     ]
 
-    # 3. Fetch gate results (all 9 gates)
-    gate_results = await GateResultTable.list_by_evaluation(evaluation_id)
+    # Process gate results
     gate_results_dict = [
         {
             "gate_id": gr.gate_id,
@@ -457,8 +496,7 @@ async def get_evaluation_detail(
         for gr in gate_results
     ]
 
-    # 4. Fetch paper position if exists
-    position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    # Process paper position
     position_dict = None
     if position:
         position_dict = {
@@ -481,11 +519,9 @@ async def get_evaluation_detail(
             "last_updated": position.last_updated,
         }
 
-    # 5. Fetch opportunity to get scanner triggers
-    opportunity_id = evaluation.get("opportunity_id")
+    # Extract scanner triggers from opportunities
     scanner_triggers = []
     if opportunity_id:
-        opportunities = await OpportunityTable.list_by_ticker(ticker, limit=20)
         for opp in opportunities:
             if opp.opportunity_id == opportunity_id:
                 scanner_triggers = [
@@ -499,8 +535,7 @@ async def get_evaluation_detail(
                 ]
                 break
 
-    # 6. Fetch feature values
-    features = await FeatureValueTable.list_by_evaluation(evaluation_id)
+    # Process features
     features_dict = {
         f.feature_name: {
             "value": f.value,
@@ -510,8 +545,7 @@ async def get_evaluation_detail(
         for f in features
     }
 
-    # 7. Fetch trade thesis if exists (Phase 10 - LLM Integration)
-    thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    # Process thesis
     thesis_dict = None
     if thesis:
         has_api = hasattr(thesis.exit_plan, 'to_api_dict')
@@ -539,7 +573,6 @@ async def get_evaluation_detail(
             "error_message": thesis.error_message,
         }
 
-    # 8. Compute summary stats
     all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
     failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
 
