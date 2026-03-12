@@ -357,7 +357,17 @@ After any rollback, tell the user:
 - **Dead GateConfig fields**: `combined_score_min`, `pillar_minimum`, `pillar_spread_max` are defined in GateConfig but no production gate uses them (only backtest). The "relaxations" noted previously had zero effect on production.
 - `breakout_volume_min` stays at 1.5x (intentional)
 
+### Pipeline Fixes Applied (Mar 11, 2026)
+- **BS fallback ignored Polygon IV** — `compute_greeks()` always recomputed IV via Newton-Raphson from estimated market prices, failing ~85% of the time. Fixed: accepts optional `iv` parameter; when Polygon provides IV, skips Newton-Raphson and computes delta/gamma/theta/vega directly. `contract_selector.py` now passes Polygon IV to the fallback and preserves it afterward.
+- **CatalystDataService never wired up** — fully implemented but never instantiated in the pipeline. `days_to_earnings` was always `None`, catalyst subscore always defaulted to 50. Fixed: orchestrator now creates `CatalystDataService(earnings_cache=earnings_cache)` and passes it through `run_feature_computation()` to `FeatureComputer`.
+- **No visibility into data completeness** — added per-run data availability logging in `pillars/calculator.py` (logs counts of non-None values for iv_rv_ratio, iv_percentile, rv20, rs_20d, theta_adj_edge, days_to_earnings).
+- **IV history backfilled** — 278,701 records across 5,904 tickers (Dec 11, 2025 – Mar 9, 2026) loaded into `oss-dev-iv-history` from S3 parquet files. IV Percentile subscore now computes from real data immediately.
+
+### Known Issues / Watch Items
+- **FinnhubClient "not initialized" errors** — needs async context manager usage. `CatalystDataService.get_days_to_earnings()` catches this and returns `None` (`catalyst.py:92-96`), so `days_to_earnings` may be `None` for some/all tickers. Catalyst subscore (3.5% of total) defaults to 50 — fails open, noisy but non-blocking.
+- **SEC EDGAR rate limiting** — `CatalystDataService.prefetch_batch()` runs 5 concurrent requests with only 0.1s delay (`catalyst.py:264-273`), exceeding SEC's 10 req/s limit. Can trigger 429 errors caught by try/except (`catalyst.py:164`), causing `recent_sec_filing` to default to `False`. Minor scoring impact only.
+- **Backfill script defaults to wrong region** — `backfill_iv_history_dynamodb.py` uses `os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-1")` but `app.config.Settings` reads `AWS_REGION` (not `AWS_DEFAULT_REGION`) and defaults to `us-east-1`. Must run with `AWS_REGION=us-west-1 DYNAMODB_TABLE_PREFIX=oss-dev` env vars explicitly set.
+
 ### Pending Verification
 - Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
 - AI Trade Thesis generation should work on next pipeline run (PillarResult→PillarScore conversion was fixed)
-- FinnhubClient "not initialized" errors (needs async context manager usage) — fails open, noisy but non-blocking
