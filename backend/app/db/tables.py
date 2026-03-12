@@ -324,22 +324,29 @@ class EvaluationTable:
     ) -> Optional[dict[str, Any]]:
         """Get an evaluation by ticker and evaluation_id.
 
-        Queries by PK and scans SK suffix for evaluation_id,
-        avoiding URL-encoding issues with ISO timestamps.
+        Paginates through DynamoDB results (newest first) and stops as soon
+        as the matching evaluation_id is found, avoiding loading all items
+        for high-volume tickers.
         """
         db = get_dynamodb()
-        items = await db.query(
-            EvaluationTable.TABLE,
-            f"EVAL#{ticker}",
-            limit=None,
-            scan_forward=False,
-        )
-        for item in items:
-            sk = item.get("SK", "")
-            if sk.endswith(evaluation_id):
-                for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
-                    item.pop(key, None)
-                return item
+        table = db.get_table(EvaluationTable.TABLE)
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": f"EVAL#{ticker}"},
+            "ScanIndexForward": False,
+        }
+        while True:
+            response = table.query(**query_kwargs)
+            for item in response.get("Items", []):
+                sk = item.get("SK", "")
+                if sk.endswith(evaluation_id):
+                    item = db.convert_from_dynamodb(dict(item))
+                    for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                        item.pop(key, None)
+                    return item
+            if "LastEvaluatedKey" not in response:
+                break
+            query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         return None
 
 
