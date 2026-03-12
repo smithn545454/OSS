@@ -133,11 +133,17 @@ def compute_greeks(
     option_type: str,
     market_price: float,
     r: float = RISK_FREE_RATE,
+    iv: Optional[float] = None,
 ) -> Optional[dict[str, float]]:
     """Compute full greeks from market price using Black-Scholes.
 
     This is a FALLBACK for when Polygon does not provide greeks.
     Polygon greeks always take priority.
+
+    When ``iv`` is provided (e.g. from Polygon), the Newton-Raphson IV
+    solver is skipped and delta/gamma/theta/vega are computed directly
+    from the known IV.  This dramatically improves success rate because
+    the solver often fails on estimated market prices.
 
     Args:
         S: Underlying price
@@ -146,16 +152,24 @@ def compute_greeks(
         option_type: "call" or "put"
         market_price: Option mid price
         r: Risk-free rate
+        iv: Known implied volatility (e.g. from Polygon). When provided,
+            skips Newton-Raphson and uses this value directly.
 
     Returns:
         Dict with iv, delta, gamma, theta, vega or None if computation fails
     """
-    if S <= 0 or K <= 0 or T <= 0 or market_price <= 0:
+    if S <= 0 or K <= 0 or T <= 0:
         return None
 
-    sigma = implied_volatility(market_price, S, K, T, r, option_type)
-    if sigma is None:
-        return None
+    # Use Polygon IV directly when available — skip Newton-Raphson
+    if iv is not None and iv > 0:
+        sigma = iv
+    else:
+        if market_price <= 0:
+            return None
+        sigma = implied_volatility(market_price, S, K, T, r, option_type)
+        if sigma is None:
+            return None
 
     try:
         d1 = _d1(S, K, T, r, sigma)

@@ -572,6 +572,7 @@ class ContractSelector:
             if greeks_incomplete and mid > 0 and dte > 0:
                 from app.selection.greeks import compute_greeks
 
+                polygon_iv = iv  # Preserve Polygon IV before fallback
                 computed = compute_greeks(
                     S=underlying_price,
                     K=strike,
@@ -580,13 +581,15 @@ class ContractSelector:
                         "call" if option_type == OptionType.CALL else "put"
                     ),
                     market_price=mid,
+                    iv=polygon_iv if polygon_iv > 0 else None,
                 )
                 if computed:
-                    iv = computed["iv"]
                     delta = computed["delta"]
                     gamma = computed["gamma"]
                     theta = computed["theta"]
                     vega = computed["vega"]
+                    # Keep Polygon IV when available; only use BS IV as last resort
+                    iv = polygon_iv if polygon_iv > 0 else computed["iv"]
 
             # Skip contracts with no greeks even after fallback
             if delta == 0 and iv == 0:

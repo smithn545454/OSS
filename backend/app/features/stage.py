@@ -39,6 +39,7 @@ class FeatureComputationStage:
         polygon_client: Optional[PolygonClient] = None,
         orchestrator: Optional[PipelineOrchestrator] = None,
         config: Optional[FeatureConfig] = None,
+        catalyst_service: Optional[Any] = None,
         data_provider: Optional[Any] = None,
         as_of_date: Optional[date] = None,
     ) -> None:
@@ -48,6 +49,7 @@ class FeatureComputationStage:
             polygon_client: Polygon API client for market data (live mode)
             orchestrator: Pipeline orchestrator for event tracking
             config: Feature computation configuration
+            catalyst_service: CatalystDataService for earnings/SEC filing data
             data_provider: Optional DataProvider for unified data access (backtest mode)
             as_of_date: Target date for backtesting (defaults to today)
         """
@@ -58,6 +60,7 @@ class FeatureComputationStage:
         self._as_of_date = as_of_date
         self._computer = FeatureComputer(
             polygon_client=polygon_client,
+            catalyst_service=catalyst_service,
             config=config,
             data_provider=data_provider,
             as_of_date=as_of_date,
@@ -234,6 +237,7 @@ async def run_feature_computation(
     polygon_client: Optional[PolygonClient] = None,
     orchestrator: Optional[PipelineOrchestrator] = None,
     config: Optional[FeatureConfig] = None,
+    catalyst_service: Optional[Any] = None,
     persist_features: bool = True,
     data_provider: Optional[Any] = None,
     as_of_date: Optional[date] = None,
@@ -247,6 +251,7 @@ async def run_feature_computation(
         polygon_client: Polygon API client (live mode)
         orchestrator: Pipeline orchestrator
         config: Feature configuration
+        catalyst_service: CatalystDataService for earnings/SEC filing data
         persist_features: Whether to save to DynamoDB
         data_provider: Optional DataProvider for unified data access (backtest mode)
         as_of_date: Target date for backtesting (defaults to today)
@@ -258,6 +263,7 @@ async def run_feature_computation(
         polygon_client=polygon_client,
         orchestrator=orchestrator,
         config=config,
+        catalyst_service=catalyst_service,
         data_provider=data_provider,
         as_of_date=as_of_date,
     )

@@ -129,6 +129,25 @@ class PillarCalculator:
                 )
                 continue
         
+        # Log data availability for diagnostics
+        if feature_sets:
+            total = len(feature_sets)
+            iv_rv = sum(1 for fs in feature_sets.values() if fs.iv_rv_ratio is not None)
+            iv_pct = sum(1 for fs in feature_sets.values() if fs.iv_percentile is not None)
+            rv20 = sum(1 for fs in feature_sets.values() if fs.rv20 is not None)
+            rs = sum(1 for fs in feature_sets.values() if fs.rs_20d is not None)
+            tae = sum(1 for fs in feature_sets.values() if fs.theta_adjusted_edge is not None)
+            dte = sum(1 for fs in feature_sets.values() if fs.days_to_earnings is not None)
+            logger.info(
+                f"Pillar data availability ({total} evals): "
+                f"iv_rv_ratio={iv_rv}/{total} "
+                f"iv_percentile={iv_pct}/{total} "
+                f"rv20={rv20}/{total} "
+                f"rs_20d={rs}/{total} "
+                f"theta_adj_edge={tae}/{total} "
+                f"days_to_earnings={dte}/{total}"
+            )
+
         logger.info(f"Computed pillars for {len(results)} evaluations")
         return results
     

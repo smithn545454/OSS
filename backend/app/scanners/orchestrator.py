@@ -573,6 +573,14 @@ class ScannerOrchestrator:
                 from app.paper_trading.stage import run_paper_trading
                 from app.pillars.stage import run_pillar_scoring
 
+                # Create catalyst service for feature computation (earnings + SEC data)
+                catalyst_service = None
+                if earnings_cache:
+                    from app.services.catalyst import CatalystDataService
+                    catalyst_service = await stack.enter_async_context(
+                        CatalystDataService(earnings_cache=earnings_cache)
+                    )
+
                 feature_sets: list[FeatureSet] = []
                 if not streaming and evaluations:
                     try:
@@ -583,6 +591,7 @@ class ScannerOrchestrator:
                             polygon_client=polygon,
                             orchestrator=self._pipeline,
                             config=policy_config.features,
+                            catalyst_service=catalyst_service,
                             persist_features=True,
                             data_provider=data_provider,
                             as_of_date=effective_date,
