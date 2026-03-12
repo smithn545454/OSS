@@ -647,7 +647,7 @@ export interface CalibrationReportsResponse {
 }
 
 // Trade Thesis Types (Section 21 - LLM Integration)
-export type ThesisStatus = 'COMPLETED' | 'FAILED' | 'RATE_LIMITED' | 'PENDING'
+export type ThesisStatus = 'COMPLETED' | 'FAILED' | 'RATE_LIMITED' | 'PENDING' | 'GENERATING'
 
 export type LLMProvider = 'anthropic' | 'openai'
 

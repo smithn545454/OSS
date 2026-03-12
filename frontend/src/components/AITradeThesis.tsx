@@ -39,10 +39,15 @@ function StatusBadge({ status }: StatusBadgeProps) {
       color: 'bg-oss-watch/10 text-oss-watch border-oss-watch/30',
       label: 'Rate Limited'
     },
-    PENDING: { 
-      icon: Clock, 
+    PENDING: {
+      icon: Clock,
       color: 'bg-oss-muted/10 text-oss-muted border-oss-muted/30',
       label: 'Pending'
+    },
+    GENERATING: {
+      icon: Loader2,
+      color: 'bg-oss-accent/10 text-oss-accent border-oss-accent/30',
+      label: 'Generating...'
     },
   }[status] || { icon: AlertCircle, color: 'bg-oss-muted/10 text-oss-muted border-oss-muted/30', label: status }
 
@@ -366,9 +371,14 @@ interface AITradeThesisProps {
 }
 
 export default function AITradeThesis({ thesis, onGenerate, isGenerating, generateError }: AITradeThesisProps) {
-  // Show loading/placeholder when no thesis, generating, or thesis failed (allows retry)
-  if (!thesis || isGenerating || thesis.status === 'FAILED' || thesis.status === 'PENDING') {
-    return <ThesisPlaceholder onGenerate={onGenerate} isGenerating={isGenerating} generateError={generateError} />
+  // Show spinner when async worker is generating (polling will pick up COMPLETED)
+  if (thesis?.status === 'GENERATING' || isGenerating) {
+    return <ThesisPlaceholder onGenerate={undefined} isGenerating={true} generateError={null} />
+  }
+
+  // Show placeholder with Generate button when no thesis or failed (allows retry)
+  if (!thesis || thesis.status === 'FAILED' || thesis.status === 'PENDING') {
+    return <ThesisPlaceholder onGenerate={onGenerate} isGenerating={false} generateError={generateError} />
   }
 
   // Rate limited — show specific message

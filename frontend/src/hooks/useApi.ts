@@ -185,6 +185,13 @@ export function useEvaluationDetail(ticker: string, evaluationId: string) {
     queryKey: queryKeys.evaluationDetail(ticker, evaluationId),
     queryFn: () => api.getEvaluationDetail(ticker, evaluationId),
     enabled: !!ticker && !!evaluationId,
+    refetchInterval: (query) => {
+      const data = query.state.data as Record<string, unknown> | undefined
+      const thesis = data?.thesis as { status?: string } | null
+      // Poll every 3s while thesis is being generated asynchronously
+      if (thesis?.status === 'GENERATING') return 3000
+      return false
+    },
   })
 }
 

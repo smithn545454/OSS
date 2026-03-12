@@ -5,7 +5,6 @@ Per Section 21 of OSS_Complete_Requirements.md.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -13,18 +12,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.schemas import (
-    Decision,
-    Evaluation,
-    ThesisConfig,
-)
+from app.core.schemas import ThesisConfig
 from app.db.tables import (
     EvaluationTable,
-    FeatureValueTable,
     LLMUsageTable,
-    OpportunityTable,
-    PaperPositionTable,
-    PillarScoreTable,
     TradeThesisTable,
 )
 from app.llm.rate_limiter import RateLimiter
@@ -181,19 +172,36 @@ def _thesis_to_dict(thesis: Any) -> dict[str, Any]:
 
 @thesis_router.post("/generate")
 async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
-    """Generate an AI trade thesis on-demand for an approved evaluation.
+    """Dispatch async AI trade thesis generation for an approved evaluation.
 
-    Fetches all prerequisite data (evaluation, pillar scores, gate results,
-    features, scanner triggers) and calls the ThesisGenerator.
+    Validates the evaluation, persists a GENERATING stub to DynamoDB, and
+    invokes the Lambda asynchronously to do the actual LLM work. Returns
+    immediately so the frontend can poll for completion.
     """
-    from app.llm.generator import ThesisGenerator
+    import json as json_mod
+    import os
+    from uuid import uuid4
+
+    import boto3
+
+    from app.core.schemas import (
+        ExitPlanThesis,
+        LLMProvider as LLMProviderEnum,
+        ThesisStatus,
+        TradeThesis,
+    )
 
     evaluation_id = body.evaluationId
 
     # Check if thesis already exists
     existing = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
-    if existing and str(getattr(existing.status, "value", existing.status)) == "COMPLETED":
-        return _thesis_to_dict(existing)
+    if existing:
+        existing_status = str(getattr(existing.status, "value", existing.status))
+        if existing_status == "COMPLETED":
+            return _thesis_to_dict(existing)
+        if existing_status == "GENERATING":
+            # Already in progress — return current state (idempotent)
+            return _thesis_to_dict(existing)
 
     # Find the evaluation — use direct lookup when ticker is provided
     eval_dict = None
@@ -237,76 +245,58 @@ async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
             detail=f"Thesis generation requires APPROVE verdict, got {verdict}",
         )
 
-    # Construct models
-    try:
-        evaluation = Evaluation(**eval_dict)
-    except Exception as e:
-        logger.error(f"Failed to construct Evaluation model: {e}")
-        raise HTTPException(status_code=500, detail=f"Invalid evaluation data: {e}")
+    ticker = eval_dict.get("underlying_ticker", body.ticker or "")
 
-    try:
-        decision = Decision(**decision_data)
-    except Exception as e:
-        logger.error(f"Failed to construct Decision model: {e}")
-        raise HTTPException(status_code=500, detail=f"Invalid decision data: {e}")
+    # Determine thesis_id: reuse from existing FAILED thesis if retrying
+    thesis_id = str(uuid4())
+    if existing:
+        thesis_id = existing.thesis_id
 
-    # Fetch prerequisites in parallel
-    ticker = evaluation.underlying_ticker
-    pillar_scores, features, opportunities = await asyncio.gather(
-        PillarScoreTable.list_by_evaluation(evaluation_id),
-        FeatureValueTable.list_by_evaluation(evaluation_id),
-        OpportunityTable.list_by_ticker(ticker, limit=20),
+    # Create GENERATING stub in DynamoDB
+    generating_thesis = TradeThesis(
+        thesis_id=thesis_id,
+        evaluation_id=evaluation_id,
+        setup_summary="",
+        thesis="",
+        supporting_evidence=[],
+        risks=[],
+        invalidation_conditions=[],
+        exit_plan=ExitPlanThesis(),
+        llm_provider=LLMProviderEnum.ANTHROPIC,
+        model_used="",
+        tokens_used=0,
+        status=ThesisStatus.GENERATING,
+        error_message=None,
     )
+    await TradeThesisTable.put(generating_thesis)
 
-    # Extract scanner triggers from the matching opportunity
-    scanner_triggers = []
-    opportunity_id = evaluation.opportunity_id
-    for opp in opportunities:
-        if opp.opportunity_id == opportunity_id:
-            scanner_triggers = list(opp.scanner_triggers)
-            break
+    # Fire-and-forget: invoke Lambda async to do the LLM work
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+    payload = {
+        "source": "oss.scheduler",
+        "action": "thesis_worker",
+        "evaluation_id": evaluation_id,
+        "thesis_id": thesis_id,
+        "ticker": ticker,
+    }
 
-    # Build features dict
-    features_dict = {f.feature_name: f.value for f in features}
+    try:
+        lambda_client = boto3.client("lambda")
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json_mod.dumps(payload),
+        )
+        logger.info(f"Dispatched thesis worker for {evaluation_id}")
+    except Exception as e:
+        logger.error(f"Failed to dispatch thesis worker: {e}")
+        failed_thesis = generating_thesis.model_copy(
+            update={
+                "status": ThesisStatus.FAILED,
+                "error_message": f"Failed to dispatch generation: {e}",
+            }
+        )
+        await TradeThesisTable.put(failed_thesis)
+        return _thesis_to_dict(failed_thesis)
 
-    # Generate thesis
-    generator = ThesisGenerator()
-    thesis = await generator.generate(
-        evaluation=evaluation,
-        decision=decision,
-        pillar_scores=pillar_scores,
-        scanner_triggers=scanner_triggers,
-        features=features_dict,
-    )
-
-    # Persist the thesis
-    await TradeThesisTable.put(thesis)
-    logger.info(f"Generated thesis for {evaluation_id}: status={thesis.status}")
-
-    # Apply structured exit levels to linked paper position
-    thesis_status = str(thesis.status.value) if hasattr(thesis.status, "value") else str(thesis.status)
-    if thesis_status == "COMPLETED" and thesis.exit_plan.take_profits:
-        try:
-            position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
-            if position:
-                pos_status = str(getattr(position.status, "value", position.status))
-                if pos_status == "OPEN":
-                    updates: dict[str, Any] = {}
-                    tp1 = thesis.exit_plan.take_profits[0]
-                    updates["thesis_tp1_pct"] = tp1.option_pnl_pct
-                    if thesis.exit_plan.stop_loss_level:
-                        updates["thesis_sl_pct"] = abs(
-                            thesis.exit_plan.stop_loss_level.option_pnl_pct
-                        )
-                    if thesis.exit_plan.time_exit_level:
-                        updates["thesis_time_exit_dte"] = (
-                            thesis.exit_plan.time_exit_level.dte_threshold
-                        )
-                    await PaperPositionTable.update(position, updates)
-                    logger.info(
-                        f"Applied thesis exit levels to position {position.position_id}"
-                    )
-        except Exception as e:
-            logger.warning(f"Failed to apply thesis exit levels to position: {e}")
-
-    return _thesis_to_dict(thesis)
+    return _thesis_to_dict(generating_thesis)

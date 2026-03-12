@@ -939,6 +939,135 @@ async def _run_daily_data_capture(
         return {"status": "error", "error": str(e)}
 
 
+async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
+    """Generate a trade thesis asynchronously (invoked by fire-and-forget dispatch).
+
+    The /api/thesis/generate endpoint writes a GENERATING stub and invokes this
+    worker asynchronously. The worker does the actual LLM call with no API Gateway
+    timeout pressure, then overwrites the stub with the COMPLETED/FAILED result.
+    """
+    from app.core.schemas import (
+        Decision,
+        Evaluation,
+        ExitPlanThesis,
+        LLMProvider as LLMProviderEnum,
+        ThesisStatus,
+        TradeThesis,
+    )
+    from app.db.tables import (
+        EvaluationTable,
+        FeatureValueTable,
+        OpportunityTable,
+        PaperPositionTable,
+        PillarScoreTable,
+        TradeThesisTable,
+    )
+    from app.llm.generator import ThesisGenerator
+
+    evaluation_id = event.get("evaluation_id", "")
+    thesis_id = event.get("thesis_id", "")
+    ticker = event.get("ticker", "")
+
+    try:
+        # Fetch evaluation
+        eval_dict = await EvaluationTable.get_by_id(ticker, evaluation_id)
+        if not eval_dict:
+            raise ValueError(f"Evaluation not found: {evaluation_id}")
+
+        decision_data = eval_dict.pop("decision", None)
+        if not decision_data:
+            raise ValueError("Evaluation has no decision data")
+
+        evaluation = Evaluation(**eval_dict)
+        decision = Decision(**decision_data)
+
+        # Fetch prerequisites in parallel
+        pillar_scores, features, opportunities = await asyncio.gather(
+            PillarScoreTable.list_by_evaluation(evaluation_id),
+            FeatureValueTable.list_by_evaluation(evaluation_id),
+            OpportunityTable.list_by_ticker(ticker, limit=20),
+        )
+
+        # Extract scanner triggers from the matching opportunity
+        scanner_triggers: list[str] = []
+        for opp in opportunities:
+            if opp.opportunity_id == evaluation.opportunity_id:
+                scanner_triggers = list(opp.scanner_triggers)
+                break
+
+        features_dict = {f.feature_name: f.value for f in features}
+
+        # Generate thesis (the LLM call — no timeout pressure here)
+        generator = ThesisGenerator()
+        thesis = await generator.generate(
+            evaluation=evaluation,
+            decision=decision,
+            pillar_scores=pillar_scores,
+            scanner_triggers=scanner_triggers,
+            features=features_dict,
+        )
+
+        # Overwrite the GENERATING stub with the same thesis_id (same PK+SK)
+        thesis = thesis.model_copy(update={"thesis_id": thesis_id})
+        await TradeThesisTable.put(thesis)
+
+        thesis_status = str(thesis.status.value) if hasattr(thesis.status, "value") else str(
+            thesis.status
+        )
+        logger.info(f"Thesis worker completed: {evaluation_id} status={thesis_status}")
+
+        # Apply exit levels to paper position
+        if thesis_status == "COMPLETED" and thesis.exit_plan.take_profits:
+            try:
+                position = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+                if position:
+                    pos_status = str(getattr(position.status, "value", position.status))
+                    if pos_status == "OPEN":
+                        updates: dict[str, Any] = {}
+                        tp1 = thesis.exit_plan.take_profits[0]
+                        updates["thesis_tp1_pct"] = tp1.option_pnl_pct
+                        if thesis.exit_plan.stop_loss_level:
+                            updates["thesis_sl_pct"] = abs(
+                                thesis.exit_plan.stop_loss_level.option_pnl_pct
+                            )
+                        if thesis.exit_plan.time_exit_level:
+                            updates["thesis_time_exit_dte"] = (
+                                thesis.exit_plan.time_exit_level.dte_threshold
+                            )
+                        await PaperPositionTable.update(position, updates)
+                        logger.info(
+                            f"Applied thesis exit levels to position {position.position_id}"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to apply thesis exit levels: {e}")
+
+        return {"status": "success", "evaluation_id": evaluation_id, "thesis_status": thesis_status}
+
+    except Exception as e:
+        logger.exception(f"Thesis worker failed for {evaluation_id}: {e}")
+        # Mark thesis as FAILED so the frontend can show a retry button
+        try:
+            failed_thesis = TradeThesis(
+                thesis_id=thesis_id,
+                evaluation_id=evaluation_id,
+                setup_summary="",
+                thesis="",
+                supporting_evidence=[],
+                risks=[],
+                invalidation_conditions=[],
+                exit_plan=ExitPlanThesis(),
+                llm_provider=LLMProviderEnum.ANTHROPIC,
+                model_used="",
+                tokens_used=0,
+                status=ThesisStatus.FAILED,
+                error_message=str(e),
+            )
+            await TradeThesisTable.put(failed_thesis)
+        except Exception as put_err:
+            logger.error(f"Failed to persist FAILED thesis: {put_err}")
+        return {"status": "error", "evaluation_id": evaluation_id, "error": str(e)}
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
 
@@ -954,6 +1083,7 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     8. Backtest Phase 3: {"source": "oss.scheduler", "action": "backtest_finalize", ...}
     9. Earnings refresh: {"source": "oss.scheduler", "action": "earnings_refresh"}
     10. Daily data capture: {"source": "oss.scheduler", "action": "daily_data_capture"}
+    11. Thesis worker: {"source": "oss.scheduler", "action": "thesis_worker", ...}
 
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
@@ -1053,6 +1183,12 @@ def handler(event: dict[str, Any], context: Any) -> Any:
                 f"(date={capture_date or 'auto'}, force={force})"
             )
             return asyncio.run(_run_daily_data_capture(capture_date, force))
+
+        elif action == "thesis_worker":
+            # Async thesis generation (dispatched by /api/thesis/generate)
+            evaluation_id = event.get("evaluation_id", "")
+            logger.info(f"Received thesis_worker event (eval={evaluation_id})")
+            return asyncio.run(_run_thesis_worker(event))
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

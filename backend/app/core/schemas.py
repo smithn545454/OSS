@@ -152,6 +152,7 @@ class ThesisStatus(str, Enum):
     FAILED = "FAILED"
     RATE_LIMITED = "RATE_LIMITED"
     PENDING = "PENDING"
+    GENERATING = "GENERATING"
 
 
 class LLMProvider(str, Enum):

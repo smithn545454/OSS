@@ -863,6 +863,8 @@ export default function EvaluationDetail() {
       ticker &&
       verdict === 'APPROVE' &&
       thesisStatus !== 'COMPLETED' &&
+      thesisStatus !== 'GENERATING' &&
+      thesisStatus !== 'RATE_LIMITED' &&
       !generateThesis.isPending &&
       !hasTriggeredThesis.current
     ) {
@@ -917,8 +919,9 @@ export default function EvaluationDetail() {
 
   const { evaluation, pillar_scores, gate_results, position, scanner_triggers, thesis, summary } = data
   const decision = evaluation.decision
-  // Use mutation result if available (shows immediately after generation)
-  const effectiveThesis = (generateThesis.data as TradeThesis | undefined) ?? thesis
+  // Prefer polled data when COMPLETED, fall back to mutation result, then query data
+  const mutationThesis = generateThesis.data as TradeThesis | undefined
+  const effectiveThesis = (thesis?.status === 'COMPLETED' ? thesis : null) ?? mutationThesis ?? thesis
 
   return (
     <div className="space-y-8">
