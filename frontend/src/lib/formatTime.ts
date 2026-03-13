@@ -82,6 +82,39 @@ export function toPacificISORange(
 }
 
 /**
+ * Relative time for evaluation age: "Just now" / "5m ago" / "2h ago" /
+ * "Today 2:15 PM" / "Yesterday 9:30 AM" / "Mar 10".
+ */
+export function formatRelativeTime(iso: string): string {
+  const now = new Date()
+  const then = new Date(iso)
+  const diffMs = now.getTime() - then.getTime()
+  const diffMin = Math.floor(diffMs / 60_000)
+  const diffHr = Math.floor(diffMs / 3_600_000)
+
+  if (diffMin < 2) return 'Just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffHr < 6) return `${diffHr}h ago`
+
+  // Same calendar day in Pacific?
+  const dayFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const nowDay = dayFmt.format(now)
+  const thenDay = dayFmt.format(then)
+  if (nowDay === thenDay) return `Today ${formatTime(iso)}`
+
+  // Yesterday?
+  const yesterday = new Date(now.getTime() - 86_400_000)
+  if (dayFmt.format(yesterday) === thenDay) return `Yesterday ${formatTime(iso)}`
+
+  return formatDateShort(iso)
+}
+
+/**
  * Compact date display: "Feb 13" (current year) or "Feb 13, 2025" (other year).
  */
 export function formatDateShort(iso: string): string {

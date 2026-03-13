@@ -14,6 +14,7 @@ import { ConvergenceBadge } from './ConvergenceBadge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
+import { formatRelativeTime } from '@/lib/formatTime'
 
 interface OpportunityCardProps {
   evaluation: ApproveEvaluation
@@ -101,6 +102,12 @@ function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
             {evaluation.approvalCount}x scans
           </span>
         )}
+        <span style={{
+          fontSize: '11px',
+          color: 'var(--text-muted)',
+        }}>
+          {formatRelativeTime(evaluation.evaluated_at)}
+        </span>
       </div>
     </div>
   )

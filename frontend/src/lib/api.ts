@@ -407,6 +407,7 @@ export async function getApproveEvaluations(options: {
   earningsDays?: number
   scanner?: string
   verdict?: string
+  maxAgeTradingDays?: number
   limit?: number
 } = {}): Promise<ApproveEvaluationsResponse> {
   const params = new URLSearchParams()
@@ -414,6 +415,7 @@ export async function getApproveEvaluations(options: {
   if (options.earningsDays) params.set('earnings_days', String(options.earningsDays))
   if (options.scanner) params.set('scanner', options.scanner)
   if (options.verdict) params.set('verdict', options.verdict)
+  if (options.maxAgeTradingDays !== undefined) params.set('max_age_trading_days', String(options.maxAgeTradingDays))
   if (options.limit) params.set('limit', String(options.limit))
 
   return fetchApi<ApproveEvaluationsResponse>(`/api/evaluations/approve?${params}`)

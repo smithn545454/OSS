@@ -33,6 +33,7 @@ export default function Opportunities() {
   } = useApproveEvaluations({
     excludeEarnings: true,
     earningsDays: 7,
+    maxAgeTradingDays: 2,
     limit: 100,
   })
   

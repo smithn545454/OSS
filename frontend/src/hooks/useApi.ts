@@ -53,6 +53,7 @@ export const queryKeys = {
     excludeEarnings?: boolean
     scanner?: string
     verdict?: string
+    maxAgeTradingDays?: number
     limit?: number
   }) => ['evaluations', 'approve', options] as const,
   watchInsights: (sinceDays: number) => ['evaluations', 'watch', 'insights', sinceDays] as const,
@@ -386,6 +387,7 @@ export function useApproveEvaluations(
     earningsDays?: number
     scanner?: string
     verdict?: string
+    maxAgeTradingDays?: number
     limit?: number
   } = {}
 ) {
@@ -394,6 +396,7 @@ export function useApproveEvaluations(
       excludeEarnings: options.excludeEarnings,
       scanner: options.scanner,
       verdict: options.verdict,
+      maxAgeTradingDays: options.maxAgeTradingDays,
       limit: options.limit,
     }),
     queryFn: async () => {
@@ -402,6 +405,7 @@ export function useApproveEvaluations(
         earningsDays: options.earningsDays,
         scanner: options.scanner,
         verdict: options.verdict,
+        maxAgeTradingDays: options.maxAgeTradingDays,
         limit: options.limit,
       })
 

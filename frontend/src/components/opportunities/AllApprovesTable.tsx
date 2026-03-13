@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ApproveEvaluation, UrgencyLevel, ScannerType } from '@/lib/types'
 import { formatContractId } from '@/lib/convictionScore'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
+import { formatRelativeTime } from '@/lib/formatTime'
 import { UrgencyBadge } from './UrgencyBadge'
 import { ScannerBadge } from './ScannerBadge'
 import { ConvictionGauge } from './ConvictionGauge'
@@ -484,10 +485,7 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                   fontSize: '12px',
                   color: 'var(--text-muted)',
                 }}>
-                  {new Date(evaluation.evaluated_at).toLocaleTimeString('en-US', { 
-                    hour: 'numeric', 
-                    minute: '2-digit' 
-                  })}
+                  {formatRelativeTime(evaluation.evaluated_at)}
                 </td>
               </tr>
             ))}

@@ -73,6 +73,6 @@ class TestApproveEvaluations:
     @pytest.mark.asyncio
     async def test_approve_returns_200(self, client):
         with patch(f"{_ROUTE}.EvaluationTable") as mock_eval:
-            mock_eval.list_by_verdict = AsyncMock(return_value=[])
+            mock_eval.list_by_verdict_since = AsyncMock(return_value=[])
             response = await client.get("/api/evaluations/approve")
         assert response.status_code == 200

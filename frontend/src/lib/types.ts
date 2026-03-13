@@ -1011,6 +1011,8 @@ export interface ApproveEvaluationsResponse {
     total: number
     excludedCount: number
     generatedAt: string
+    maxAgeTradingDays?: number
+    cutoffTimestamp?: string
   }
 }
 

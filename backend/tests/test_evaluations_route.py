@@ -257,7 +257,7 @@ class TestEvaluationRoutes:
     @pytest.mark.asyncio
     async def test_list_approve_evaluations_empty(self, app):
         with patch("app.api.routes.evaluations.EvaluationTable") as mock_table:
-            mock_table.list_by_verdict = AsyncMock(return_value=[])
+            mock_table.list_by_verdict_since = AsyncMock(return_value=[])
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:

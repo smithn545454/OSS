@@ -258,6 +258,25 @@ class EvaluationTable:
         return items
 
     @staticmethod
+    async def list_by_verdict_since(
+        verdict: str, since_iso: str, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """List evaluations by verdict, filtered to those evaluated after since_iso."""
+        db = get_dynamodb()
+        items = await db.query(
+            EvaluationTable.TABLE,
+            f"VERDICT#{verdict}",
+            sk_condition={"gte": since_iso},
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+        return items
+
+    @staticmethod
     async def expire_stale_pending(cutoff_iso: str) -> int:
         """Mark PENDING evaluations older than cutoff as EXPIRED.
 
