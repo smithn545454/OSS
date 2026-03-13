@@ -418,6 +418,26 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                         {evaluation.approvalCount}x
                       </span>
                     )}
+                    {evaluation.matchedRules && evaluation.matchedRules.length > 0 && (
+                      <span
+                        title={evaluation.matchedRules.map(r => r.name).join('\n')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          color: '#a78bfa',
+                          background: 'rgba(167, 139, 250, 0.1)',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(167, 139, 250, 0.2)',
+                        }}
+                      >
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#a78bfa' }} />
+                        {evaluation.matchedRules.length}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td style={{ padding: '12px 16px' }}>

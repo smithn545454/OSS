@@ -3,7 +3,7 @@
  * Sections: Run Analysis controls, Archetype cards, Saved Setup Rules.
  */
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import clsx from 'clsx'
 import {
   Brain,
@@ -15,6 +15,10 @@ import {
   ToggleRight,
   Trash2,
   BookmarkPlus,
+  Check,
+  Loader2,
+  Radio,
+  FlaskConical,
 } from 'lucide-react'
 import {
   useRunPatternDiscovery,
@@ -23,6 +27,7 @@ import {
   useCreateSetupRule,
   useToggleSetupRule,
   useDeleteSetupRule,
+  useSetupRulePerformance,
 } from '@/hooks/useApi'
 import type { ArchetypeResult, PatternAnalysis, SetupRule } from '@/lib/types'
 
@@ -65,12 +70,28 @@ function CriteriaDisplay({ criteria }: { criteria: Record<string, unknown> }) {
   )
 }
 
+function ModeBadge({ mode }: { mode: 'production' | 'test' }) {
+  return mode === 'production' ? (
+    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-purple-400/15 text-purple-400 border border-purple-400/25">
+      <Radio className="h-2.5 w-2.5" />
+      Production
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-oss-muted/10 text-oss-muted border border-oss-border">
+      <FlaskConical className="h-2.5 w-2.5" />
+      Test
+    </span>
+  )
+}
+
 interface ArchetypeCardProps {
   archetype: ArchetypeResult
   onPromote: () => void
+  isSaving: boolean
+  isSaved: boolean
 }
 
-function ArchetypeCard({ archetype, onPromote }: ArchetypeCardProps) {
+function ArchetypeCard({ archetype, onPromote, isSaving, isSaved }: ArchetypeCardProps) {
   const [expanded, setExpanded] = useState(false)
   const perf = archetype.performance
 
@@ -111,13 +132,27 @@ function ArchetypeCard({ archetype, onPromote }: ArchetypeCardProps) {
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onPromote()
+            if (!isSaved && !isSaving) onPromote()
           }}
-          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-oss-accent hover:bg-oss-accent/10 border border-oss-accent/20 transition-colors"
-          title="Save as Setup Rule"
+          disabled={isSaving || isSaved}
+          className={clsx(
+            'flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors border',
+            isSaved
+              ? 'text-oss-approve border-oss-approve/20 bg-oss-approve/10 cursor-default'
+              : isSaving
+                ? 'text-oss-accent border-oss-accent/20 bg-oss-accent/10 cursor-wait'
+                : 'text-oss-accent hover:bg-oss-accent/10 border-oss-accent/20'
+          )}
+          title={isSaved ? 'Saved as Setup Rule' : 'Save as Setup Rule'}
         >
-          <BookmarkPlus className="h-3.5 w-3.5" />
-          Save
+          {isSaved ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : isSaving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <BookmarkPlus className="h-3.5 w-3.5" />
+          )}
+          {isSaved ? 'Saved' : isSaving ? 'Saving...' : 'Save'}
         </button>
       </div>
 
@@ -176,56 +211,156 @@ function ArchetypeCard({ archetype, onPromote }: ArchetypeCardProps) {
   )
 }
 
+function PerformanceComparison({ ruleId, creation }: {
+  ruleId: string
+  creation: { win_rate?: number; avg_return?: number; sample_size?: number; avg_days_held?: number }
+}) {
+  const { data, isLoading } = useSetupRulePerformance(ruleId, true)
+
+  if (isLoading) {
+    return <div className="text-xs text-oss-muted py-2">Loading performance data...</div>
+  }
+
+  const current = data?.performance
+  if (!current || data.sample_size === 0) {
+    return (
+      <div className="text-xs text-oss-muted py-2">
+        No matched positions yet. Performance tracking begins on the next pipeline run.
+      </div>
+    )
+  }
+
+  const rows = [
+    { label: 'Win Rate', creation: creation?.win_rate != null ? creation.win_rate * 100 : null, current: current.win_rate * 100, suffix: '%' },
+    { label: 'Avg Return', creation: creation?.avg_return ?? null, current: current.avg_return, suffix: '%' },
+    { label: 'Sample Size', creation: creation?.sample_size ?? null, current: current.sample_size, suffix: '' },
+    { label: 'Avg Days Held', creation: creation?.avg_days_held ?? null, current: current.avg_days_held, suffix: '' },
+  ]
+
+  return (
+    <div className="grid grid-cols-[1fr_80px_80px] gap-x-4 gap-y-1 text-xs">
+      <div className="text-oss-muted font-medium" />
+      <div className="text-oss-muted font-medium text-right">At Creation</div>
+      <div className="text-oss-muted font-medium text-right">Current</div>
+      {rows.map(({ label, creation: c, current: cur, suffix }) => (
+        <div key={label} className="contents">
+          <div className="text-oss-muted">{label}</div>
+          <div className="font-mono text-oss-text text-right">
+            {c != null ? `${fmt(c)}${suffix}` : '--'}
+          </div>
+          <div className={clsx(
+            'font-mono text-right',
+            c != null && cur > c ? 'text-oss-approve' : c != null && cur < c ? 'text-oss-reject' : 'text-oss-text'
+          )}>
+            {fmt(cur)}{suffix}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SetupRuleRow({ rule }: { rule: SetupRule }) {
   const toggleMutation = useToggleSetupRule()
   const deleteMutation = useDeleteSetupRule()
+  const [expanded, setExpanded] = useState(false)
+
+  const mode = rule.mode ?? 'production'
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-oss-border last:border-b-0">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-oss-text truncate">{rule.name}</span>
-          <span
-            className={clsx(
-              'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium border',
-              rule.is_active
-                ? 'bg-oss-approve/10 text-oss-approve border-oss-approve/20'
-                : 'bg-oss-muted/10 text-oss-muted border-oss-border'
+    <div className="border-b border-oss-border last:border-b-0">
+      <div className="flex items-center justify-between px-4 py-3">
+        <div
+          className="flex-1 min-w-0 cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-2">
+            {expanded ? (
+              <ChevronDown className="h-3 w-3 text-oss-muted flex-shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 text-oss-muted flex-shrink-0" />
             )}
+            <span className="font-medium text-sm text-oss-text truncate">{rule.name}</span>
+            <span
+              className={clsx(
+                'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium border',
+                rule.is_active
+                  ? 'bg-oss-approve/10 text-oss-approve border-oss-approve/20'
+                  : 'bg-oss-muted/10 text-oss-muted border-oss-border'
+              )}
+            >
+              {rule.is_active ? 'Active' : 'Inactive'}
+            </span>
+            <ModeBadge mode={mode} />
+          </div>
+          <div className="flex items-center gap-3 mt-0.5 ml-5 text-xs text-oss-muted">
+            <span>
+              WR: {fmt(rule.performance_at_creation?.win_rate ? rule.performance_at_creation.win_rate * 100 : null)}%
+            </span>
+            <span>
+              Avg: {fmt(rule.performance_at_creation?.avg_return)}%
+            </span>
+            <span>n={rule.performance_at_creation?.sample_size ?? '--'}</span>
+            <span>Created: {rule.created_at?.slice(0, 10)}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() =>
+              toggleMutation.mutate({
+                ruleId: rule.rule_id,
+                mode: mode === 'production' ? 'test' : 'production',
+              })
+            }
+            className={clsx(
+              'rounded px-2 py-1 text-[10px] font-medium border transition-colors',
+              mode === 'production'
+                ? 'text-purple-400 border-purple-400/20 hover:bg-purple-400/10'
+                : 'text-oss-muted border-oss-border hover:bg-oss-bg'
+            )}
+            title={mode === 'production' ? 'Switch to test mode' : 'Switch to production mode'}
           >
-            {rule.is_active ? 'Active' : 'Inactive'}
-          </span>
-        </div>
-        <div className="flex items-center gap-3 mt-0.5 text-xs text-oss-muted">
-          <span>
-            WR: {fmt(rule.performance_at_creation?.win_rate ? rule.performance_at_creation.win_rate * 100 : null)}%
-          </span>
-          <span>n={rule.performance_at_creation?.sample_size ?? '--'}</span>
-          <span>Created: {rule.created_at?.slice(0, 10)}</span>
+            {mode === 'production' ? 'Prod' : 'Test'}
+          </button>
+          <button
+            onClick={() =>
+              toggleMutation.mutate({ ruleId: rule.rule_id, isActive: !rule.is_active })
+            }
+            className="p-1.5 rounded hover:bg-oss-bg text-oss-muted transition-colors"
+            title={rule.is_active ? 'Deactivate' : 'Activate'}
+          >
+            {rule.is_active ? (
+              <ToggleRight className="h-4 w-4 text-oss-approve" />
+            ) : (
+              <ToggleLeft className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            onClick={() => deleteMutation.mutate(rule.rule_id)}
+            className="p-1.5 rounded hover:bg-oss-reject/10 text-oss-muted hover:text-oss-reject transition-colors"
+            title="Delete rule"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() =>
-            toggleMutation.mutate({ ruleId: rule.rule_id, isActive: !rule.is_active })
-          }
-          className="p-1.5 rounded hover:bg-oss-bg text-oss-muted transition-colors"
-          title={rule.is_active ? 'Deactivate' : 'Activate'}
-        >
-          {rule.is_active ? (
-            <ToggleRight className="h-4 w-4 text-oss-approve" />
-          ) : (
-            <ToggleLeft className="h-4 w-4" />
-          )}
-        </button>
-        <button
-          onClick={() => deleteMutation.mutate(rule.rule_id)}
-          className="p-1.5 rounded hover:bg-oss-reject/10 text-oss-muted hover:text-oss-reject transition-colors"
-          title="Delete rule"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
+      {expanded && (
+        <div className="px-4 pb-3 ml-5 space-y-3">
+          <div>
+            <h4 className="text-xs text-oss-muted uppercase tracking-wider mb-1.5">Criteria</h4>
+            <CriteriaDisplay criteria={rule.criteria} />
+          </div>
+          <div>
+            <h4 className="text-xs text-oss-muted uppercase tracking-wider mb-1.5">
+              Performance Tracking
+            </h4>
+            <PerformanceComparison
+              ruleId={rule.rule_id}
+              creation={rule.performance_at_creation ?? {}}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -243,27 +378,49 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
   const createRule = useCreateSetupRule()
 
   const [result, setResult] = useState<PatternAnalysis | null>(null)
+  const [savedArchetypes, setSavedArchetypes] = useState<Set<string>>(new Set())
+  const [savingArchetype, setSavingArchetype] = useState<string | null>(null)
 
   const handleRun = async () => {
     try {
       const data = await runAnalysis.mutateAsync({ period, verdict, scanner })
       setResult(data)
+      setSavedArchetypes(new Set())
     } catch {
       // Error handled by mutation state
     }
   }
 
-  const handlePromote = (archetype: ArchetypeResult, analysisId: string) => {
-    createRule.mutate({
-      name: archetype.name,
-      criteria: archetype.criteria,
-      source_analysis_id: analysisId,
-      performance_at_creation: archetype.performance as unknown as Record<string, unknown>,
-    })
-  }
+  const handlePromote = useCallback(
+    (archetype: ArchetypeResult, analysisId: string) => {
+      const key = archetype.name
+      setSavingArchetype(key)
+      createRule.mutate(
+        {
+          name: archetype.name,
+          criteria: archetype.criteria,
+          source_analysis_id: analysisId,
+          performance_at_creation: archetype.performance as unknown as Record<string, unknown>,
+        },
+        {
+          onSuccess: () => {
+            setSavedArchetypes((prev) => new Set(prev).add(key))
+            setSavingArchetype(null)
+          },
+          onError: () => {
+            setSavingArchetype(null)
+          },
+        }
+      )
+    },
+    [createRule]
+  )
 
   const latestAnalysis = analyses?.[0]
   const displayResult = result ?? null
+
+  // Check which archetypes are already saved as rules
+  const ruleNames = new Set(rules?.map((r) => r.name) ?? [])
 
   return (
     <div className="space-y-6">
@@ -339,6 +496,8 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
               key={arch.name + i}
               archetype={arch}
               onPromote={() => handlePromote(arch, displayResult.analysis_id)}
+              isSaving={savingArchetype === arch.name}
+              isSaved={savedArchetypes.has(arch.name) || ruleNames.has(arch.name)}
             />
           ))}
         </div>

@@ -500,6 +500,7 @@ export interface EvaluationDetailResponse {
   scanner_triggers: ScannerTriggerDetail[]
   features: Record<string, FeatureDetail>
   thesis: TradeThesis | null
+  matched_rules?: MatchedRule[]
   summary: EvaluationSummary
 }
 
@@ -999,6 +1000,8 @@ export interface ApproveEvaluation extends Evaluation {
   convictionScore?: number
   convictionBreakdown?: ConvictionScoreBreakdown
   alertedAt?: string
+  // Setup rule matches (from backend)
+  matchedRules?: MatchedRule[]
 }
 
 /**
@@ -1660,7 +1663,16 @@ export interface SetupRule {
   name: string
   criteria: Record<string, unknown>
   is_active: boolean
+  mode: 'production' | 'test'
   created_at: string
   source_analysis_id: string | null
   performance_at_creation: ArchetypePerformance
+}
+
+export interface MatchedRule {
+  rule_id: string
+  name: string
+  mode: 'production' | 'test'
+  criteria?: Record<string, unknown>
+  performance_at_creation?: ArchetypePerformance
 }

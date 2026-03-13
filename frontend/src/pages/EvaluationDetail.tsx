@@ -568,6 +568,92 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
 
 
 // ============================================================================
+// Matched Setup Rules Panel
+// ============================================================================
+
+interface MatchedRuleDisplay {
+  rule_id: string
+  name: string
+  mode: 'production' | 'test'
+  criteria?: Record<string, unknown>
+  performance_at_creation?: {
+    win_rate?: number
+    avg_return?: number
+    sample_size?: number
+  }
+}
+
+function MatchedRulesPanel({ rules }: { rules: MatchedRuleDisplay[] }) {
+  if (!rules || rules.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-purple-400/20 bg-purple-400/5 p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <BarChart3 className="h-5 w-5 text-purple-400" />
+        <h3 className="text-lg font-medium text-oss-text">Matching Setup Rules</h3>
+        <span className="text-xs text-oss-muted">({rules.length})</span>
+      </div>
+
+      <div className="space-y-3">
+        {rules.map((rule) => (
+          <div key={rule.rule_id} className="rounded-lg bg-oss-surface p-4 border border-oss-border">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-medium text-sm text-oss-text">{rule.name}</span>
+              <span
+                className={clsx(
+                  'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border',
+                  rule.mode === 'production'
+                    ? 'bg-purple-400/15 text-purple-400 border-purple-400/25'
+                    : 'bg-oss-muted/10 text-oss-muted border-oss-border'
+                )}
+              >
+                {rule.mode === 'production' ? 'Production' : 'Test'}
+              </span>
+            </div>
+            {rule.performance_at_creation && (
+              <div className="flex items-center gap-4 text-xs text-oss-muted mb-2">
+                {rule.performance_at_creation.win_rate != null && (
+                  <span>
+                    WR: <span className="font-mono text-oss-approve">
+                      {(rule.performance_at_creation.win_rate * 100).toFixed(1)}%
+                    </span>
+                  </span>
+                )}
+                {rule.performance_at_creation.avg_return != null && (
+                  <span>
+                    Avg Return: <span className="font-mono text-oss-text">
+                      {rule.performance_at_creation.avg_return.toFixed(1)}%
+                    </span>
+                  </span>
+                )}
+                {rule.performance_at_creation.sample_size != null && (
+                  <span>n={rule.performance_at_creation.sample_size}</span>
+                )}
+              </div>
+            )}
+            {rule.criteria && Object.keys(rule.criteria).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(rule.criteria)
+                  .filter(([, v]) => v != null)
+                  .map(([key, val]) => (
+                    <span
+                      key={key}
+                      className="inline-block rounded bg-oss-bg px-2 py-0.5 text-[10px] font-mono text-oss-muted border border-oss-border"
+                    >
+                      {key}: {Array.isArray(val) ? (val as string[]).join(', ') : String(val)}
+                    </span>
+                  ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+// ============================================================================
 // Decision Explanation Component
 // ============================================================================
 
@@ -917,7 +1003,7 @@ export default function EvaluationDetail() {
     )
   }
 
-  const { evaluation, pillar_scores, gate_results, position, scanner_triggers, thesis, summary } = data
+  const { evaluation, pillar_scores, gate_results, position, scanner_triggers, thesis, summary, matched_rules } = data
   const decision = evaluation.decision
   // Prefer polled data when COMPLETED, fall back to mutation result, then query data
   const mutationThesis = generateThesis.data as TradeThesis | undefined
@@ -963,6 +1049,11 @@ export default function EvaluationDetail() {
         )}
         <ScannerTriggers triggers={scanner_triggers} />
       </div>
+
+      {/* Matched Setup Rules */}
+      {matched_rules && matched_rules.length > 0 && (
+        <MatchedRulesPanel rules={matched_rules as MatchedRuleDisplay[]} />
+      )}
 
       {/* AI Trade Thesis */}
       {decision?.verdict === 'APPROVE' && (

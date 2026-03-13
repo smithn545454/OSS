@@ -1416,6 +1416,7 @@ class SetupRuleRequest(BaseModel):
     criteria: dict[str, Any]
     source_analysis_id: Optional[str] = None
     performance_at_creation: Optional[dict[str, Any]] = None
+    mode: Optional[str] = "production"  # "production" | "test"
 
 
 class SetupRuleUpdateRequest(BaseModel):
@@ -1423,6 +1424,7 @@ class SetupRuleUpdateRequest(BaseModel):
 
     is_active: Optional[bool] = None
     name: Optional[str] = None
+    mode: Optional[str] = None  # "production" | "test"
 
 
 @router.get("/setup-rules")
@@ -1444,6 +1446,7 @@ async def create_setup_rule_endpoint(request: SetupRuleRequest) -> dict[str, Any
         "criteria": request.criteria,
         "source_analysis_id": request.source_analysis_id,
         "performance_at_creation": request.performance_at_creation or {},
+        "mode": request.mode or "production",
     })
     return {"rule": rule, "message": "Setup rule created"}
 
@@ -1460,6 +1463,8 @@ async def update_setup_rule_endpoint(
         updates["is_active"] = request.is_active
     if request.name is not None:
         updates["name"] = request.name
+    if request.mode is not None:
+        updates["mode"] = request.mode
 
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
@@ -1479,3 +1484,35 @@ async def delete_setup_rule_endpoint(rule_id: str) -> dict[str, Any]:
     if not success:
         raise HTTPException(status_code=404, detail=f"Setup rule not found: {rule_id}")
     return {"message": f"Setup rule {rule_id} deleted"}
+
+
+@router.get("/setup-rules/{rule_id}/performance")
+async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
+    """Get ongoing performance for a setup rule from matched closed positions."""
+    from app.db.tables import PaperPositionTable
+    import statistics
+
+    closed = await PaperPositionTable.list_closed(limit=2000)
+    matched_positions = [
+        p for p in closed
+        if p.matched_rule_ids and rule_id in p.matched_rule_ids
+    ]
+
+    if not matched_positions:
+        return {"rule_id": rule_id, "performance": None, "sample_size": 0}
+
+    returns = [p.current_pnl_pct for p in matched_positions]
+    wins = [r for r in returns if r > 0]
+    days_held = [p.days_held for p in matched_positions]
+
+    return {
+        "rule_id": rule_id,
+        "sample_size": len(matched_positions),
+        "performance": {
+            "win_rate": len(wins) / len(returns),
+            "avg_return": sum(returns) / len(returns),
+            "median_return": statistics.median(returns),
+            "sample_size": len(matched_positions),
+            "avg_days_held": sum(days_held) / len(days_held),
+        },
+    }

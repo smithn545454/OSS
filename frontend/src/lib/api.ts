@@ -765,7 +765,10 @@ export async function getPatternAnalysis(
 // ============================================================================
 
 export async function listSetupRules(): Promise<import('./types').SetupRule[]> {
-  return fetchApi('/api/paper-trading/setup-rules')
+  const response = await fetchApi<{ rules: import('./types').SetupRule[]; count: number }>(
+    '/api/paper-trading/setup-rules'
+  )
+  return response.rules
 }
 
 export async function createSetupRule(data: {
@@ -773,27 +776,46 @@ export async function createSetupRule(data: {
   criteria: Record<string, unknown>
   source_analysis_id?: string
   performance_at_creation?: Record<string, unknown>
+  mode?: 'production' | 'test'
 }): Promise<import('./types').SetupRule> {
-  return fetchApi('/api/paper-trading/setup-rules', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
+  const response = await fetchApi<{ rule: import('./types').SetupRule; message: string }>(
+    '/api/paper-trading/setup-rules',
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  )
+  return response.rule
 }
 
 export async function updateSetupRule(
   ruleId: string,
-  updates: { is_active?: boolean; name?: string }
+  updates: { is_active?: boolean; name?: string; mode?: 'production' | 'test' }
 ): Promise<import('./types').SetupRule> {
-  return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}`, {
-    method: 'PUT',
-    body: JSON.stringify(updates),
-  })
+  const response = await fetchApi<{ rule: import('./types').SetupRule; message: string }>(
+    `/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }
+  )
+  return response.rule
 }
 
 export async function deleteSetupRule(ruleId: string): Promise<{ success: boolean }> {
   return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}`, {
     method: 'DELETE',
   })
+}
+
+export interface SetupRulePerformance {
+  rule_id: string
+  sample_size: number
+  performance: import('./types').ArchetypePerformance | null
+}
+
+export async function getSetupRulePerformance(ruleId: string): Promise<SetupRulePerformance> {
+  return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}/performance`)
 }
 
 // Export the ApiError for error handling

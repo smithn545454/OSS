@@ -874,8 +874,20 @@ export function useCreateSetupRule() {
 export function useToggleSetupRule() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ ruleId, isActive }: { ruleId: string; isActive: boolean }) =>
-      api.updateSetupRule(ruleId, { is_active: isActive }),
+    mutationFn: ({
+      ruleId,
+      isActive,
+      mode,
+    }: {
+      ruleId: string
+      isActive?: boolean
+      mode?: 'production' | 'test'
+    }) => {
+      const updates: { is_active?: boolean; mode?: 'production' | 'test' } = {}
+      if (isActive !== undefined) updates.is_active = isActive
+      if (mode !== undefined) updates.mode = mode
+      return api.updateSetupRule(ruleId, updates)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })
     },
@@ -889,5 +901,14 @@ export function useDeleteSetupRule() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })
     },
+  })
+}
+
+export function useSetupRulePerformance(ruleId: string, enabled: boolean = false) {
+  return useQuery({
+    queryKey: ['paper-trading', 'setup-rules', ruleId, 'performance'] as const,
+    queryFn: () => api.getSetupRulePerformance(ruleId),
+    enabled: enabled && !!ruleId,
+    staleTime: 60000,
   })
 }

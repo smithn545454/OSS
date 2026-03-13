@@ -145,7 +145,39 @@ async def create_position_from_evaluation(
         entry_iv=evaluation.iv,
         entry_theta=evaluation.theta,
     )
-    
+
+    # Match setup rules at position creation time
+    try:
+        from app.paper_trading.pattern_discovery import list_setup_rules
+        from app.paper_trading.rule_matcher import match_rules
+
+        all_rules = await list_setup_rules()
+        if all_rules:
+            eval_dict = {
+                "option_type": (
+                    evaluation.option_type.value
+                    if hasattr(evaluation.option_type, "value")
+                    else str(evaluation.option_type)
+                ),
+                "dte": evaluation.dte,
+                "iv": evaluation.iv,
+                "delta": evaluation.delta,
+                "spread_pct": getattr(evaluation, "spread_pct", None),
+                "open_interest": getattr(evaluation, "open_interest", None),
+                "volume": getattr(evaluation, "volume", None),
+            }
+            decision_dict = {
+                "final_score": decision.final_score,
+                "directional_score": decision.directional_score,
+                "volatility_score": decision.volatility_score,
+                "structure_score": decision.structure_score,
+            }
+            matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
+            if matched:
+                position.matched_rule_ids = [r["rule_id"] for r in matched]
+    except Exception as e:
+        logger.warning(f"Setup rule matching failed during position creation: {e}")
+
     # Persist position
     try:
         await PaperPositionTable.put(position)

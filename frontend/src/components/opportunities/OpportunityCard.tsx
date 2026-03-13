@@ -83,6 +83,30 @@ function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
         ))}
         <ConvergenceBadge count={evaluation.scannerConvergence} />
         <UrgencyBadge urgency={evaluation.urgency} size="small" />
+        {evaluation.matchedRules && evaluation.matchedRules.length > 0 && (
+          <span
+            title={evaluation.matchedRules.map(r => r.name).join(', ')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              fontSize: '10px',
+              fontWeight: 600,
+              color: '#a78bfa',
+              background: 'rgba(167, 139, 250, 0.1)',
+              borderRadius: '10px',
+              border: '1px solid rgba(167, 139, 250, 0.2)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {evaluation.matchedRules.length === 1
+              ? evaluation.matchedRules[0].name.length > 30
+                ? evaluation.matchedRules[0].name.slice(0, 28) + '...'
+                : evaluation.matchedRules[0].name
+              : `${evaluation.matchedRules.length} setup matches`}
+          </span>
+        )}
         {(evaluation.approvalCount ?? 1) > 1 && (
           <span
             title={`Approved in ${evaluation.approvalCount} separate pipeline scans`}

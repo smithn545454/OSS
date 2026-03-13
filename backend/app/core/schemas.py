@@ -411,6 +411,9 @@ class PaperPosition(OSSBaseModel):
     thesis_sl_pct: Optional[float] = None
     thesis_time_exit_dte: Optional[int] = None
 
+    # Setup rule matching (populated at creation for performance tracking)
+    matched_rule_ids: Optional[list[str]] = None
+
 
 # ============================================================================
 # Pipeline Run & Stage Events

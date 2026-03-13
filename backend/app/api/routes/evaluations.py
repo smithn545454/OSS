@@ -381,6 +381,41 @@ async def get_evaluation_detail_by_id(
         dte=evaluation.get("dte", 30),
     )
 
+    # Match setup rules (all active rules, both production and test)
+    matched_rules_list: list[dict[str, Any]] = []
+    try:
+        from app.paper_trading.pattern_discovery import list_setup_rules  # noqa: I001
+        from app.paper_trading.rule_matcher import match_rules, format_matched_rules
+
+        all_rules = await list_setup_rules()
+        if all_rules:
+            # Build decision dict from evaluation's decision field
+            eval_decision = evaluation.get("decision", {})
+            if not isinstance(eval_decision, dict):
+                eval_decision = {}
+            # Also try pillar scores for decision fields
+            if not eval_decision.get("final_score"):
+                for ps in pillar_scores_dict:
+                    pid = ps.get("pillar_id", "")
+                    if pid == "DIRECTIONAL":
+                        eval_decision.setdefault("directional_score", ps.get("score"))
+                    elif pid == "VOLATILITY":
+                        eval_decision.setdefault("volatility_score", ps.get("score"))
+                    elif pid == "STRUCTURE":
+                        eval_decision.setdefault("structure_score", ps.get("score"))
+
+            # Extract scanner types from scanner_triggers
+            eval_scanners = [
+                st.get("scanner_type", "")
+                for st in scanner_triggers
+                if st.get("scanner_type")
+            ]
+
+            matched = match_rules(all_rules, evaluation, eval_decision, eval_scanners)
+            matched_rules_list = format_matched_rules(matched, include_criteria=True)
+    except Exception as e:
+        logger.warning(f"Setup rule matching failed on detail page: {e}")
+
     return {
         "evaluation": evaluation,
         "thetaAdjustedEV": theta_adjusted_ev,
@@ -391,6 +426,7 @@ async def get_evaluation_detail_by_id(
         "scanner_triggers": scanner_triggers,
         "features": features_dict,
         "thesis": thesis_dict,
+        "matched_rules": matched_rules_list,
         "summary": {
             "all_gates_passed": all_gates_passed,
             "failed_gates": failed_gates,
@@ -923,6 +959,29 @@ async def list_approve_evaluations(
         reverse=True,
     )
     enhanced_items = enhanced_items[:limit]
+
+    # ------------------------------------------------------------------
+    # 7. Match setup rules (production mode only)
+    # ------------------------------------------------------------------
+    try:
+        from app.paper_trading.pattern_discovery import list_setup_rules  # noqa: I001
+        from app.paper_trading.rule_matcher import match_rules, format_matched_rules
+
+        all_rules = await list_setup_rules()
+        if all_rules:
+            for item in enhanced_items:
+                decision = item.get("decision", {})
+                if not isinstance(decision, dict):
+                    decision = {}
+                scanner_source = item.get("scannerSource", [])
+                matched = match_rules(
+                    all_rules, item, decision, scanner_source,
+                    mode_filter="production",
+                )
+                if matched:
+                    item["matchedRules"] = format_matched_rules(matched)
+    except Exception as e:
+        logger.warning(f"Setup rule matching failed: {e}")
 
     # Consolidate earnings exclusions by ticker
     earnings_by_ticker: dict[str, dict[str, Any]] = {}
