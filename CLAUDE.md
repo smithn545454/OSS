@@ -301,10 +301,11 @@ This reverts to the previous Lambda version. Verify again after rollback.
 ./scripts/deploy.sh rollback N        # Rollback to version N
 ```
 
-#### Option C: Restore known-good code (nuclear option)
+#### Option C: Restore known-good baseline (nuclear option)
 ```bash
-git checkout pipeline-stable-2026-02-12 -- backend/
+git checkout pipeline-stable-2026-03-13 -- backend/
 # Then redeploy using Step 3
+# If policy also needs restoring, see baselines/2026-03-13-README.md
 ```
 
 After any rollback, tell the user:
@@ -376,3 +377,18 @@ After any rollback, tell the user:
 ### Pending Verification
 - Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
 - AI Trade Thesis generation should work on next pipeline run (PillarResult→PillarScore conversion was fixed)
+
+## Baselines
+
+Baselines capture a known-good pipeline state: code (git tag) + policy config (exported JSON). Stored in `baselines/` with restore instructions.
+
+**Current known-good baseline: `pipeline-stable-2026-03-13`**
+- Policy v2.0.2, Lambda v127, commit `c651a2c`
+- 16.1% gate pass rate, 15 approvals, 231 watches per run
+- Full restore instructions in `baselines/2026-03-13-README.md`
+
+### Convention
+- Tag code: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
+- Export policy: `curl -s .../api/policies/active > baselines/YYYY-MM-DD-policy.json`
+- Document: create `baselines/YYYY-MM-DD-README.md` with identifiers + metrics + restore steps
+- To restore: checkout the tag, POST the policy JSON back via API, activate it

@@ -1,0 +1,170 @@
+{
+  "version": "v2.0.2",
+  "policy_hash": "aa9dd55fe1eb084a949afa72e829b83fb546e8e8ea3c8ab2f984ea822c75f0f1",
+  "config": {
+    "scanner": {
+      "unusual_volume": {
+        "volume_ratio_threshold": 2.0,
+        "oi_change_threshold_pct": 15.0
+      },
+      "breakout": {
+        "lookback_days": 20
+      },
+      "compression": {
+        "atr_period": 14,
+        "compression_multiplier": 1.2,
+        "break_pct": 0.5
+      },
+      "cheap_options": {
+        "iv_rv_ratio_max": 1.1,
+        "iv_percentile_max": 40
+      }
+    },
+    "underlying_filter": {
+      "min_price": 5.0,
+      "min_avg_dollar_volume": 20000000.0,
+      "max_missing_bars": 2,
+      "exclude_earnings_within_days": 0
+    },
+    "contract_selection": {
+      "dte_buckets": {
+        "A": {
+          "min_dte": 7,
+          "max_dte": 21
+        },
+        "B": {
+          "min_dte": 22,
+          "max_dte": 45
+        },
+        "C": {
+          "min_dte": 46,
+          "max_dte": 75
+        },
+        "D": {
+          "min_dte": 76,
+          "max_dte": 120
+        }
+      },
+      "delta_bands": {
+        "CALL": {
+          "min_delta": 0.2,
+          "max_delta": 0.75
+        },
+        "PUT": {
+          "min_delta": -0.75,
+          "max_delta": -0.2
+        }
+      },
+      "top_k": 3,
+      "target_delta_call": 0.45,
+      "target_delta_put": -0.45,
+      "min_open_interest": 200,
+      "min_volume": 50,
+      "max_spread_pct": 10.0,
+      "min_mid_price": 0.2,
+      "rank_weight_liquidity": 0.4,
+      "rank_weight_delta": 0.35,
+      "rank_weight_spread": 0.25
+    },
+    "features": {
+      "iv_percentile_lookback_days": 252,
+      "iv_percentile_min_days": 20,
+      "iv_regime_low_percentile": 30,
+      "iv_regime_high_percentile": 70,
+      "iv_trending_change_threshold": 10.0,
+      "rs_benchmark_ticker": "SPY",
+      "atm_iv_min_dte": 30,
+      "atm_iv_max_dte": 45,
+      "atm_delta_target_call": 0.5,
+      "atm_delta_target_put": -0.5
+    },
+    "gates": {
+      "min_open_interest": 300,
+      "min_volume": 75,
+      "max_spread_pct": 8.0,
+      "dte_min": 7,
+      "dte_max": 120,
+      "move_sufficiency_max": 1.25,
+      "iv_percentile_max": 85,
+      "breakout_volume_min": 1.5,
+      "theta_burden_max": 4.0,
+      "trend_alignment_min": 0.6,
+      "iv_rv_ratio_max": 1.5,
+      "feasibility_ratio_max": 1.5,
+      "delta_min": 0.2,
+      "delta_max": 0.7,
+      "max_premium": 20.0,
+      "combined_score_min": 75.0,
+      "pillar_minimum": 60.0,
+      "pillar_spread_max": 30.0,
+      "disabled_gates": []
+    },
+    "pillars": {
+      "weights": {
+        "directional": 0.35,
+        "volatility": 0.35,
+        "structure": 0.3
+      },
+      "directional": {
+        "trend_alignment_weight": 0.3,
+        "momentum_weight": 0.25,
+        "signal_confirmation_weight": 0.2,
+        "relative_strength_weight": 0.15,
+        "catalyst_weight": 0.1,
+        "momentum_blend_bucket_a": 0.7,
+        "momentum_blend_bucket_b": 0.5,
+        "momentum_blend_bucket_c": 0.3,
+        "momentum_blend_bucket_d": 0.2
+      },
+      "volatility": {
+        "iv_vs_rv_weight": 0.35,
+        "iv_percentile_weight": 0.25,
+        "iv_regime_weight": 0.2,
+        "theta_adjusted_edge_weight": 0.2
+      },
+      "structure": {
+        "spread_weight": 0.3,
+        "open_interest_weight": 0.25,
+        "volume_weight": 0.2,
+        "theta_burden_weight": 0.15,
+        "liquidity_trend_weight": 0.1
+      }
+    },
+    "pillar_weights": {
+      "directional": 0.35,
+      "volatility": 0.35,
+      "structure": 0.3
+    },
+    "decision": {
+      "approve_threshold": 75,
+      "watch_threshold": 65,
+      "tier_1_min_score": 85,
+      "tier_1_min_pillar": 70,
+      "tier_1_max_spread": 5.0,
+      "tier_2_min_pillar": 55
+    },
+    "tracking": {
+      "profit_target_pct": 50.0,
+      "stop_loss_pct": 50.0,
+      "time_exit_dte": 5,
+      "shadow_sample_rate": 0.05,
+      "shadow_near_miss_threshold": 60
+    },
+    "watchlist": {
+      "tickers": [],
+      "max_concurrent_requests": 10,
+      "batch_size": 25
+    },
+    "thesis": {
+      "enabled": true,
+      "max_daily_calls": 50,
+      "output_token_limit": 1000,
+      "preferred_provider": "anthropic",
+      "fallback_enabled": true
+    }
+  },
+  "created_at": "2026-02-17T14:38:42.739178+00:00",
+  "created_by": "claude-code",
+  "is_active": true,
+  "changelog": []
+}
