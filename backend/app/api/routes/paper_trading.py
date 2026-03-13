@@ -1370,18 +1370,70 @@ class PatternDiscoveryRequest(BaseModel):
 async def run_pattern_discovery(request: PatternDiscoveryRequest) -> dict[str, Any]:
     """Run on-demand pattern discovery analysis using AI.
 
-    Sends closed trade data to Claude to identify statistically significant
-    archetypes. Results are stored and can be retrieved later.
+    Creates a 'running' stub and dispatches an async Lambda worker
+    to avoid API Gateway's 30-second timeout. Frontend polls for results.
     """
-    from app.paper_trading.pattern_discovery import run_pattern_analysis
+    import json as json_mod
+    import os
 
-    return await run_pattern_analysis(
+    import boto3
+
+    from app.paper_trading.pattern_discovery import create_analysis_stub
+
+    # Create stub — returns immediately with analysis_id
+    result = await create_analysis_stub(
         period=request.period,
         verdict=request.verdict,
         scanner=request.scanner,
         min_sample=request.min_sample,
         min_win_rate=request.min_win_rate,
     )
+
+    # If insufficient data, return early (no worker needed)
+    if result["status"] != "running":
+        return result
+
+    # Fire-and-forget: invoke Lambda async to do the LLM work
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+    payload = {
+        "source": "oss.scheduler",
+        "action": "pattern_discovery_worker",
+        "analysis_id": result["analysis_id"],
+        "period": request.period,
+        "verdict": request.verdict,
+        "scanner": request.scanner,
+        "min_sample": request.min_sample,
+        "min_win_rate": request.min_win_rate,
+    }
+
+    try:
+        lambda_client = boto3.client("lambda")
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json_mod.dumps(payload),
+        )
+        logger.info(f"Dispatched pattern discovery worker for {result['analysis_id']}")
+    except Exception as e:
+        logger.error(f"Failed to dispatch pattern discovery worker: {e}")
+        # Update stub to error
+        from app.db.dynamodb import get_dynamodb
+        from app.db.tables import PaperPositionTable
+
+        db = get_dynamodb()
+        try:
+            await db.update_item(
+                PaperPositionTable.TABLE,
+                f"ANALYSIS#{result['analysis_id']}",
+                "META",
+                {"status": "error", "error_message": f"Failed to dispatch: {e}"},
+            )
+        except Exception:
+            pass
+        result["status"] = "error"
+        result["message"] = f"Failed to start analysis: {e}"
+
+    return result
 
 
 @router.get("/pattern-discovery")

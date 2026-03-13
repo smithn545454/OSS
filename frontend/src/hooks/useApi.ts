@@ -836,11 +836,12 @@ export function usePatternAnalyses() {
   })
 }
 
-export function usePatternAnalysis(analysisId: string) {
+export function usePatternAnalysis(analysisId: string, polling = false) {
   return useQuery({
     queryKey: ['paper-trading', 'pattern-discovery', analysisId] as const,
     queryFn: () => api.getPatternAnalysis(analysisId),
     enabled: !!analysisId,
+    refetchInterval: polling ? 3000 : false,
   })
 }
 

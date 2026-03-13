@@ -3,7 +3,7 @@
  * Sections: Run Analysis controls, Archetype cards, Saved Setup Rules.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import clsx from 'clsx'
 import {
   Brain,
@@ -23,6 +23,7 @@ import {
 import {
   useRunPatternDiscovery,
   usePatternAnalyses,
+  usePatternAnalysis,
   useSetupRules,
   useCreateSetupRule,
   useToggleSetupRule,
@@ -378,14 +379,31 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
   const createRule = useCreateSetupRule()
 
   const [result, setResult] = useState<PatternAnalysis | null>(null)
+  const [pollingId, setPollingId] = useState<string | null>(null)
   const [savedArchetypes, setSavedArchetypes] = useState<Set<string>>(new Set())
   const [savingArchetype, setSavingArchetype] = useState<string | null>(null)
+
+  // Poll for results while analysis is running
+  const { data: polledResult } = usePatternAnalysis(pollingId ?? '', pollingId != null)
+
+  useEffect(() => {
+    if (polledResult && polledResult.status !== 'running') {
+      setResult(polledResult)
+      setPollingId(null)
+    }
+  }, [polledResult])
+
+  const isRunning = runAnalysis.isPending || pollingId != null
 
   const handleRun = async () => {
     try {
       const data = await runAnalysis.mutateAsync({ period, verdict, scanner })
-      setResult(data)
       setSavedArchetypes(new Set())
+      if (data.status === 'running' && data.analysis_id) {
+        setPollingId(data.analysis_id)
+      } else {
+        setResult(data)
+      }
     } catch {
       // Error handled by mutation state
     }
@@ -446,16 +464,20 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
             )}
             <button
               onClick={handleRun}
-              disabled={runAnalysis.isPending}
+              disabled={isRunning}
               className={clsx(
                 'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors',
-                runAnalysis.isPending
+                isRunning
                   ? 'bg-oss-accent/30 text-oss-accent cursor-wait'
                   : 'bg-oss-accent text-oss-bg hover:bg-oss-accent/90'
               )}
             >
-              <Play className="h-4 w-4" />
-              {runAnalysis.isPending ? 'Analyzing...' : 'Run Analysis'}
+              {isRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              {isRunning ? 'Analyzing...' : 'Run Analysis'}
             </button>
           </div>
         </div>

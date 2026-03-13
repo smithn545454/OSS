@@ -939,6 +939,30 @@ async def _run_daily_data_capture(
         return {"status": "error", "error": str(e)}
 
 
+async def _run_pattern_discovery_worker(event: dict[str, Any]) -> dict[str, Any]:
+    """Run pattern discovery analysis asynchronously (no API Gateway timeout).
+
+    Invoked by fire-and-forget dispatch from the POST endpoint.
+    Updates the pre-created analysis stub with results or error.
+    """
+    from app.paper_trading.pattern_discovery import run_pattern_analysis
+
+    analysis_id = event.get("analysis_id", "")
+    try:
+        result = await run_pattern_analysis(
+            analysis_id=analysis_id,
+            period=event.get("period"),
+            verdict=event.get("verdict"),
+            scanner=event.get("scanner"),
+            min_sample=event.get("min_sample", 5),
+            min_win_rate=event.get("min_win_rate", 0.55),
+        )
+        return {"status": "success", "analysis_id": analysis_id, "result": result.get("status")}
+    except Exception as e:
+        logger.error(f"Pattern discovery worker failed: {e}")
+        return {"status": "error", "analysis_id": analysis_id, "error": str(e)}
+
+
 async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
     """Generate a trade thesis asynchronously (invoked by fire-and-forget dispatch).
 
@@ -1084,6 +1108,7 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     9. Earnings refresh: {"source": "oss.scheduler", "action": "earnings_refresh"}
     10. Daily data capture: {"source": "oss.scheduler", "action": "daily_data_capture"}
     11. Thesis worker: {"source": "oss.scheduler", "action": "thesis_worker", ...}
+    12. Pattern discovery: {"source": "oss.scheduler", "action": "pattern_discovery_worker", ...}
 
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
@@ -1183,6 +1208,12 @@ def handler(event: dict[str, Any], context: Any) -> Any:
                 f"(date={capture_date or 'auto'}, force={force})"
             )
             return asyncio.run(_run_daily_data_capture(capture_date, force))
+
+        elif action == "pattern_discovery_worker":
+            # Async pattern discovery (dispatched by /api/paper-trading/pattern-discovery)
+            analysis_id = event.get("analysis_id", "")
+            logger.info(f"Received pattern_discovery_worker event (analysis={analysis_id})")
+            return asyncio.run(_run_pattern_discovery_worker(event))
 
         elif action == "thesis_worker":
             # Async thesis generation (dispatched by /api/thesis/generate)
