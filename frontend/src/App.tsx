@@ -7,6 +7,7 @@ import PolicyConfig from './pages/PolicyConfig'
 import PipelineMonitor from './pages/PipelineMonitor'
 import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
+import Intelligence from './pages/Intelligence'
 import PaperTrading from './pages/PaperTrading'
 import Backtesting from './pages/Backtesting'
 import Opps from './pages/Opps'
@@ -65,6 +66,7 @@ function App() {
         <Route path="opps" element={<Navigate to="/opportunities" replace />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
+        <Route path="intelligence" element={<Intelligence />} />
         <Route path="paper-trading" element={<PaperTrading />} />
         <Route path="backtesting" element={<Backtesting />} />
         <Route path="config" element={<PolicyConfig />} />

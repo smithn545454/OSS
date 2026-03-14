@@ -1676,3 +1676,58 @@ export interface MatchedRule {
   criteria?: Record<string, unknown>
   performance_at_creation?: ArchetypePerformance
 }
+
+// Edge Intelligence types
+
+export interface DimensionStats {
+  label: string
+  total: number
+  closed: number
+  wins: number
+  losses: number
+  win_rate: number | null
+  avg_return: number | null
+  avg_days_held: number | null
+  total_pnl_dollars: number
+  expectancy: number | null
+}
+
+export interface EdgeInsight {
+  category: string
+  headline: string
+  detail: string | null
+  strength: 'strong' | 'moderate'
+}
+
+export interface EdgeBriefingResponse {
+  period_start: string
+  period_end: string
+  trading_days: number
+  total_positions: number
+  total_closed: number
+  overall_win_rate: number | null
+  overall_avg_return: number | null
+  overall_expectancy: number | null
+  by_option_type: Record<string, DimensionStats>
+  option_type_edge: string | null
+  by_scanner: Record<string, DimensionStats>
+  hot_scanner: string | null
+  by_score_bucket: Record<string, DimensionStats>
+  by_dte_bucket: Record<string, DimensionStats>
+  by_quality_tier: Record<string, DimensionStats>
+  by_convergence: Record<string, DimensionStats>
+  insights: EdgeInsight[]
+  vix_level: number | null
+  spy_direction: string | null
+}
+
+export interface TradeContextResponse {
+  exact_match: DimensionStats | null
+  exact_match_description: string
+  sample_size: number
+  by_option_type: DimensionStats | null
+  by_scanner: DimensionStats | null
+  by_score_range: DimensionStats | null
+  summary: string
+  confidence_flag: 'high_confidence' | 'moderate' | 'low_sample' | 'insufficient'
+}

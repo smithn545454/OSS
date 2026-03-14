@@ -913,3 +913,27 @@ export function useSetupRulePerformance(ruleId: string, enabled: boolean = false
     staleTime: 60000,
   })
 }
+
+// Edge Intelligence
+export function useEdgeBriefing(days: number = 10) {
+  return useQuery({
+    queryKey: ['paper-trading', 'edge-briefing', days] as const,
+    queryFn: () => api.getEdgeBriefing(days),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
+
+export function useTradeContext(params: {
+  option_type: string
+  scanner?: string
+  score?: number
+  dte_bucket?: string
+}) {
+  return useQuery({
+    queryKey: ['paper-trading', 'trade-context', params] as const,
+    queryFn: () => api.getTradeContext(params),
+    enabled: !!params.option_type,
+    staleTime: 10 * 60 * 1000,
+  })
+}

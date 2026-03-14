@@ -26,6 +26,7 @@ import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
+import TradeContextSection from '@/components/evaluation/TradeContextSection'
 
 // ============================================================================
 // Score Bar Component
@@ -1041,6 +1042,14 @@ export default function EvaluationDetail() {
           <PillarCard key={pillar.pillar_id} pillar={pillar} />
         ))}
       </div>
+
+      {/* Trades Like This One */}
+      <TradeContextSection
+        optionType={evaluation.option_type}
+        scanner={scanner_triggers?.[0]?.scanner_type}
+        score={decision?.final_score}
+        dteBucket={evaluation.dte_bucket}
+      />
 
       {/* Decision + Scanner + AI Thesis */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

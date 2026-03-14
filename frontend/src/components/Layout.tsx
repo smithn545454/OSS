@@ -1,12 +1,12 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Settings, Scan, Target, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
+import { Activity, Settings, Scan, Brain, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
 { path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
   { path: '/pipeline', label: 'Pipeline', shortLabel: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', shortLabel: 'Paper', icon: TrendingUp },
-  { path: '/calibration', label: 'Calibration', shortLabel: 'Cal', icon: Target },
+  { path: '/intelligence', label: 'Intelligence', shortLabel: 'Intel', icon: Brain },
   { path: '/backtesting', label: 'Backtesting', shortLabel: 'Backtest', icon: FlaskConical },
   { path: '/config', label: 'Policy', shortLabel: 'Policy', icon: Settings },
 ]

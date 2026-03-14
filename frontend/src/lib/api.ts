@@ -818,5 +818,25 @@ export async function getSetupRulePerformance(ruleId: string): Promise<SetupRule
   return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}/performance`)
 }
 
+// Edge Intelligence
+export async function getEdgeBriefing(days: number = 10): Promise<import('./types').EdgeBriefingResponse> {
+  return fetchApi(`/api/paper-positions/edge-briefing?days=${days}`)
+}
+
+export async function getTradeContext(params: {
+  option_type: string
+  scanner?: string
+  score?: number
+  dte_bucket?: string
+  days?: number
+}): Promise<import('./types').TradeContextResponse> {
+  const searchParams = new URLSearchParams({ option_type: params.option_type })
+  if (params.scanner) searchParams.set('scanner', params.scanner)
+  if (params.score != null) searchParams.set('score', String(params.score))
+  if (params.dte_bucket) searchParams.set('dte_bucket', params.dte_bucket)
+  if (params.days) searchParams.set('days', String(params.days))
+  return fetchApi(`/api/paper-positions/trade-context?${searchParams}`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }

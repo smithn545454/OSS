@@ -951,6 +951,127 @@ async def get_performance_breakdown(
 
 
 # ============================================================================
+# Edge Intelligence Endpoints
+# ============================================================================
+
+
+@router.get("/edge-briefing")
+async def get_edge_briefing(
+    days: int = 10,
+    include_market: bool = True,
+) -> dict[str, Any]:
+    """Get rolling-window edge intelligence briefing.
+
+    Returns performance analytics sliced by option type, scanner, score bucket,
+    DTE bucket, quality tier, and convergence count, plus deterministic insights.
+
+    Args:
+        days: Number of trading days to look back (default 10).
+        include_market: Whether to include SPY/VIX market context.
+    """
+    import math
+    from datetime import datetime as dt, timedelta, timezone as tz
+
+    from app.paper_trading.edge_intelligence import compute_edge_briefing
+
+    now = dt.now(tz.utc)
+    calendar_days = math.ceil(days * 7 / 5)
+    cutoff = (now - timedelta(days=calendar_days)).strftime("%Y-%m-%d")
+    period_end = now.strftime("%Y-%m-%d")
+
+    sk_condition = {"gte": cutoff}
+
+    all_positions: list = []
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_open_paginated,
+        None, None, None, sk_condition,
+    ))
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_closed_paginated,
+        None, None, None, sk_condition,
+    ))
+
+    # Fetch market context
+    market_context = None
+    if include_market:
+        try:
+            from app.services.polygon import PolygonClient
+
+            async with PolygonClient() as polygon:
+                spy_snap = await polygon.get_snapshot("SPY")
+                vix_snap = await polygon.get_snapshot("VIX")
+                market_context = {
+                    "spy": {
+                        "price": spy_snap.get("close") if spy_snap else None,
+                        "change_percent": spy_snap.get("todaysChangePerc") if spy_snap else None,
+                    } if spy_snap else None,
+                    "vix": {
+                        "price": vix_snap.get("close") if vix_snap else None,
+                    } if vix_snap else None,
+                }
+        except Exception as e:
+            logger.warning(f"Failed to fetch market context: {e}")
+
+    briefing = compute_edge_briefing(
+        positions=all_positions,
+        period_start=cutoff,
+        period_end=period_end,
+        trading_days=days,
+        market_context=market_context,
+    )
+    return briefing.to_dict()
+
+
+@router.get("/trade-context")
+async def get_trade_context(
+    option_type: str,
+    scanner: Optional[str] = None,
+    score: Optional[float] = None,
+    dte_bucket: Optional[str] = None,
+    days: int = 20,
+) -> dict[str, Any]:
+    """Get historical context for trades matching specific characteristics.
+
+    Used on the Evaluation Detail page to show "trades like this one."
+
+    Args:
+        option_type: CALL or PUT (required).
+        scanner: Scanner source (e.g., BREAKOUT).
+        score: Conviction score (e.g., 82).
+        dte_bucket: DTE bucket letter (A, B, C, D).
+        days: Number of trading days to look back (default 20).
+    """
+    import math
+    from datetime import datetime as dt, timedelta, timezone as tz
+
+    from app.paper_trading.edge_intelligence import compute_trade_context
+
+    now = dt.now(tz.utc)
+    calendar_days = math.ceil(days * 7 / 5)
+    cutoff = (now - timedelta(days=calendar_days)).strftime("%Y-%m-%d")
+    sk_condition = {"gte": cutoff}
+
+    all_positions: list = []
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_open_paginated,
+        None, None, None, sk_condition,
+    ))
+    all_positions.extend(await _exhaust_paginated(
+        PaperPositionTable.list_closed_paginated,
+        None, None, None, sk_condition,
+    ))
+
+    context = compute_trade_context(
+        option_type=option_type.upper(),
+        scanner=scanner,
+        score=score,
+        dte_bucket=dte_bucket,
+        positions=all_positions,
+    )
+    return context.to_dict()
+
+
+# ============================================================================
 # Metrics Endpoints (Legacy — Computed on Read)
 # ============================================================================
 
