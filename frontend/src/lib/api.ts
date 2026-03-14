@@ -820,7 +820,7 @@ export async function getSetupRulePerformance(ruleId: string): Promise<SetupRule
 
 // Edge Intelligence
 export async function getEdgeBriefing(days: number = 10): Promise<import('./types').EdgeBriefingResponse> {
-  return fetchApi(`/api/paper-positions/edge-briefing?days=${days}`)
+  return fetchApi(`/api/paper-trading/edge-briefing?days=${days}`)
 }
 
 export async function getTradeContext(params: {
@@ -835,7 +835,7 @@ export async function getTradeContext(params: {
   if (params.score != null) searchParams.set('score', String(params.score))
   if (params.dte_bucket) searchParams.set('dte_bucket', params.dte_bucket)
   if (params.days) searchParams.set('days', String(params.days))
-  return fetchApi(`/api/paper-positions/trade-context?${searchParams}`)
+  return fetchApi(`/api/paper-trading/trade-context?${searchParams}`)
 }
 
 // Export the ApiError for error handling
