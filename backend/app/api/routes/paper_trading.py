@@ -13,6 +13,7 @@ Provides endpoints for:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -28,6 +29,8 @@ from app.paper_trading.position_manager import (
     close_position_manually,
     extract_underlying_from_option_ticker,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
