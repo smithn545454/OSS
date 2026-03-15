@@ -1787,3 +1787,57 @@ export interface SetupRule {
   mode: 'production' | 'test'
   created_at: string
 }
+
+// ============================================================================
+// Real Trade Tracking
+// ============================================================================
+
+export type TradeExitReason =
+  | 'PROFIT_TARGET'
+  | 'STOP_LOSS'
+  | 'TIME_EXIT'
+  | 'TRAILING_STOP'
+  | 'EXPIRATION'
+  | 'THESIS_INVALIDATED'
+  | 'MANUAL'
+  | 'OTHER'
+
+export type TradeStatus = 'OPEN' | 'CLOSED'
+
+export interface RealTrade {
+  trade_id: string
+  status: TradeStatus
+  entry_price: number
+  quantity: number
+  entry_notes?: string | null
+  exit_price?: number | null
+  exit_reason?: TradeExitReason | null
+  exit_notes?: string | null
+  realized_pnl_pct?: number | null
+  realized_pnl_dollars?: number | null
+  tracked_at: string
+  closed_at?: string | null
+  snapshot: Record<string, unknown>
+}
+
+export interface TrackTradeResponse {
+  trade_id: string
+  status: string
+  ticker: string
+  option_ticker: string
+  entry_price: number
+  tracked_at: string
+}
+
+export interface TradeListResponse {
+  trades: RealTrade[]
+  count: number
+}
+
+export interface TradeStatsResponse {
+  open_count: number
+  closed_count: number
+  total_count: number
+  win_rate: number
+  avg_return_pct: number
+}

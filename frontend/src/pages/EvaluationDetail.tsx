@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { 
-  ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
   Eye,
   TrendingUp,
   DollarSign,
@@ -11,8 +11,9 @@ import {
   Zap,
   Shield,
   BarChart3,
+  Crosshair,
 } from 'lucide-react'
-import { useEvaluationDetail, useGenerateThesis } from '@/hooks/useApi'
+import { useEvaluationDetail, useGenerateThesis, useIsTradeTracked } from '@/hooks/useApi'
 import type { 
   PillarScoreDetail, 
   GateResultDetail, 
@@ -24,6 +25,7 @@ import type {
 } from '@/lib/types'
 import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
+import TrackTradeModal from '@/components/TrackTradeModal'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
@@ -939,6 +941,8 @@ export default function EvaluationDetail() {
 
   const generateThesis = useGenerateThesis()
   const hasTriggeredThesis = useRef(false)
+  const [showTrackModal, setShowTrackModal] = useState(false)
+  const { data: trackStatus } = useIsTradeTracked(evaluationId || '')
 
   // Auto-generate thesis on page load for APPROVE evaluations
   useEffect(() => {
@@ -1012,15 +1016,36 @@ export default function EvaluationDetail() {
 
   return (
     <div className="space-y-8">
-      {/* Back Link */}
-      <Link 
-        to="/opportunities" 
-        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-oss-muted hover:bg-oss-surface hover:text-oss-text transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Opportunities
-      </Link>
-      
+      {/* Back Link + Track Trade Button */}
+      <div className="flex items-center justify-between">
+        <Link
+          to="/opportunities"
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-oss-muted hover:bg-oss-surface hover:text-oss-text transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Opportunities
+        </Link>
+        {decision?.verdict === 'APPROVE' && (
+          trackStatus?.tracked ? (
+            <Link
+              to={`/trades`}
+              className="inline-flex items-center gap-2 rounded-lg border border-oss-approve/30 bg-oss-approve/10 px-4 py-2 text-sm font-medium text-oss-approve"
+            >
+              <CheckCircle className="h-4 w-4" />
+              Trade Tracked
+            </Link>
+          ) : (
+            <button
+              onClick={() => setShowTrackModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-oss-accent px-4 py-2 text-sm font-semibold text-black hover:bg-oss-accent/90 transition-colors"
+            >
+              <Crosshair className="h-4 w-4" />
+              Track This Trade
+            </button>
+          )
+        )}
+      </div>
+
       {/* Hero Section */}
       <HeroSection
         evaluation={evaluation as HeroSectionProps['evaluation']}
@@ -1082,6 +1107,18 @@ export default function EvaluationDetail() {
 
       {/* Gate Results (Detailed) */}
       <GateResultsPanel gates={gate_results} allPassed={summary.all_gates_passed} />
+
+      {/* Track Trade Modal */}
+      {ticker && evaluationId && (
+        <TrackTradeModal
+          isOpen={showTrackModal}
+          onClose={() => setShowTrackModal(false)}
+          ticker={ticker}
+          evaluationId={evaluationId}
+          askPrice={evaluation.ask ?? evaluation.mid ?? 0}
+          optionTicker={evaluation.option_ticker ?? ''}
+        />
+      )}
     </div>
   )
 }

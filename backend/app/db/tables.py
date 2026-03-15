@@ -19,6 +19,7 @@ from app.core.schemas import (
     PillarScore,
     PipelineRun,
     Policy,
+    RealTrade,
     StageEvent,
     TradeThesis,
 )
@@ -44,6 +45,7 @@ PAPER_SNAPSHOTS_TABLE = "paper-snapshots"
 CALIBRATION_REPORTS_TABLE = "calibration-reports"
 SCAN_STATUS_TABLE = "scan-status"
 SP500_TICKERS_TABLE = "sp500-tickers"
+REAL_TRADES_TABLE = "real-trades"
 
 
 class PolicyTable:
@@ -1869,3 +1871,208 @@ class ScanStatusTable:
         started_at = data.get("started_at", datetime.now(timezone.utc).isoformat())
         item["SK"] = f"{started_at}#{run_id}"
         await db.put_item(ScanStatusTable.TABLE, item)
+
+
+class RealTradeTable:
+    """Operations for the real-trades table.
+
+    Stores manually tracked real trades with full evaluation snapshots.
+    PK=TRADE#{status}, SK={tracked_at}#{trade_id}
+    GSI1: TICKER#{ticker} for per-ticker queries
+    GSI2: EVAL#{evaluation_id} for dedup
+    """
+
+    TABLE = REAL_TRADES_TABLE
+
+    @staticmethod
+    def _build_keys(trade: RealTrade) -> dict[str, str]:
+        """Build PK/SK/GSI keys for a trade."""
+        status = getattr(trade.status, "value", trade.status)
+        return {
+            "PK": f"TRADE#{status}",
+            "SK": f"{trade.tracked_at}#{trade.trade_id}",
+            "GSI1PK": f"TICKER#{trade.snapshot.underlying_ticker}",
+            "GSI1SK": trade.tracked_at,
+            "GSI2PK": f"EVAL#{trade.snapshot.evaluation_id}",
+            "GSI2SK": trade.tracked_at,
+        }
+
+    @staticmethod
+    def _strip_keys(item: dict[str, Any]) -> dict[str, Any]:
+        """Remove DynamoDB key attributes from an item."""
+        for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+            item.pop(key, None)
+        return item
+
+    @staticmethod
+    async def put(trade: RealTrade) -> None:
+        """Store a real trade."""
+        db = get_dynamodb()
+        item = trade.to_dynamodb_item()
+        item.update(RealTradeTable._build_keys(trade))
+        await db.put_item(RealTradeTable.TABLE, item)
+
+    @staticmethod
+    async def get_by_evaluation_id(evaluation_id: str) -> Optional[dict[str, Any]]:
+        """Check if an evaluation is already tracked (dedup via GSI2).
+
+        Returns:
+            Trade item dict if found, None otherwise
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            RealTradeTable.TABLE,
+            f"EVAL#{evaluation_id}",
+            index_name="GSI2",
+            limit=1,
+        )
+        if items:
+            return RealTradeTable._strip_keys(items[0])
+        return None
+
+    @staticmethod
+    async def list_by_status(
+        status: str,
+        limit: int = 50,
+        scan_forward: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List trades by status (OPEN or CLOSED), most recent first."""
+        db = get_dynamodb()
+        items = await db.query(
+            RealTradeTable.TABLE,
+            f"TRADE#{status}",
+            limit=limit,
+            scan_forward=scan_forward,
+        )
+        return [RealTradeTable._strip_keys(item) for item in items]
+
+    @staticmethod
+    async def list_open(limit: int = 50) -> list[dict[str, Any]]:
+        """List open trades."""
+        return await RealTradeTable.list_by_status("OPEN", limit=limit)
+
+    @staticmethod
+    async def list_closed(limit: int = 100) -> list[dict[str, Any]]:
+        """List closed trades."""
+        return await RealTradeTable.list_by_status("CLOSED", limit=limit)
+
+    @staticmethod
+    async def list_by_ticker(ticker: str, limit: int = 50) -> list[dict[str, Any]]:
+        """List all trades for a ticker via GSI1."""
+        db = get_dynamodb()
+        items = await db.query(
+            RealTradeTable.TABLE,
+            f"TICKER#{ticker}",
+            index_name="GSI1",
+            limit=limit,
+            scan_forward=False,
+        )
+        return [RealTradeTable._strip_keys(item) for item in items]
+
+    @staticmethod
+    async def get_by_id(trade_id: str) -> Optional[dict[str, Any]]:
+        """Find a trade by trade_id (searches OPEN then CLOSED)."""
+        db = get_dynamodb()
+        # Search open trades first
+        for status in ["OPEN", "CLOSED"]:
+            items = await db.query(
+                RealTradeTable.TABLE,
+                f"TRADE#{status}",
+                limit=100,
+                scan_forward=False,
+            )
+            for item in items:
+                if item.get("trade_id") == trade_id:
+                    return RealTradeTable._strip_keys(item)
+        return None
+
+    @staticmethod
+    async def close(
+        trade_id: str,
+        tracked_at: str,
+        exit_price: float,
+        exit_reason: str,
+        exit_notes: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Close a trade: delete from OPEN, write to CLOSED.
+
+        Writes CLOSED first, then deletes OPEN (safe ordering).
+
+        Args:
+            trade_id: The trade to close
+            tracked_at: The tracked_at timestamp (needed for SK)
+            exit_price: The exit price
+            exit_reason: Exit reason string
+            exit_notes: Optional exit notes
+
+        Returns:
+            The closed trade item dict
+        """
+        db = get_dynamodb()
+
+        # Read the open trade
+        open_pk = "TRADE#OPEN"
+        open_sk = f"{tracked_at}#{trade_id}"
+        item = await db.get_item(RealTradeTable.TABLE, open_pk, open_sk)
+        if not item:
+            raise ValueError(f"Open trade not found: {trade_id}")
+
+        RealTradeTable._strip_keys(item)
+
+        # Compute P&L
+        entry_price = float(item["entry_price"])
+        quantity = int(item.get("quantity", 1))
+        realized_pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+        realized_pnl_dollars = (exit_price - entry_price) * quantity * 100
+
+        # Update fields
+        now = datetime.now(timezone.utc).isoformat()
+        item["exit_price"] = exit_price
+        item["exit_date"] = now[:10]
+        item["exit_reason"] = exit_reason
+        item["exit_notes"] = exit_notes
+        item["realized_pnl_pct"] = round(realized_pnl_pct, 2)
+        item["realized_pnl_dollars"] = round(realized_pnl_dollars, 2)
+        item["status"] = "CLOSED"
+        item["closed_at"] = now
+
+        # Convert floats to Decimal for DynamoDB
+        from app.core.schemas import OSSBaseModel
+
+        item = OSSBaseModel._convert_floats_to_decimal(item)
+
+        # STEP 1: Write CLOSED first (safe — creates duplicate at worst)
+        closed_item = dict(item)
+        closed_item["PK"] = "TRADE#CLOSED"
+        closed_item["SK"] = f"{tracked_at}#{trade_id}"
+        ticker = item.get("snapshot", {}).get("underlying_ticker", "UNKNOWN")
+        eval_id = item.get("snapshot", {}).get("evaluation_id", "UNKNOWN")
+        closed_item["GSI1PK"] = f"TICKER#{ticker}"
+        closed_item["GSI1SK"] = tracked_at
+        closed_item["GSI2PK"] = f"EVAL#{eval_id}"
+        closed_item["GSI2SK"] = tracked_at
+        await db.put_item(RealTradeTable.TABLE, closed_item)
+
+        # STEP 2: Delete from OPEN
+        await db.delete_item(RealTradeTable.TABLE, open_pk, f"{tracked_at}#{trade_id}")
+
+        return RealTradeTable._strip_keys(item)
+
+    @staticmethod
+    async def count_by_status(status: str) -> int:
+        """Count trades by status."""
+        db = get_dynamodb()
+        table = db.get_table(RealTradeTable.TABLE)
+        count = 0
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": f"TRADE#{status}"},
+            "Select": "COUNT",
+        }
+        while True:
+            response = table.query(**query_kwargs)
+            count += response.get("Count", 0)
+            if "LastEvaluatedKey" not in response:
+                break
+            query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        return count

@@ -1,11 +1,12 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Bell, Settings, Scan, Brain, Crosshair, TrendingUp } from 'lucide-react'
+import { Activity, Bell, Settings, Scan, Brain, Crosshair, TrendingUp, Wallet } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
-{ path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
+  { path: '/opportunities', label: 'Opportunities', shortLabel: 'Opps', icon: Crosshair },
   { path: '/pipeline', label: 'Pipeline', shortLabel: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', shortLabel: 'Paper', icon: TrendingUp },
+  { path: '/trades', label: 'My Trades', shortLabel: 'Trades', icon: Wallet },
   { path: '/intelligence', label: 'Intelligence', shortLabel: 'Intel', icon: Brain },
   { path: '/alerts', label: 'Alerts', shortLabel: 'Alerts', icon: Bell },
   { path: '/config', label: 'Policy', shortLabel: 'Policy', icon: Settings },

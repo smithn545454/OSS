@@ -983,4 +983,105 @@ export function useTestAlert() {
   })
 }
 
+// ============================================================================
+// Real Trade Tracking Hooks
+// ============================================================================
 
+export function useTrackTrade() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: {
+      ticker: string
+      evaluation_id: string
+      entry_price: number
+      quantity: number
+      entry_notes?: string
+      conviction_score?: number
+    }) => api.trackTrade(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+    },
+  })
+}
+
+export function useIsTradeTracked(evaluationId: string) {
+  return useQuery({
+    queryKey: ['trades', 'tracked', evaluationId] as const,
+    queryFn: () => api.isTradeTracked(evaluationId),
+    enabled: !!evaluationId,
+    staleTime: 30000,
+  })
+}
+
+export function useTrades(params: {
+  status?: string
+  ticker?: string
+  limit?: number
+} = {}) {
+  return useQuery({
+    queryKey: ['trades', 'list', params] as const,
+    queryFn: () => api.listTrades(params),
+    staleTime: 15000,
+  })
+}
+
+export function useTrade(tradeId: string) {
+  return useQuery({
+    queryKey: ['trades', tradeId] as const,
+    queryFn: () => api.getTrade(tradeId),
+    enabled: !!tradeId,
+  })
+}
+
+export function useCloseTrade() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tradeId,
+      ...params
+    }: {
+      tradeId: string
+      exit_price: number
+      exit_reason: string
+      exit_notes?: string
+    }) => api.closeTrade(tradeId, params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+    },
+  })
+}
+
+export function useTradeStats() {
+  return useQuery({
+    queryKey: ['trades', 'stats'] as const,
+    queryFn: api.getTradeStats,
+    staleTime: 30000,
+  })
+}
+
+export function useTriggerTradeAnalysis() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.triggerTradeAnalysis(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trades', 'analysis'] })
+    },
+  })
+}
+
+export function useLatestTradeAnalysis() {
+  return useQuery({
+    queryKey: ['trades', 'analysis', 'latest'] as const,
+    queryFn: api.getLatestTradeAnalysis,
+    staleTime: 30000,
+  })
+}
+
+export function useTradeAnalysis(analysisId: string, polling = false) {
+  return useQuery({
+    queryKey: ['trades', 'analysis', analysisId] as const,
+    queryFn: () => api.getTradeAnalysis(analysisId),
+    enabled: !!analysisId,
+    refetchInterval: polling ? 3000 : false,
+  })
+}

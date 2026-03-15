@@ -9,6 +9,8 @@ import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
 import Intelligence from './pages/Intelligence'
 import PaperTrading from './pages/PaperTrading'
+import MyTrades from './pages/MyTrades'
+import TradeDetail from './pages/TradeDetail'
 import AlertsConfig from './pages/AlertsConfig'
 import Backtesting from './pages/Backtesting'
 import Opps from './pages/Opps'
@@ -69,6 +71,8 @@ function App() {
         <Route path="calibration" element={<Calibration />} />
         <Route path="intelligence" element={<Intelligence />} />
         <Route path="paper-trading" element={<PaperTrading />} />
+        <Route path="trades" element={<MyTrades />} />
+        <Route path="trades/:tradeId" element={<TradeDetail />} />
         <Route path="alerts" element={<AlertsConfig />} />
         <Route path="backtesting" element={<Backtesting />} />
         <Route path="config" element={<PolicyConfig />} />

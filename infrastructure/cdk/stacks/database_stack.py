@@ -429,6 +429,39 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
+        # 17. Real trades table (manual trade tracking with full evaluation snapshots)
+        self.real_trades_table = dynamodb.Table(
+            self,
+            "RealTradesTable",
+            table_name=f"{self.table_prefix}-real-trades",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.real_trades_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+        self.real_trades_table.add_global_secondary_index(
+            index_name="GSI2",
+            partition_key=dynamodb.Attribute(
+                name="GSI2PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI2SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         # Collect all tables for permissions
         self.all_tables = [
             self.policies_table,
@@ -449,6 +482,7 @@ class DatabaseStack(Stack):
             self.backtest_pending_trades_table,
             self.backtest_insights_table,
             self.calibration_reports_table,
+            self.real_trades_table,
         ]
 
         # Outputs

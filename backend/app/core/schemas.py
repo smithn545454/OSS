@@ -103,6 +103,26 @@ class ExitReason(str, Enum):
     MANUAL = "MANUAL"
 
 
+class TradeExitReason(str, Enum):
+    """Real trade exit reasons."""
+
+    PROFIT_TARGET = "PROFIT_TARGET"
+    STOP_LOSS = "STOP_LOSS"
+    TIME_EXIT = "TIME_EXIT"
+    TRAILING_STOP = "TRAILING_STOP"
+    EXPIRATION = "EXPIRATION"
+    THESIS_INVALIDATED = "THESIS_INVALIDATED"
+    MANUAL = "MANUAL"
+    OTHER = "OTHER"
+
+
+class TradeStatus(str, Enum):
+    """Real trade status."""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
 class PositionStatus(str, Enum):
     """Paper position status."""
 
@@ -1295,6 +1315,130 @@ class GetRunDetailResponse(OSSBaseModel):
 
     run: PipelineRunListItem
     data: PipelineMonitorData
+
+
+# ============================================================================
+# Real Trade Tracking (Manual Trade Journal)
+# ============================================================================
+
+
+class EvaluationSnapshot(OSSBaseModel):
+    """Point-in-time snapshot of ALL evaluation detail data.
+
+    Captured when a user tracks a real trade. Contains every field from the
+    Evaluation Detail page, denormalized into a single document for
+    self-contained LLM analysis.
+    """
+
+    # Core evaluation fields
+    evaluation_id: str
+    opportunity_id: str
+    underlying_ticker: str
+    option_ticker: str
+    option_type: str
+    strike: float
+    expiration_date: str
+    dte: int
+    dte_bucket: str
+    underlying_price: float
+    moneyness_pct: float
+    bid: float
+    ask: float
+    mid: float
+    spread_abs: float
+    spread_pct: float
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    iv: float
+    open_interest: int
+    volume: int
+    oi_5d_change_pct: Optional[float] = None
+    breakeven_price: float
+    required_move_pct: float
+    expected_move_pct: float
+    feasibility_ratio: float
+    time_adjusted_feasibility: float
+    rank_score: float
+    policy_version: str
+    policy_hash: str
+    scanner_source: Optional[str] = None
+    scanner_metrics: Optional[dict[str, Any]] = None
+    trigger_reasons: Optional[list[str]] = None
+    evaluated_at: str
+
+    # Decision fields
+    verdict: str
+    quality_tier: Optional[str] = None
+    final_score: float
+    directional_score: float
+    volatility_score: float
+    structure_score: float
+    primary_reason_code: str
+    supporting_reason_codes: list[str]
+    failed_gates: list[str]
+    concentration_warnings: list[str] = Field(default_factory=list)
+
+    # Pillar scores (full contributor detail)
+    pillar_scores: list[dict[str, Any]]
+
+    # Gate results (full detail)
+    gate_results: list[dict[str, Any]]
+
+    # Scanner triggers
+    scanner_triggers: list[dict[str, Any]]
+
+    # Feature values
+    features: dict[str, Any] = Field(default_factory=dict)
+
+    # Trade thesis (if exists)
+    thesis: Optional[dict[str, Any]] = None
+
+    # Matched setup rules
+    matched_rules: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Computed scores
+    theta_adjusted_ev: Optional[float] = None
+    conviction_score: Optional[float] = None
+    company_name: Optional[str] = None
+
+
+class RealTrade(OSSBaseModel):
+    """A real trade manually tracked by the user.
+
+    Contains the full evaluation snapshot (denormalized) plus
+    actual execution details and outcome tracking.
+    """
+
+    model_config = ConfigDict(frozen=False, use_enum_values=True)
+
+    trade_id: str = Field(default_factory=lambda: str(uuid4()))
+
+    # Execution details (provided by user at track time)
+    entry_price: float
+    quantity: int = 1
+    entry_notes: Optional[str] = None
+
+    # Exit details (updated later)
+    exit_price: Optional[float] = None
+    exit_date: Optional[str] = None
+    exit_reason: Optional[TradeExitReason] = None
+    exit_notes: Optional[str] = None
+
+    # Computed P&L (set on close)
+    realized_pnl_pct: Optional[float] = None
+    realized_pnl_dollars: Optional[float] = None
+
+    # Status tracking
+    status: TradeStatus = TradeStatus.OPEN
+    tracked_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    closed_at: Optional[str] = None
+
+    # The full evaluation snapshot
+    snapshot: EvaluationSnapshot
 
 
 # ============================================================================

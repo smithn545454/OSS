@@ -487,6 +487,15 @@ def moto_dynamodb():
         # Backtest insights: simple PK/SK
         db.create_table(TableName=f"{table_prefix}-backtest-insights", **pk_sk_schema)
 
+        # Real trades: GSI1 (ticker) + GSI2 (evaluation_id dedup)
+        db.create_table(
+            TableName=f"{table_prefix}-real-trades",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs + gsi2_attrs,
+            GlobalSecondaryIndexes=gsi1 + gsi2,
+            BillingMode="PAY_PER_REQUEST",
+        )
+
         # Earnings cache: ticker-keyed (no PK/SK pattern)
         db.create_table(
             TableName=f"{table_prefix}-earnings-cache",

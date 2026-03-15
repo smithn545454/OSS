@@ -880,5 +880,86 @@ export async function sendTestAlert(
   })
 }
 
+// ============================================================================
+// Real Trade Tracking API
+// ============================================================================
+
+export async function trackTrade(params: {
+  ticker: string
+  evaluation_id: string
+  entry_price: number
+  quantity: number
+  entry_notes?: string
+  conviction_score?: number
+}): Promise<import('./types').TrackTradeResponse> {
+  return fetchApi('/api/trades', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function listTrades(params: {
+  status?: string
+  ticker?: string
+  limit?: number
+} = {}): Promise<import('./types').TradeListResponse> {
+  const qs = new URLSearchParams()
+  if (params.status) qs.set('status', params.status)
+  if (params.ticker) qs.set('ticker', params.ticker)
+  if (params.limit) qs.set('limit', String(params.limit))
+  const query = qs.toString()
+  return fetchApi(`/api/trades${query ? `?${query}` : ''}`)
+}
+
+export async function getTrade(tradeId: string): Promise<import('./types').RealTrade> {
+  return fetchApi(`/api/trades/${encodeURIComponent(tradeId)}`)
+}
+
+export async function closeTrade(
+  tradeId: string,
+  params: { exit_price: number; exit_reason: string; exit_notes?: string }
+): Promise<import('./types').RealTrade> {
+  return fetchApi(`/api/trades/${encodeURIComponent(tradeId)}/close`, {
+    method: 'PATCH',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function getTradeStats(): Promise<import('./types').TradeStatsResponse> {
+  return fetchApi('/api/trades/stats')
+}
+
+export async function isTradeTracked(
+  evaluationId: string
+): Promise<{ tracked: boolean; trade_id?: string }> {
+  try {
+    const trades = await fetchApi<import('./types').TradeListResponse>('/api/trades?limit=500')
+    const match = trades.trades.find(
+      (t) => t.snapshot?.evaluation_id === evaluationId
+    )
+    return match ? { tracked: true, trade_id: match.trade_id } : { tracked: false }
+  } catch {
+    return { tracked: false }
+  }
+}
+
+export async function triggerTradeAnalysis(): Promise<{
+  analysis_id: string
+  status: string
+  total_trades?: number
+}> {
+  return fetchApi('/api/trades/analysis', { method: 'POST' })
+}
+
+export async function getLatestTradeAnalysis(): Promise<Record<string, unknown>> {
+  return fetchApi('/api/trades/analysis/latest')
+}
+
+export async function getTradeAnalysis(
+  analysisId: string
+): Promise<Record<string, unknown>> {
+  return fetchApi(`/api/trades/analysis/${encodeURIComponent(analysisId)}`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }
