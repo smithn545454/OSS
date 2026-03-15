@@ -937,3 +937,50 @@ export function useTradeContext(params: {
     staleTime: 10 * 60 * 1000,
   })
 }
+
+// ============================================================================
+// Alerts
+// ============================================================================
+
+export function useAlertConfig() {
+  return useQuery({
+    queryKey: ['alerts', 'config'] as const,
+    queryFn: () => api.getAlertConfig(),
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useUpdateAlertConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (config: Partial<import('@/lib/types').AlertConfig>) =>
+      api.updateAlertConfig(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] })
+    },
+  })
+}
+
+export function useAlertPreview(days: number = 3) {
+  return useQuery({
+    queryKey: ['alerts', 'preview', days] as const,
+    queryFn: () => api.getAlertPreview(days),
+    staleTime: 60 * 1000,
+  })
+}
+
+export function useAlertHistory(date?: string) {
+  return useQuery({
+    queryKey: ['alerts', 'history', date] as const,
+    queryFn: () => api.getAlertHistory(date),
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useTestAlert() {
+  return useMutation({
+    mutationFn: (channelIndex?: number) => api.sendTestAlert(channelIndex),
+  })
+}
+
+

@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
+from app.api.routes import alerts as alerts_routes
 from app.api.routes import backtest as backtest_routes
 from app.api.routes import calibration as calibration_routes
 from app.api.routes import evaluations as evaluations_routes
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_routes.thesis_router, prefix="/api/thesis", tags=["Thesis"])
     app.include_router(observability_routes.router, prefix="/api/observability", tags=["Observability"])
     app.include_router(market_routes.router, prefix="/api/market", tags=["Market"])
+    app.include_router(alerts_routes.router, prefix="/api/alerts", tags=["Alerts"])
     app.include_router(backtest_routes.router, prefix="/api/backtest", tags=["Backtest"])
 
     return app

@@ -838,5 +838,47 @@ export async function getTradeContext(params: {
   return fetchApi(`/api/paper-trading/trade-context?${searchParams}`)
 }
 
+// ============================================================================
+// Alerts
+// ============================================================================
+
+export async function getAlertConfig(): Promise<import('./types').AlertConfig> {
+  return fetchApi('/api/alerts/config')
+}
+
+export async function updateAlertConfig(
+  config: Partial<import('./types').AlertConfig>,
+): Promise<import('./types').AlertConfig> {
+  return fetchApi('/api/alerts/config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export async function getAlertPreview(
+  days: number = 3,
+): Promise<import('./types').AlertPreview> {
+  return fetchApi(`/api/alerts/preview?days=${days}`)
+}
+
+export async function getAlertHistory(
+  date?: string,
+  limit: number = 50,
+): Promise<{ entries: import('./types').AlertHistoryEntry[]; count: number; date: string | null }> {
+  const params = new URLSearchParams()
+  if (date) params.set('date', date)
+  params.set('limit', String(limit))
+  return fetchApi(`/api/alerts/history?${params}`)
+}
+
+export async function sendTestAlert(
+  channelIndex?: number,
+): Promise<{ success: boolean; message: string }> {
+  return fetchApi('/api/alerts/test', {
+    method: 'POST',
+    body: JSON.stringify({ channel_index: channelIndex }),
+  })
+}
+
 // Export the ApiError for error handling
 export { ApiError }

@@ -821,6 +821,26 @@ class ScannerOrchestrator:
                         metadata={"status": "skipped", "reason": "missing_prerequisites"},
                     )
 
+                # ================================================================
+                # SLACK ALERTS (side effect — non-blocking, never affects pipeline)
+                # ================================================================
+                if not streaming and evaluations and decisions:
+                    try:
+                        await _fire_slack_alerts(
+                            evaluations=evaluations,
+                            decisions=decisions,
+                            pillar_results=(
+                                pillar_results if 'pillar_results' in dir() else {}
+                            ),
+                            gate_evaluations=(
+                                gate_evaluations if 'gate_evaluations' in dir() else {}
+                            ),
+                            filtered_opportunities=filtered_opportunities,
+                            theses=theses if 'theses' in dir() else [],
+                        )
+                    except Exception as e:
+                        logger.warning(f"Slack alerts failed (non-blocking): {e}")
+
                 # Mark pipeline run as complete (batch path only)
                 if not streaming:
                     await self._pipeline.complete_run(run_id, status="completed")
@@ -1792,3 +1812,164 @@ async def run_scanner_only(
     """
     orchestrator = ScannerOrchestrator()
     return await orchestrator.run_scan(tickers=tickers, run_full_pipeline=False)
+
+
+async def _fire_slack_alerts(
+    evaluations: Sequence[Evaluation],
+    decisions: dict[str, Decision],
+    pillar_results: dict[str, list[Any]],
+    gate_evaluations: dict[str, Any],
+    filtered_opportunities: list[Opportunity],
+    theses: list[TradeThesis],
+) -> None:
+    """Send Slack alerts for high-conviction APPROVE evaluations.
+
+    This is a pipeline side effect — failures are logged but never
+    affect pipeline determinism or outputs.
+    """
+    from app.api.routes.evaluations import calculate_gate_margin, calculate_theta_adjusted_ev
+    from app.scoring.conviction import calculate_conviction_score, determine_urgency
+    from app.services.slack import get_slack_service
+
+    service = get_slack_service()
+    config = await service._ensure_config()
+    if not config.get("enabled", False):
+        return
+
+    # Build lookup: opportunity_id → scanner types
+    opp_scanners: dict[str, list[str]] = {}
+    for opp in filtered_opportunities:
+        scanner_types = [t.scanner_type.value for t in opp.scanner_triggers]
+        opp_scanners[opp.opportunity_id] = scanner_types
+
+    # Build lookup: evaluation_id → trade thesis text
+    thesis_map: dict[str, str] = {}
+    for t in theses:
+        thesis_map[t.evaluation_id] = t.thesis
+
+    # Build lookup: evaluation_id → matched rule IDs/names
+    rule_ids_map: dict[str, list[str]] = {}
+    rule_names_map: dict[str, list[str]] = {}
+    # (Matched rules are tracked on PaperPosition, but we can also
+    #  check in real-time against active rules)
+    try:
+        from app.paper_trading.pattern_discovery import list_setup_rules
+        from app.paper_trading.rule_matcher import match_rules as do_match_rules
+
+        all_rules = await list_setup_rules()
+        active_rules = [r for r in all_rules if r.get("is_active", False)]
+
+        if active_rules:
+            for ev in evaluations:
+                decision = decisions.get(ev.evaluation_id)
+                if not decision:
+                    continue
+                scanners = opp_scanners.get(ev.opportunity_id, [])
+                matched = do_match_rules(
+                    active_rules,
+                    ev.model_dump(),
+                    decision.model_dump(),
+                    scanners,
+                )
+                if matched:
+                    rule_ids_map[ev.evaluation_id] = [
+                        r["rule_id"] for r in matched
+                    ]
+                    rule_names_map[ev.evaluation_id] = [
+                        r.get("name", "") for r in matched
+                    ]
+    except Exception as e:
+        logger.debug(f"Rule matching for alerts skipped: {e}")
+
+    sent_count = 0
+    checked_count = 0
+    allowed_verdicts = config.get("verdicts", ["APPROVE"])
+
+    for ev in evaluations:
+        decision = decisions.get(ev.evaluation_id)
+        if not decision:
+            continue
+
+        verdict_str = (
+            decision.verdict.value
+            if hasattr(decision.verdict, "value")
+            else str(decision.verdict)
+        )
+        if verdict_str not in allowed_verdicts:
+            continue
+
+        checked_count += 1
+
+        # Get scanner types for this evaluation
+        scanner_types = opp_scanners.get(ev.opportunity_id, [])
+
+        # Get pillar scores
+        pillar_scores: dict[str, float] = {}
+        pr_list = pillar_results.get(ev.evaluation_id, [])
+        for pr in pr_list:
+            pillar_id = pr.pillar_id.value if hasattr(pr.pillar_id, "value") else str(pr.pillar_id)
+            pillar_scores[pillar_id] = pr.score
+
+        # Compute gate margin from gate results
+        gate_margin = 50.0
+        gate_eval = gate_evaluations.get(ev.evaluation_id)
+        if gate_eval and hasattr(gate_eval, "gate_results"):
+            gate_dicts = []
+            for gr in gate_eval.gate_results:
+                gate_dicts.append({
+                    "enabled": gr.enabled,
+                    "passed": gr.passed,
+                    "measured_value": gr.measured_value,
+                    "threshold_value": gr.threshold_value,
+                    "operator": gr.operator,
+                })
+            gate_margin = calculate_gate_margin(gate_dicts)
+
+        # Compute theta-adjusted EV
+        theta_ev = calculate_theta_adjusted_ev(
+            delta=ev.delta or 0,
+            theta=ev.theta or 0,
+            mid=ev.mid or 0,
+            iv=ev.iv or 0,
+            underlying_price=ev.underlying_price or 0,
+            dte=ev.dte or 0,
+        )
+
+        # Compute conviction score
+        result = calculate_conviction_score(
+            theta_adj_ev=theta_ev,
+            pillar_scores=pillar_scores,
+            gate_margin=gate_margin,
+            scanner_types=scanner_types,
+        )
+
+        urgency = determine_urgency(scanner_types)
+        convergence = len(scanner_types)
+        contract_id = ev.option_ticker or ev.evaluation_id
+
+        # Send alert (service handles should_alert checks internally)
+        success, _ = await service.send_alert(
+            ticker=ev.underlying_ticker,
+            strike=ev.strike,
+            option_type=ev.option_type,
+            expiration=ev.expiration_date,
+            conviction_score=result.total,
+            urgency=urgency,
+            convergence=convergence,
+            headline=None,
+            theta_adj_ev=theta_ev,
+            delta=ev.delta or 0,
+            premium=ev.mid or 0,
+            scanners=scanner_types,
+            contract_id=contract_id,
+            verdict=verdict_str,
+            evaluation_id=ev.evaluation_id,
+            trade_thesis=thesis_map.get(ev.evaluation_id),
+            matched_rule_ids=rule_ids_map.get(ev.evaluation_id, []),
+            matched_rule_names=rule_names_map.get(ev.evaluation_id, []),
+        )
+        if success:
+            sent_count += 1
+
+    if sent_count > 0:
+        logger.info(f"Sent {sent_count}/{checked_count} Slack alerts")

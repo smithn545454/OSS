@@ -1731,3 +1731,59 @@ export interface TradeContextResponse {
   summary: string
   confidence_flag: 'high_confidence' | 'moderate' | 'low_sample' | 'insufficient'
 }
+
+// ============================================================================
+// Alert Configuration
+// ============================================================================
+
+export interface WebhookChannel {
+  channel_name: string
+  url: string
+  url_masked?: string
+}
+
+export interface AlertConfig {
+  enabled: boolean
+  score_threshold: number
+  require_urgency_or_convergence: boolean
+  cooldown_minutes: number
+  daily_cap: number
+  quiet_hours_start: string
+  quiet_hours_end: string
+  webhook_channels: WebhookChannel[]
+  setup_rule_filter_ids: string[]
+  verdicts: Verdict[]
+  updated_at?: string
+}
+
+export interface AlertPreviewBreakdown {
+  totalEvaluations: number
+  belowScoreThreshold: number
+  failedUrgencyConvergence: number
+  noMatchingSetupRule: number
+  wouldAlert: number
+}
+
+export interface AlertPreview {
+  estimatedAlertsPerDay: number
+  daysAnalyzed: number
+  breakdown: AlertPreviewBreakdown
+}
+
+export interface AlertHistoryEntry {
+  contract_id: string
+  ticker: string
+  conviction_score: number
+  channel: string
+  status: 'sent' | 'failed'
+  timestamp: string
+}
+
+export interface SetupRule {
+  rule_id: string
+  name: string
+  criteria: Record<string, unknown>
+  is_active: boolean
+  mode: 'production' | 'test'
+  created_at: string
+}
