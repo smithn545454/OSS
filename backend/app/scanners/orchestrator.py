@@ -1967,6 +1967,10 @@ async def _fire_slack_alerts(
             trade_thesis=thesis_map.get(ev.evaluation_id),
             matched_rule_ids=rule_ids_map.get(ev.evaluation_id, []),
             matched_rule_names=rule_names_map.get(ev.evaluation_id, []),
+            pillar_scores=pillar_scores,
+            underlying_price=ev.underlying_price or 0,
+            gate_margin=gate_margin,
+            dte=ev.dte or 0,
         )
         if success:
             sent_count += 1

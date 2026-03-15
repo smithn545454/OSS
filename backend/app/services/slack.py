@@ -311,6 +311,11 @@ class SlackAlertService:
         evaluation_id: str | None = None,
         trade_thesis: str | None = None,
         matched_rules: list[str] | None = None,
+        pillar_scores: dict[str, float] | None = None,
+        underlying_price: float = 0,
+        gate_margin: float = 50,
+        dte: int = 0,
+        is_test: bool = False,
     ) -> dict[str, Any]:
         """Format Slack message with rich blocks.
 
@@ -323,66 +328,98 @@ class SlackAlertService:
             "patient": "\U0001f7e2",
         }
         urgency_emoji = urgency_map.get(urgency, "\u26aa")
+        urgency_label = urgency.replace("_", " ").title()
+        test_prefix = "[TEST] " if is_test else ""
 
         blocks: list[dict[str, Any]] = [
+            # Header
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"\U0001f3af High Conviction: {ticker} ${strike} {option_type}",
+                    "text": (
+                        f"\U0001f3af {test_prefix}High Conviction: "
+                        f"{ticker} ${strike} {option_type}"
+                    ),
                     "emoji": True,
                 },
             },
+            # Contract details
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Conviction:*\n{conviction_score:.0f}/100"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Urgency:*\n{urgency_emoji} {urgency.replace('_', ' ').title()}",
-                    },
-                    {"type": "mrkdwn", "text": f"*Expiration:*\n{expiration}"},
-                    {"type": "mrkdwn", "text": f"*Premium:*\n${premium:.2f}"},
-                ],
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4c4 *Contract*\n"
+                        f"Exp {expiration} \u00b7 Premium ${premium:.2f} \u00b7 "
+                        f"Delta {delta:.2f}\n"
+                        f"\u03b8-Adj EV: ${theta_adj_ev:.2f} \u00b7 DTE: {dte}"
+                    ),
+                },
             },
+            # Underlying
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Delta:*\n{delta:.2f}"},
-                    {"type": "mrkdwn", "text": f"*\u03b8-Adj EV:*\n${theta_adj_ev:.0f}"},
-                    {"type": "mrkdwn", "text": f"*Scanners:*\n{', '.join(scanners)}"},
-                ],
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4ca *Underlying: ${underlying_price:.2f}*\n"
+                        f"{', '.join(scanners)} \u00b7 {urgency_emoji} {urgency_label}"
+                    ),
+                },
             },
         ]
 
-        # Trade thesis (truncate to ~200 chars)
-        thesis_text = trade_thesis or headline
-        if thesis_text:
-            if len(thesis_text) > 200:
-                thesis_text = thesis_text[:197] + "..."
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"\U0001f4dd _{thesis_text}_"},
-                }
-            )
+        # Scores section
+        pillars = pillar_scores or {}
+        dir_score = pillars.get("DIRECTIONAL", 0)
+        vol_score = pillars.get("VOLATILITY", 0)
+        str_score = pillars.get("STRUCTURE", 0)
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4c8 *Scores*\n"
+                        f"Conviction: {conviction_score:.0f}/100\n"
+                        f"Directional: {dir_score:.0f} \u00b7 "
+                        f"Volatility: {vol_score:.0f} \u00b7 "
+                        f"Structure: {str_score:.0f}\n"
+                        f"Gate Margin: {gate_margin:.1f}"
+                    ),
+                },
+            }
+        )
 
-        # Matched rules
+        # Matched setup rules
         if matched_rules:
             rules_text = ", ".join(matched_rules[:5])
             blocks.append(
                 {
-                    "type": "context",
-                    "elements": [
-                        {"type": "mrkdwn", "text": f"\U0001f3f7\ufe0f *Rules:* {rules_text}"}
-                    ],
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"\U0001f3f7\ufe0f *Setup Rules Matched*\n{rules_text}",
+                    },
+                }
+            )
+
+        # Trade thesis (truncate to ~500 chars)
+        thesis_text = trade_thesis or headline
+        if thesis_text:
+            if len(thesis_text) > 500:
+                thesis_text = thesis_text[:497] + "..."
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"\U0001f4dd *Trade Thesis*\n{thesis_text}"},
                 }
             )
 
         blocks.append({"type": "divider"})
 
         # View Details button + timestamp
-        detail_url = None
         if evaluation_id:
             detail_url = f"{FRONTEND_URL}/evaluation/{ticker}/{evaluation_id}"
             blocks.append(
@@ -435,6 +472,10 @@ class SlackAlertService:
         trade_thesis: str | None = None,
         matched_rule_ids: list[str] | None = None,
         matched_rule_names: list[str] | None = None,
+        pillar_scores: dict[str, float] | None = None,
+        underlying_price: float = 0,
+        gate_margin: float = 50,
+        dte: int = 0,
     ) -> tuple[bool, str | None]:
         """Send a Slack alert for a high-conviction opportunity.
 
@@ -470,6 +511,10 @@ class SlackAlertService:
             evaluation_id=evaluation_id,
             trade_thesis=trade_thesis,
             matched_rules=matched_rule_names,
+            pillar_scores=pillar_scores,
+            underlying_price=underlying_price,
+            gate_margin=gate_margin,
+            dte=dte,
         )
 
         # Send to all configured webhooks
@@ -521,7 +566,10 @@ class SlackAlertService:
         return True, None
 
     async def send_test_alert(self, channel_index: int | None = None) -> tuple[bool, str | None]:
-        """Send a test alert to verify webhook configuration."""
+        """Send a test alert using the top conviction APPROVE evaluation.
+
+        Falls back to a generic message if no evaluations are available.
+        """
         config = await self._ensure_config()
         webhooks = self._get_webhook_urls()
 
@@ -532,43 +580,11 @@ class SlackAlertService:
         if channel_index is not None and 0 <= channel_index < len(webhooks):
             targets = [webhooks[channel_index]]
 
-        message = {
-            "blocks": [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "\u2705 OSS Alert Test",
-                        "emoji": True,
-                    },
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": (
-                            "This is a test alert from the Option Scanner System.\n"
-                            f"Score threshold: {config.get('score_threshold', 75)}\n"
-                            f"Daily cap: {config.get('daily_cap', 10)}\n"
-                            f"Quiet hours: {config.get('quiet_hours_start', '22:00')}"
-                            f" - {config.get('quiet_hours_end', '08:00')} UTC"
-                        ),
-                    },
-                },
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": (
-                                "\u23f0 "
-                                f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
-                            ),
-                        }
-                    ],
-                },
-            ]
-        }
+        # Try to build a realistic message from the top conviction evaluation
+        message = await self._build_test_message_from_eval()
+        if message is None:
+            # Fallback: generic message if no evaluations available
+            message = self._build_generic_test_message(config)
 
         sent = 0
         for webhook in targets:
@@ -586,6 +602,207 @@ class SlackAlertService:
         if sent == 0:
             return False, "All test sends failed"
         return True, None
+
+    async def _build_test_message_from_eval(self) -> dict[str, Any] | None:
+        """Build a realistic test alert from the top conviction APPROVE evaluation."""
+        import asyncio
+
+        try:
+            from app.api.routes.evaluations import (
+                calculate_gate_margin,
+                calculate_theta_adjusted_ev,
+            )
+            from app.db.tables import (
+                EvaluationTable,
+                GateResultTable,
+                PillarScoreTable,
+                TradeThesisTable,
+            )
+            from app.scoring.conviction import (
+                calculate_conviction_score,
+                determine_urgency,
+            )
+
+            # Fetch recent APPROVE evaluations
+            items = await EvaluationTable.list_by_verdict("APPROVE", limit=20)
+            if not items:
+                return None
+
+            # Enrich and score each evaluation
+            best_score = -1.0
+            best_message: dict[str, Any] | None = None
+
+            for item in items:
+                evaluation_id = item.get("evaluation_id", "")
+                if not evaluation_id:
+                    continue
+
+                try:
+                    pillar_scores_raw, gate_results_raw, thesis = await asyncio.gather(
+                        PillarScoreTable.list_by_evaluation(evaluation_id),
+                        GateResultTable.list_by_evaluation(evaluation_id),
+                        TradeThesisTable.get_by_evaluation_id(evaluation_id),
+                    )
+                except Exception:
+                    continue
+
+                # Build pillar scores dict
+                pillar_scores: dict[str, float] = {}
+                for ps in pillar_scores_raw:
+                    pid = (
+                        ps.pillar_id.value
+                        if hasattr(ps.pillar_id, "value")
+                        else str(ps.pillar_id)
+                    )
+                    pillar_scores[pid] = ps.score
+
+                # Build gate results for margin calculation
+                gate_dicts = [
+                    {
+                        "enabled": gr.enabled,
+                        "passed": gr.passed,
+                        "measured_value": gr.measured_value,
+                        "threshold_value": gr.threshold_value,
+                        "operator": (
+                            gr.operator.value
+                            if hasattr(gr.operator, "value")
+                            else str(gr.operator)
+                        ),
+                    }
+                    for gr in gate_results_raw
+                ]
+                gate_margin = calculate_gate_margin(gate_dicts)
+
+                # Calculate theta-adjusted EV
+                theta_ev = calculate_theta_adjusted_ev(
+                    delta=item.get("delta", 0) or 0,
+                    theta=item.get("theta", 0) or 0,
+                    mid=item.get("mid", 0) or 0,
+                    iv=item.get("iv", 0) or 0,
+                    underlying_price=item.get("underlying_price", 0) or 0,
+                    dte=item.get("dte", 30) or 30,
+                )
+
+                # Get scanner types
+                scanner_source = item.get("scanner_source")
+                scanner_types = [scanner_source] if scanner_source else []
+
+                # Calculate conviction score
+                result = calculate_conviction_score(
+                    theta_adj_ev=theta_ev,
+                    pillar_scores=pillar_scores,
+                    gate_margin=gate_margin,
+                    scanner_types=scanner_types,
+                )
+
+                if result.total > best_score:
+                    best_score = result.total
+                    urgency = determine_urgency(scanner_types)
+
+                    # Get trade thesis text
+                    trade_thesis_text = None
+                    headline = None
+                    if thesis:
+                        trade_thesis_text = thesis.thesis if hasattr(thesis, "thesis") else None
+                        if hasattr(thesis, "setup_summary") and thesis.setup_summary:
+                            headline = thesis.setup_summary
+
+                    # Get matched rules
+                    matched_rule_names: list[str] = []
+                    try:
+                        from app.paper_trading.pattern_discovery import list_setup_rules
+                        from app.paper_trading.rule_matcher import (
+                            format_matched_rules,
+                            match_rules,
+                        )
+
+                        all_rules = await list_setup_rules()
+                        active_rules = [r for r in all_rules if r.get("is_active", False)]
+                        if active_rules:
+                            matched = match_rules(
+                                active_rules,
+                                item,
+                                item.get("decision", {}),
+                                scanner_types,
+                            )
+                            if matched:
+                                matched_rule_names = [
+                                    r.get("name", "") for r in format_matched_rules(matched)
+                                ]
+                    except Exception:
+                        pass
+
+                    best_message = self._format_message(
+                        ticker=item.get("underlying_ticker", "???"),
+                        strike=item.get("strike", 0),
+                        option_type=item.get("option_type", "CALL"),
+                        expiration=item.get("expiration_date", "N/A"),
+                        conviction_score=result.total,
+                        urgency=urgency,
+                        headline=headline,
+                        theta_adj_ev=theta_ev,
+                        delta=item.get("delta", 0) or 0,
+                        premium=item.get("mid", 0) or 0,
+                        scanners=scanner_types,
+                        evaluation_id=evaluation_id,
+                        trade_thesis=trade_thesis_text,
+                        matched_rules=matched_rule_names if matched_rule_names else None,
+                        pillar_scores=pillar_scores,
+                        underlying_price=item.get("underlying_price", 0) or 0,
+                        gate_margin=gate_margin,
+                        dte=item.get("dte", 0) or 0,
+                        is_test=True,
+                    )
+
+            return best_message
+
+        except Exception as e:
+            logger.warning(f"Failed to build realistic test alert: {e}")
+            return None
+
+    def _build_generic_test_message(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Build a generic test alert when no evaluations are available."""
+        return {
+            "blocks": [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "\u2705 OSS Alert Test — No Evaluations Available",
+                        "emoji": True,
+                    },
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            "Your webhook is working, but there are no recent APPROVE "
+                            "evaluations to preview.\n\n"
+                            "When the pipeline produces high-conviction opportunities, "
+                            "alerts will appear here with full contract details, "
+                            "pillar scores, and trade thesis.\n\n"
+                            f"*Config:* Score threshold {config.get('score_threshold', 75)} · "
+                            f"Daily cap {config.get('daily_cap', 10)} · "
+                            f"Quiet hours {config.get('quiet_hours_start', '22:00')}"
+                            f"–{config.get('quiet_hours_end', '08:00')} UTC"
+                        ),
+                    },
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"\u23f0 "
+                                f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+                            ),
+                        }
+                    ],
+                },
+            ]
+        }
 
 
 # Singleton instance
