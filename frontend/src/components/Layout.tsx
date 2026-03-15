@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Bell, Settings, Scan, Brain, Crosshair, TrendingUp, FlaskConical } from 'lucide-react'
+import { Activity, Bell, Settings, Scan, Brain, Crosshair, TrendingUp } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
@@ -7,7 +7,6 @@ const navItems = [
   { path: '/pipeline', label: 'Pipeline', shortLabel: 'Pipeline', icon: Activity },
   { path: '/paper-trading', label: 'Paper Trading', shortLabel: 'Paper', icon: TrendingUp },
   { path: '/intelligence', label: 'Intelligence', shortLabel: 'Intel', icon: Brain },
-  { path: '/backtesting', label: 'Backtesting', shortLabel: 'Backtest', icon: FlaskConical },
   { path: '/alerts', label: 'Alerts', shortLabel: 'Alerts', icon: Bell },
   { path: '/config', label: 'Policy', shortLabel: 'Policy', icon: Settings },
 ]
