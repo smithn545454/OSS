@@ -152,6 +152,18 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
               {evaluation.approvalCount}x scans
             </span>
           )}
+          {evaluation.matchedRules && evaluation.matchedRules.length > 0 && (
+            <span
+              title={evaluation.matchedRules.map(r => r.name).join(', ')}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-violet-400 bg-violet-400/10 rounded-full border border-violet-400/20 whitespace-nowrap"
+            >
+              {evaluation.matchedRules.length === 1
+                ? evaluation.matchedRules[0].name.length > 30
+                  ? evaluation.matchedRules[0].name.slice(0, 28) + '...'
+                  : evaluation.matchedRules[0].name
+                : `${evaluation.matchedRules.length} setup matches`}
+            </span>
+          )}
         </div>
       </div>
 
