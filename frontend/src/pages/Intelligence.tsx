@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEdgeBriefing } from '@/hooks/useApi'
 import type { DimensionStats, EdgeInsight } from '@/lib/types'
 import clsx from 'clsx'
@@ -356,6 +357,7 @@ function InsightsBanner({ insights }: { insights: EdgeInsight[] }) {
 // ---------------------------------------------------------------------------
 
 export default function Intelligence() {
+  usePageTitle('Intelligence')
   const [days, setDays] = useState(10)
   const { data, isLoading, error } = useEdgeBriefing(days)
 

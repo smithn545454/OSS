@@ -7,6 +7,7 @@
 
 import { useState } from 'react'
 import clsx from 'clsx'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { Clock, Sparkles, RefreshCw } from 'lucide-react'
 import FilterBar, { useFilterParams } from '@/components/paper-trading/FilterBar'
 import CompactSummaryBar from '@/components/paper-trading/CompactSummaryBar'
@@ -41,6 +42,7 @@ function formatLastSynced(iso: string | null | undefined): string {
 }
 
 export default function PaperTrading() {
+  usePageTitle('Paper Trading')
   const [filters, setFilters] = useFilterParams()
   const [activeTab, setActiveTab] = useState<TabId>('scanners')
 

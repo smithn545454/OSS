@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/usePageTitle'
 
 import { usePipelineMonitorRuns, usePipelineAggregate, usePipelineRunDetail } from '@/hooks/useApi'
 import type {
@@ -73,6 +74,7 @@ function hasAnyAnomaly(data: PipelineMonitorData | undefined): boolean {
 }
 
 export default function PipelineMonitor() {
+  usePageTitle('Pipeline')
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Initialize custom date range from URL params, then localStorage

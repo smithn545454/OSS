@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import {
   Bell,
   Save,
@@ -387,6 +388,7 @@ function AlertHistoryTable() {
 // ============================================================================
 
 export default function AlertsConfig() {
+  usePageTitle('Alerts')
   const { data: config, isLoading } = useAlertConfig()
   const updateConfig = useUpdateAlertConfig()
 

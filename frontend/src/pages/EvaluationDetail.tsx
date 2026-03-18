@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import {
   ArrowLeft,
   CheckCircle,
@@ -946,6 +947,10 @@ export default function EvaluationDetail() {
     ticker || '',
     evaluationId || ''
   )
+
+  const optionType = data?.evaluation?.option_type
+  const titleSuffix = optionType ? `${ticker} ${optionType} Evaluation Detail` : `${ticker} Evaluation`
+  usePageTitle(titleSuffix)
 
   const generateThesis = useGenerateThesis()
   const hasTriggeredThesis = useRef(false)

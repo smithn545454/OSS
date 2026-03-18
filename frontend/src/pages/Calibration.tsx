@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { 
-  Play, 
+import { usePageTitle } from '@/hooks/usePageTitle'
+import {
+  Play,
   CheckCircle, 
   XCircle, 
   AlertTriangle,
@@ -454,6 +455,7 @@ function ReportList({ reports, selectedReport, onSelectReport }: ReportListProps
 // ============================================================================
 
 export default function Calibration() {
+  usePageTitle('Calibration')
   const { data: reportsData, isLoading } = useCalibrationReports(10)
   const runCalibration = useRunCalibration()
   const approveSuggestion = useApproveSuggestion()

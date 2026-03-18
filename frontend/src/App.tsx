@@ -15,8 +15,10 @@ import AlertsConfig from './pages/AlertsConfig'
 import Backtesting from './pages/Backtesting'
 import Opps from './pages/Opps'
 import { useIsMobile } from './hooks/useIsMobile'
+import { usePageTitle } from './hooks/usePageTitle'
 
 function ResponsiveOpportunities() {
+  usePageTitle('Opportunities')
   const isMobile = useIsMobile()
   return isMobile ? <Opps /> : <Opportunities />
 }

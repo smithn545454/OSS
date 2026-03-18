@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
-import { 
+import { usePageTitle } from '@/hooks/usePageTitle'
+import {
   Check, 
   Clock, 
   ChevronDown, 
@@ -820,6 +821,7 @@ function setNestedValue(obj: PolicyConfigType, path: string, value: number): Pol
 }
 
 export default function PolicyConfig() {
+  usePageTitle('Policy')
   const { data: policiesData, isLoading: policiesLoading } = usePolicies()
   const { data: activePolicy, isLoading: activePolicyLoading } = useActivePolicy()
   const activateMutation = useActivatePolicy()

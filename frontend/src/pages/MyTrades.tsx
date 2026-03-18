@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Wallet, TrendingUp, TrendingDown, BarChart3, Brain } from 'lucide-react'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import clsx from 'clsx'
 import { useTrades, useTradeStats } from '@/hooks/useApi'
 import TradeCard from '@/components/trades/TradeCard'
@@ -8,6 +9,7 @@ import TradeAnalysisView from '@/components/trades/TradeAnalysisView'
 type Tab = 'open' | 'closed' | 'analysis'
 
 export default function MyTrades() {
+  usePageTitle('My Trades')
   const [activeTab, setActiveTab] = useState<Tab>('open')
   const { data: stats } = useTradeStats()
   const { data: tradesData, isLoading } = useTrades({

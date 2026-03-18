@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { FlaskConical } from 'lucide-react'
 import clsx from 'clsx'
 import DataStoreTab from '@/components/backtest/DataStoreTab'
@@ -17,6 +18,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id']
 
 export default function Backtesting() {
+  usePageTitle('Backtesting')
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab') as TabId | null
   const [activeTab, setActiveTab] = useState<TabId>(

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import {
   ArrowLeft,
   CheckCircle,
@@ -31,6 +32,9 @@ export default function TradeDetail() {
   const { tradeId } = useParams<{ tradeId: string }>()
   const { data: trade, isLoading, error } = useTrade(tradeId || '')
   const closeTrade = useCloseTrade()
+
+  const tradeTicker = (trade?.snapshot as Record<string, unknown>)?.underlying_ticker as string | undefined
+  usePageTitle(tradeTicker ? `${tradeTicker} Trade Detail` : 'Trade Detail')
 
   const [showCloseForm, setShowCloseForm] = useState(false)
   const [exitPrice, setExitPrice] = useState('')
