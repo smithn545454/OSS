@@ -482,6 +482,24 @@ body {
   box-shadow: var(--shadow-glow-cyan-strong);
 }
 
+/* Fresh opportunity — evaluated within last 30 minutes */
+.opportunity-card--fresh {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, var(--bg-secondary) 100%);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.opportunity-card--fresh:hover {
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+/* Recent opportunity — evaluated 30–60 minutes ago */
+.opportunity-card--recent {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, var(--bg-secondary) 100%);
+  border-color: rgba(6, 182, 212, 0.25);
+}
+.opportunity-card--recent:hover {
+  border-color: rgba(6, 182, 212, 0.4);
+}
+
 /* Rank Indicator */
 .rank-indicator {
   font-size: 28px;

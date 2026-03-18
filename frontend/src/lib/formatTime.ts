@@ -115,6 +115,18 @@ export function formatRelativeTime(iso: string): string {
 }
 
 /**
+ * Freshness tier for an evaluation timestamp.
+ * "fresh" = within 30 min, "recent" = 30-60 min, null = older.
+ */
+export function getAgeFreshness(iso: string): 'fresh' | 'recent' | null {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const diffMin = diffMs / 60_000
+  if (diffMin <= 30) return 'fresh'
+  if (diffMin <= 60) return 'recent'
+  return null
+}
+
+/**
  * Compact date display: "Feb 13" (current year) or "Feb 13, 2025" (other year).
  */
 export function formatDateShort(iso: string): string {

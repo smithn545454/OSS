@@ -14,7 +14,7 @@ import { ConvergenceBadge } from './ConvergenceBadge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
-import { formatRelativeTime } from '@/lib/formatTime'
+import { formatRelativeTime, getAgeFreshness } from '@/lib/formatTime'
 
 interface OpportunityCardProps {
   evaluation: ApproveEvaluation
@@ -40,7 +40,9 @@ function RankIndicator({ rank }: { rank: number }) {
   )
 }
 
-function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
+type Freshness = 'fresh' | 'recent' | null
+
+function ContractInfo({ evaluation, freshness }: { evaluation: ApproveEvaluation; freshness: Freshness }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {/* Ticker and option type */}
@@ -127,9 +129,15 @@ function ContractInfo({ evaluation }: { evaluation: ApproveEvaluation }) {
           </span>
         )}
         <span style={{
-          fontSize: '11px',
-          color: 'var(--text-muted)',
+          fontSize: freshness === 'fresh' ? '13px' : freshness === 'recent' ? '12px' : '11px',
+          fontWeight: freshness ? 600 : 400,
+          color: freshness === 'fresh'
+            ? '#34d399'
+            : freshness === 'recent'
+              ? '#22d3ee'
+              : 'var(--text-muted)',
         }}>
+          {freshness === 'fresh' && '\u25cf '}
           {formatRelativeTime(evaluation.evaluated_at)}
         </span>
       </div>
@@ -222,21 +230,24 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
 export function OpportunityCard({ evaluation, rank, className = '' }: OpportunityCardProps) {
   const navigate = useNavigate()
   const isTopRank = rank === 1
-  
+  const freshness = getAgeFreshness(evaluation.evaluated_at)
+
   const handleClick = () => {
     navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluation_id}`)
   }
-  
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       handleClick()
     }
   }
-  
+
+  const freshnessClass = freshness ? `opportunity-card--${freshness}` : ''
+
   return (
     <article
-      className={`opportunity-card ${isTopRank ? 'opportunity-card--top' : ''} ${className}`}
+      className={`opportunity-card ${isTopRank ? 'opportunity-card--top' : ''} ${freshnessClass} ${className}`}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
@@ -265,7 +276,7 @@ export function OpportunityCard({ evaluation, rank, className = '' }: Opportunit
       </div>
       
       {/* Zone 2: Contract Info */}
-      <ContractInfo evaluation={evaluation} />
+      <ContractInfo evaluation={evaluation} freshness={freshness} />
       
       {/* Zone 3: Metrics */}
       <MetricsZone evaluation={evaluation} />
