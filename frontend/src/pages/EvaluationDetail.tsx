@@ -583,6 +583,7 @@ interface MatchedRuleDisplay {
     win_rate?: number
     avg_return?: number
     sample_size?: number
+    avg_days_held?: number
   }
 }
 
@@ -626,6 +627,13 @@ function MatchedRulesPanel({ rules }: { rules: MatchedRuleDisplay[] }) {
                   <span>
                     Avg Return: <span className="font-mono text-oss-text">
                       {rule.performance_at_creation.avg_return.toFixed(1)}%
+                    </span>
+                  </span>
+                )}
+                {rule.performance_at_creation.avg_days_held != null && (
+                  <span>
+                    Avg Hold: <span className="font-mono text-oss-text">
+                      {rule.performance_at_creation.avg_days_held.toFixed(1)}d
                     </span>
                   </span>
                 )}
