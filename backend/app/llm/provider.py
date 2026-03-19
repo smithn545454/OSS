@@ -62,7 +62,7 @@ class AnthropicProvider(LLMProvider):
     """Anthropic Claude provider implementation."""
 
     MODEL = "claude-haiku-4-5-20251001"
-    SONNET_MODEL = "claude-sonnet-4-5-20241022"
+    SONNET_MODEL = "claude-sonnet-4-5-20250929"
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         """Initialize Anthropic provider.
