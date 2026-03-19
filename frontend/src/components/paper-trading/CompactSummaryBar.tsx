@@ -39,7 +39,7 @@ export default function CompactSummaryBar({
     <div className="flex items-center gap-4 rounded-lg border border-oss-border bg-oss-surface px-4 py-2.5 text-sm">
       <div className="flex items-center gap-1.5">
         <span className="text-oss-muted">Trades:</span>
-        <span className="font-mono font-medium text-oss-text">{totalTrades}</span>
+        <span className="font-mono font-medium text-oss-text">{totalTrades.toLocaleString()}</span>
       </div>
 
       <div className="h-4 w-px bg-oss-border" />

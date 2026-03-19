@@ -80,7 +80,7 @@ function ScannerRow({ scanner, data, isExpanded, onToggle }: ScannerRowProps) {
             {SCANNER_LABELS[scanner] ?? scanner}
           </span>
         </div>
-        <span className="text-right font-mono text-sm">{data.total}</span>
+        <span className="text-right font-mono text-sm">{data.total.toLocaleString()}</span>
         <span className={clsx('text-right font-mono text-sm', winRateColor(data.win_rate))}>
           {fmt(data.win_rate)}%
         </span>
@@ -123,16 +123,16 @@ function ScannerRow({ scanner, data, isExpanded, onToggle }: ScannerRowProps) {
             <div>
               <span className="text-oss-muted">Win/Loss: </span>
               <span className="font-mono text-oss-text">
-                {data.win_count}W / {data.loss_count}L
+                {data.win_count.toLocaleString()}W / {data.loss_count.toLocaleString()}L
               </span>
             </div>
             <div>
               <span className="text-oss-muted">Closed: </span>
-              <span className="font-mono text-oss-text">{data.closed}</span>
+              <span className="font-mono text-oss-text">{data.closed.toLocaleString()}</span>
             </div>
             <div>
               <span className="text-oss-muted">Open: </span>
-              <span className="font-mono text-oss-text">{data.total - data.closed}</span>
+              <span className="font-mono text-oss-text">{(data.total - data.closed).toLocaleString()}</span>
             </div>
             <div>
               <span className="text-oss-muted">Avg Hold: </span>
