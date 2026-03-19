@@ -14,9 +14,6 @@ interface ConvictionQueueProps {
   evaluations: ApproveEvaluation[]
   threshold?: number
   className?: string
-  onRefresh?: () => void
-  hasNewData?: boolean
-  newCount?: number
 }
 
 function EmptyState() {
@@ -57,47 +54,10 @@ function EmptyState() {
   )
 }
 
-function RefreshNotification({ 
-  count, 
-  onClick 
-}: { 
-  count: number
-  onClick: () => void 
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="refresh-notification"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        width: '100%',
-        padding: '12px 16px',
-        background: 'var(--bg-active)',
-        border: '1px solid var(--border-active)',
-        borderRadius: 'var(--radius-md)',
-        cursor: 'pointer',
-        fontSize: '14px',
-        fontWeight: 500,
-        color: 'var(--accent-primary)',
-        marginBottom: '16px',
-      }}
-    >
-      <span>🔄</span>
-      <span>{count} new opportunities available</span>
-    </button>
-  )
-}
-
-export function ConvictionQueue({ 
+export function ConvictionQueue({
   evaluations,
   threshold = 75,
   className = '',
-  onRefresh,
-  hasNewData = false,
-  newCount = 0,
 }: ConvictionQueueProps) {
   const [sortMode, setSortMode] = useState<'composite' | 'conviction'>('composite')
 
@@ -187,11 +147,6 @@ export function ConvictionQueue({
           </span>
         </div>
       </div>
-      
-      {/* Refresh notification */}
-      {hasNewData && newCount > 0 && onRefresh && (
-        <RefreshNotification count={newCount} onClick={onRefresh} />
-      )}
       
       {/* Cards or Empty State */}
       {isEmpty ? (

@@ -5,7 +5,7 @@
  * Per Section 5 of OSS_Opportunities_Page_Specification.
  */
 
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useApproveEvaluations } from '@/hooks/useApi'
 import {
   ContextBar,
@@ -19,15 +19,13 @@ import {
 const DEFAULT_CONVICTION_THRESHOLD = 75
 
 export default function Opportunities() {
-  const [convictionThreshold] = useState(DEFAULT_CONVICTION_THRESHOLD)
-  const [hasNewData, setHasNewData] = useState(false)
-  const [newCount, setNewCount] = useState(0)
-  
+  const convictionThreshold = DEFAULT_CONVICTION_THRESHOLD
+
   // Fetch APPROVE evaluations with conviction scoring
-  const { 
-    data, 
-    isLoading, 
-    error, 
+  const {
+    data,
+    isLoading,
+    error,
     refetch,
     dataUpdatedAt,
   } = useApproveEvaluations({
@@ -36,36 +34,15 @@ export default function Opportunities() {
     maxAgeTradingDays: 2,
     limit: 100,
   })
-  
-  // Track previous data count to detect new opportunities
-  useEffect(() => {
-    if (data?.evaluations) {
-      const storedCount = sessionStorage.getItem('oss_opportunities_count')
-      const currentCount = data.evaluations.length
-      
-      if (storedCount && parseInt(storedCount) < currentCount) {
-        setHasNewData(true)
-        setNewCount(currentCount - parseInt(storedCount))
-      }
-      
-      sessionStorage.setItem('oss_opportunities_count', String(currentCount))
-    }
-  }, [data])
-  
+
   // Poll for new opportunities every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       refetch()
     }, 60000)
-    
+
     return () => clearInterval(interval)
   }, [refetch])
-  
-  const handleRefresh = () => {
-    setHasNewData(false)
-    setNewCount(0)
-    refetch()
-  }
   
   const evaluations = data?.evaluations ?? []
   const earningsExclusions = data?.excludedForEarnings ?? []
@@ -201,9 +178,6 @@ export default function Opportunities() {
             <ConvictionQueue
               evaluations={evaluations}
               threshold={convictionThreshold}
-              hasNewData={hasNewData}
-              newCount={newCount}
-              onRefresh={handleRefresh}
             />
             
             {/* All APPROVEs Table */}
