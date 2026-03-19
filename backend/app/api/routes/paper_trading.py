@@ -1692,3 +1692,176 @@ async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
             "avg_days_held": sum(days_held) / len(days_held),
         },
     }
+
+
+# ============================================================================
+# Scanner Performance Analysis (AI-Powered)
+# ============================================================================
+
+# In-memory cache for scanner analysis results.
+# Key: (scanner_name, date_str, num_closed_positions)
+_scanner_analysis_cache: dict[tuple[str, str, int], dict[str, Any]] = {}
+
+
+@router.post("/scanner-analysis/{scanner_name}")
+async def analyze_scanner_performance(
+    scanner_name: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Run AI-powered analysis of a scanner's paper trading performance.
+
+    Analyzes winner vs loser patterns and recommends gate/filter adjustments.
+    Uses Claude Sonnet for deeper analytical reasoning. Results are cached
+    for the current day + position count.
+    """
+    from datetime import datetime, timezone
+
+    from app.db.tables import LLMUsageTable, PaperPositionTable, PolicyTable
+    from app.llm.provider import AnthropicProvider
+    from app.llm.rate_limiter import RateLimiter
+    from app.paper_trading.scanner_analysis import (
+        KNOWN_SCANNERS,
+        build_scanner_analysis_input,
+        build_scanner_analysis_prompt,
+        parse_scanner_analysis_response,
+    )
+
+    # Normalize scanner name
+    normalized = scanner_name.upper().replace(" ", "_")
+    if normalized not in KNOWN_SCANNERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown scanner: {scanner_name}. "
+            f"Valid: {', '.join(sorted(KNOWN_SCANNERS))}",
+        )
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Fetch all closed positions
+    all_closed = await _exhaust_paginated(
+        PaperPositionTable.list_closed_paginated,
+        None, None, None, None,
+    )
+
+    num_closed = len(all_closed)
+
+    # Check cache
+    cache_key = (normalized, today, num_closed)
+    if not force and cache_key in _scanner_analysis_cache:
+        cached = _scanner_analysis_cache[cache_key]
+        cached["metadata"]["cached"] = True
+        return cached
+
+    # Scanner-specific positions check
+    from app.paper_trading.edge_intelligence import _normalize_scanner, _val
+    scanner_closed = [
+        p for p in all_closed
+        if _normalize_scanner(p.scanner_source) == normalized
+        and _val(p.status) == "CLOSED"
+    ]
+    if len(scanner_closed) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No closed paper trades found for scanner {normalized}",
+        )
+
+    # Fetch active policy for gate thresholds
+    policy = await PolicyTable.get_active()
+    if policy is None:
+        raise HTTPException(status_code=500, detail="No active policy found")
+
+    gate_config_dict = policy.config.gates.model_dump()
+
+    # Build analysis input
+    analysis_input = build_scanner_analysis_input(
+        normalized, all_closed, gate_config_dict
+    )
+
+    if analysis_input.get("error") == "no_data":
+        raise HTTPException(
+            status_code=404,
+            detail=f"No closed trades for scanner {normalized}",
+        )
+
+    # Check rate limit
+    usage_table = LLMUsageTable()
+    rate_limiter = RateLimiter(max_daily_calls=50, usage_table=usage_table)
+    remaining = await rate_limiter.get_remaining_calls()
+
+    if remaining <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI analysis limit reached (0/50 remaining). "
+            "Try again tomorrow.",
+        )
+
+    # Build prompt
+    system_prompt, user_prompt = build_scanner_analysis_prompt(analysis_input)
+
+    # Call Claude Sonnet
+    provider = AnthropicProvider()
+    if not provider.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Anthropic API not configured",
+        )
+
+    llm_response = await provider.generate(
+        prompt=user_prompt,
+        max_tokens=2000,
+        system_prompt=system_prompt,
+        model=AnthropicProvider.SONNET_MODEL,
+    )
+
+    if not llm_response.success:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI analysis failed: {llm_response.error}",
+        )
+
+    # Record the call
+    await rate_limiter.record_call(llm_response.tokens_used)
+    new_remaining = await rate_limiter.get_remaining_calls()
+
+    # Parse response
+    try:
+        analysis = parse_scanner_analysis_response(llm_response.content)
+    except ValueError as e:
+        logger.error(f"Failed to parse scanner analysis response: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI returned invalid analysis format: {e}",
+        )
+
+    # Build response
+    winners = [p for p in scanner_closed if p.current_pnl_pct > 0]
+    losers = [p for p in scanner_closed if p.current_pnl_pct <= 0]
+
+    result = {
+        "scanner_name": normalized,
+        "analysis": analysis,
+        "metadata": {
+            "model_used": llm_response.model,
+            "tokens_used": llm_response.tokens_used,
+            "cached": False,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "positions_analyzed": len(scanner_closed),
+            "remaining_llm_calls": new_remaining,
+        },
+        "data_snapshot": {
+            "win_rate": round(
+                len(winners) / len(scanner_closed) * 100, 1
+            ) if scanner_closed else None,
+            "avg_return": round(
+                sum(p.current_pnl_pct for p in scanner_closed) / len(scanner_closed), 2
+            ) if scanner_closed else None,
+            "closed_trades": len(scanner_closed),
+            "winners": len(winners),
+            "losers": len(losers),
+        },
+    }
+
+    # Cache it
+    _scanner_analysis_cache[cache_key] = result
+
+    return result
