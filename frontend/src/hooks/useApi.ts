@@ -1085,3 +1085,13 @@ export function useTradeAnalysis(analysisId: string, polling = false) {
     refetchInterval: polling ? 3000 : false,
   })
 }
+
+// ============================================================================
+// Scanner Performance Analysis
+// ============================================================================
+
+export function useScannerAnalysis() {
+  return useMutation({
+    mutationFn: (scannerName: string) => api.analyzeScannerPerformance(scannerName),
+  })
+}

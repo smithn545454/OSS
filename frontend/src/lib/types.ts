@@ -1841,3 +1841,57 @@ export interface TradeStatsResponse {
   win_rate: number
   avg_return_pct: number
 }
+
+// ============================================================================
+// Scanner Performance Analysis (AI-Powered)
+// ============================================================================
+
+export interface ScannerAnalysisRootCause {
+  cause: string
+  evidence: string
+  severity: 'high' | 'medium' | 'low'
+}
+
+export interface ScannerAnalysisGateRec {
+  gate_id: string
+  gate_name: string
+  current_value: number
+  suggested_value: number
+  direction: 'tighten' | 'loosen'
+  rationale: string
+  expected_impact: string
+}
+
+export interface ScannerAnalysisFilter {
+  description: string
+  rationale: string
+}
+
+export interface ScannerAnalysisResult {
+  summary: string
+  root_causes: ScannerAnalysisRootCause[]
+  gate_recommendations: ScannerAnalysisGateRec[]
+  additional_filters: ScannerAnalysisFilter[]
+  confidence: 'high' | 'medium' | 'low'
+  confidence_rationale: string
+}
+
+export interface ScannerAnalysisResponse {
+  scanner_name: string
+  analysis: ScannerAnalysisResult
+  metadata: {
+    model_used: string
+    tokens_used: number
+    cached: boolean
+    generated_at: string
+    positions_analyzed: number
+    remaining_llm_calls: number
+  }
+  data_snapshot: {
+    win_rate: number | null
+    avg_return: number | null
+    closed_trades: number
+    winners: number
+    losers: number
+  }
+}

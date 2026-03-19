@@ -961,5 +961,20 @@ export async function getTradeAnalysis(
   return fetchApi(`/api/trades/analysis/${encodeURIComponent(analysisId)}`)
 }
 
+// ============================================================================
+// Scanner Performance Analysis
+// ============================================================================
+
+export async function analyzeScannerPerformance(
+  scannerName: string,
+  force = false
+): Promise<import('./types').ScannerAnalysisResponse> {
+  const params = force ? '?force=true' : ''
+  return fetchApi(
+    `/api/paper-trading/scanner-analysis/${encodeURIComponent(scannerName)}${params}`,
+    { method: 'POST' }
+  )
+}
+
 // Export the ApiError for error handling
 export { ApiError }

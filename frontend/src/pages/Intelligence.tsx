@@ -4,6 +4,7 @@ import { useEdgeBriefing } from '@/hooks/useApi'
 import type { DimensionStats, EdgeInsight } from '@/lib/types'
 import clsx from 'clsx'
 import { Brain, TrendingUp, TrendingDown, Zap, Target, Layers, Clock, Lightbulb } from 'lucide-react'
+import ScannerAnalysisPanel from '@/components/ScannerAnalysisPanel'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -192,6 +193,129 @@ function DimensionTable({
 }
 
 // ---------------------------------------------------------------------------
+// Scanner Dimension Table (clickable rows with analysis trigger)
+// ---------------------------------------------------------------------------
+
+function ScannerDimensionTable({
+  data,
+  highlightKey,
+  selectedScanner,
+  onSelectScanner,
+}: {
+  data: Record<string, DimensionStats>
+  highlightKey?: string | null
+  selectedScanner: string | null
+  onSelectScanner: (key: string | null) => void
+}) {
+  const entries = Object.entries(data).filter(([k]) => k !== 'UNKNOWN')
+
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-xl border border-oss-border bg-oss-surface p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap className="h-4 w-4 text-oss-muted" />
+          <h3 className="text-sm font-medium text-oss-text">By Scanner</h3>
+        </div>
+        <p className="text-xs text-oss-muted">No data</p>
+      </div>
+    )
+  }
+
+  const sorted = [...entries].sort((a, b) => {
+    const aWr = a[1].win_rate ?? -1
+    const bWr = b[1].win_rate ?? -1
+    return bWr - aWr
+  })
+
+  return (
+    <div>
+      <div className="rounded-xl border border-oss-border bg-oss-surface p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="h-4 w-4 text-oss-accent" />
+          <h3 className="text-sm font-medium text-oss-text">By Scanner</h3>
+          <span className="text-[10px] text-oss-muted ml-auto">Click to analyze</span>
+        </div>
+        <div className="space-y-2">
+          {sorted.map(([key, stats]) => {
+            const isHighlight = key === highlightKey
+            const isSelected = key === selectedScanner
+            const isUnderperforming = stats.win_rate != null && stats.win_rate < 50
+            return (
+              <button
+                key={key}
+                onClick={() => onSelectScanner(isSelected ? null : key)}
+                className={clsx(
+                  'w-full flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors text-left',
+                  isSelected
+                    ? 'bg-oss-accent/10 border border-oss-accent/30'
+                    : isHighlight
+                      ? 'bg-oss-accent/8 border border-oss-accent/20 hover:bg-oss-accent/12'
+                      : 'bg-oss-bg hover:bg-oss-bg/80'
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-oss-text min-w-[80px]">
+                    {key.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-xs text-oss-muted">
+                    {stats.closed} closed
+                  </span>
+                  {isUnderperforming && !isSelected && (
+                    <Brain className="h-3 w-3 text-oss-muted/50" />
+                  )}
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right min-w-[60px]">
+                    <span className={clsx('font-mono text-sm font-semibold', wrColor(stats.win_rate))}>
+                      {stats.win_rate != null ? `${fmt(stats.win_rate, 0)}%` : '—'}
+                    </span>
+                    <span className="text-[10px] text-oss-muted ml-1">WR</span>
+                  </div>
+                  <div className="text-right min-w-[60px]">
+                    <span
+                      className={clsx(
+                        'font-mono text-xs',
+                        stats.avg_return != null && stats.avg_return > 0
+                          ? 'text-oss-approve'
+                          : stats.avg_return != null && stats.avg_return < 0
+                            ? 'text-oss-reject'
+                            : 'text-oss-muted'
+                      )}
+                    >
+                      {stats.avg_return != null ? `${fmt(stats.avg_return)}%` : '—'}
+                    </span>
+                    <span className="text-[10px] text-oss-muted ml-1">avg</span>
+                  </div>
+                  <div className="w-16 h-2 rounded-full bg-oss-bg overflow-hidden">
+                    <div
+                      className={clsx(
+                        'h-full rounded-full transition-all',
+                        stats.win_rate != null && stats.win_rate >= 60
+                          ? 'bg-oss-approve'
+                          : stats.win_rate != null && stats.win_rate >= 50
+                            ? 'bg-oss-watch'
+                            : 'bg-oss-reject'
+                      )}
+                      style={{ width: `${Math.min(stats.win_rate ?? 0, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      {selectedScanner && (
+        <ScannerAnalysisPanel
+          scannerName={selectedScanner}
+          onClose={() => onSelectScanner(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Calls vs Puts Comparison
 // ---------------------------------------------------------------------------
 
@@ -359,6 +483,7 @@ function InsightsBanner({ insights }: { insights: EdgeInsight[] }) {
 export default function Intelligence() {
   usePageTitle('Intelligence')
   const [days, setDays] = useState(10)
+  const [selectedScanner, setSelectedScanner] = useState<string | null>(null)
   const { data, isLoading, error } = useEdgeBriefing(days)
 
   return (
@@ -444,12 +569,12 @@ export default function Intelligence() {
           <OptionTypeComparison data={data.by_option_type} edge={data.option_type_edge} />
 
           {/* Scanner & Score side by side */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <DimensionTable
-              title="By Scanner"
-              icon={Zap}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <ScannerDimensionTable
               data={data.by_scanner}
               highlightKey={data.hot_scanner}
+              selectedScanner={selectedScanner}
+              onSelectScanner={setSelectedScanner}
             />
             <DimensionTable
               title="By Score Bucket"

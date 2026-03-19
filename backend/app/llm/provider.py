@@ -62,6 +62,7 @@ class AnthropicProvider(LLMProvider):
     """Anthropic Claude provider implementation."""
 
     MODEL = "claude-haiku-4-5-20251001"
+    SONNET_MODEL = "claude-sonnet-4-5-20241022"
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         """Initialize Anthropic provider.
@@ -104,13 +105,22 @@ class AnthropicProvider(LLMProvider):
         prompt: str,
         max_tokens: int = 1000,
         system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> LLMResponse:
-        """Generate completion using Claude."""
+        """Generate completion using Claude.
+
+        Args:
+            prompt: The formatted prompt string
+            max_tokens: Maximum output tokens
+            system_prompt: Optional system prompt
+            model: Override model ID (defaults to self.MODEL)
+        """
+        use_model = model or self.MODEL
         if not self.is_available():
             return LLMResponse(
                 content="",
                 tokens_used=0,
-                model=self.MODEL,
+                model=use_model,
                 success=False,
                 error="Anthropic API key not configured",
             )
@@ -118,7 +128,7 @@ class AnthropicProvider(LLMProvider):
         try:
             client = self._get_client()
             kwargs: dict = {
-                "model": self.MODEL,
+                "model": use_model,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
             }
@@ -137,7 +147,7 @@ class AnthropicProvider(LLMProvider):
             return LLMResponse(
                 content=content,
                 tokens_used=tokens_used,
-                model=self.MODEL,
+                model=use_model,
                 success=True,
             )
 
@@ -146,7 +156,7 @@ class AnthropicProvider(LLMProvider):
             return LLMResponse(
                 content="",
                 tokens_used=0,
-                model=self.MODEL,
+                model=use_model,
                 success=False,
                 error=str(e),
             )
