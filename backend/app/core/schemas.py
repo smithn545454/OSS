@@ -425,6 +425,9 @@ class PaperPosition(OSSBaseModel):
     entry_theta: Optional[float] = None
     gate_margin: Optional[float] = None
     theta_adj_ev: Optional[float] = None
+    entry_iv_percentile: Optional[float] = None
+    entry_iv_rv_ratio: Optional[float] = None
+    entry_theta_adjusted_edge: Optional[float] = None
 
     # Thesis-driven exit thresholds (applied when thesis is generated)
     thesis_tp1_pct: Optional[float] = None

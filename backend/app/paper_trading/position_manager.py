@@ -146,6 +146,27 @@ async def create_position_from_evaluation(
         entry_theta=evaluation.theta,
     )
 
+    # Load volatility features for position enrichment and rule matching
+    vol_features: dict[str, float] = {}
+    try:
+        from app.db.tables import FeatureValueTable
+        feat_values = await FeatureValueTable.list_by_evaluation(
+            evaluation.evaluation_id
+        )
+        for fv in feat_values:
+            if fv.feature_name in (
+                "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"
+            ):
+                if fv.value is not None:
+                    vol_features[fv.feature_name] = fv.value
+    except Exception as e:
+        logger.warning(f"Failed to load features for position enrichment: {e}")
+
+    # Enrich position with volatility features (for Pattern Discovery AI)
+    position.entry_iv_percentile = vol_features.get("iv_percentile")
+    position.entry_iv_rv_ratio = vol_features.get("iv_rv_ratio")
+    position.entry_theta_adjusted_edge = vol_features.get("theta_adjusted_edge")
+
     # Match setup rules at position creation time
     try:
         from app.paper_trading.pattern_discovery import list_setup_rules
@@ -165,21 +186,8 @@ async def create_position_from_evaluation(
                 "spread_pct": getattr(evaluation, "spread_pct", None),
                 "open_interest": getattr(evaluation, "open_interest", None),
                 "volume": getattr(evaluation, "volume", None),
+                **vol_features,
             }
-            # Load volatility features for rule matching
-            try:
-                from app.db.tables import FeatureValueTable
-                feat_values = await FeatureValueTable.list_by_evaluation(
-                    evaluation.evaluation_id
-                )
-                for fv in feat_values:
-                    if fv.feature_name in (
-                        "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"
-                    ):
-                        if fv.value is not None:
-                            eval_dict[fv.feature_name] = fv.value
-            except Exception as e:
-                logger.warning(f"Failed to load features for rule matching: {e}")
             decision_dict = {
                 "final_score": decision.final_score,
                 "directional_score": decision.directional_score,

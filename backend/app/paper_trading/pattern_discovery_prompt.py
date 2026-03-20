@@ -30,6 +30,13 @@ DISCOVERY_SYSTEM_PROMPT = (
     "- dte_at_entry: Days to expiration when position opened\n"
     "- dte_bucket: Bucketed DTE range\n"
     "- entry_iv: Implied volatility at entry\n"
+    "- entry_iv_percentile: IV percentile rank 0-100 "
+    "(lower = historically cheaper options, null if unavailable)\n"
+    "- entry_iv_rv_ratio: IV/RV ratio "
+    "(below 1.0 = IV cheaper than realized volatility — a tailwind for long options, "
+    "null if unavailable)\n"
+    "- entry_theta_adjusted_edge: Expected delta gain per unit of theta decay "
+    "(above 1.5 = strong edge, null if unavailable)\n"
     "- convergence_count: Number of scanners that fired (1-4)\n"
     "- return_pct: Final return percentage\n"
     "- days_held: Calendar days held\n"
@@ -78,6 +85,9 @@ The criteria object can include any combination of:
 - dte_min / dte_max: DTE range
 - option_type: "CALL" or "PUT"
 - entry_iv_min / entry_iv_max: IV thresholds
+- iv_percentile_max / iv_percentile_min: IV percentile thresholds
+- iv_rv_ratio_max / iv_rv_ratio_min: IV/RV ratio (1.0 = IV < realized vol)
+- theta_adjusted_edge_min: minimum theta-adjusted edge ratio
 """
 
 

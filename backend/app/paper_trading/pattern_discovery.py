@@ -41,6 +41,14 @@ def _position_summary(p: PaperPosition) -> dict[str, Any]:
         "dte_at_entry": p.dte_at_entry,
         "dte_bucket": p.dte_bucket,
         "entry_iv": p.entry_iv,
+        "entry_iv_percentile": p.entry_iv_percentile,
+        "entry_iv_rv_ratio": (
+            round(p.entry_iv_rv_ratio, 3) if p.entry_iv_rv_ratio is not None else None
+        ),
+        "entry_theta_adjusted_edge": (
+            round(p.entry_theta_adjusted_edge, 2)
+            if p.entry_theta_adjusted_edge is not None else None
+        ),
         "entry_delta": p.entry_delta,
         "return_pct": round(p.current_pnl_pct, 2),
         "days_held": p.days_held,
