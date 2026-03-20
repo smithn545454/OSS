@@ -144,6 +144,11 @@ async def create_position_from_evaluation(
         entry_delta=evaluation.delta,
         entry_iv=evaluation.iv,
         entry_theta=evaluation.theta,
+        entry_underlying_price=evaluation.underlying_price,
+        entry_moneyness_pct=getattr(evaluation, "moneyness_pct", None),
+        entry_spread_pct=getattr(evaluation, "spread_pct", None),
+        entry_open_interest=getattr(evaluation, "open_interest", None),
+        entry_volume=getattr(evaluation, "volume", None),
     )
 
     # Load volatility features for position enrichment and rule matching
@@ -155,17 +160,26 @@ async def create_position_from_evaluation(
         )
         for fv in feat_values:
             if fv.feature_name in (
-                "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"
+                "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
+                "days_to_earnings", "atr14_pct", "rs_20d",
+                "feasibility_ratio",
             ):
                 if fv.value is not None:
                     vol_features[fv.feature_name] = fv.value
     except Exception as e:
         logger.warning(f"Failed to load features for position enrichment: {e}")
 
-    # Enrich position with volatility features (for Pattern Discovery AI)
+    # Enrich position with features (for Pattern Discovery AI)
     position.entry_iv_percentile = vol_features.get("iv_percentile")
     position.entry_iv_rv_ratio = vol_features.get("iv_rv_ratio")
     position.entry_theta_adjusted_edge = vol_features.get("theta_adjusted_edge")
+    dte_val = vol_features.get("days_to_earnings")
+    position.entry_days_to_earnings = (
+        int(dte_val) if dte_val is not None else None
+    )
+    position.entry_atr14_pct = vol_features.get("atr14_pct")
+    position.entry_rs_20d = vol_features.get("rs_20d")
+    position.entry_feasibility_ratio = vol_features.get("feasibility_ratio")
 
     # Match setup rules at position creation time
     try:
@@ -186,6 +200,10 @@ async def create_position_from_evaluation(
                 "spread_pct": getattr(evaluation, "spread_pct", None),
                 "open_interest": getattr(evaluation, "open_interest", None),
                 "volume": getattr(evaluation, "volume", None),
+                "underlying_price": evaluation.underlying_price,
+                "moneyness_pct": getattr(
+                    evaluation, "moneyness_pct", None
+                ),
                 **vol_features,
             }
             decision_dict = {

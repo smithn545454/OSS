@@ -37,6 +37,26 @@ DISCOVERY_SYSTEM_PROMPT = (
     "null if unavailable)\n"
     "- entry_theta_adjusted_edge: Expected delta gain per unit of theta decay "
     "(above 1.5 = strong edge, null if unavailable)\n"
+    "- entry_delta: Option delta at entry\n"
+    "- gate_margin: Distance above minimum gate threshold "
+    "(higher = more comfortable pass)\n"
+    "- theta_adj_ev: Theta-adjusted expected value in dollars\n"
+    "- strike: Option strike price\n"
+    "- underlying_price: Stock price at entry\n"
+    "- moneyness_pct: How far OTM/ITM as percentage "
+    "(positive = OTM for calls)\n"
+    "- spread_pct: Bid-ask spread as % of mid "
+    "(lower = more liquid)\n"
+    "- open_interest: Contract open interest at entry\n"
+    "- volume: Contract volume at entry\n"
+    "- days_to_earnings: Calendar days to next earnings "
+    "(null if unknown)\n"
+    "- atr14_pct: 14-day ATR as % of price "
+    "(higher = more volatile stock, null if unavailable)\n"
+    "- rs_20d: 20-day relative strength vs SPY "
+    "(positive = outperforming, null if unavailable)\n"
+    "- feasibility_ratio: Required move / expected move "
+    "(lower = more achievable breakeven, null if unavailable)\n"
     "- convergence_count: Number of scanners that fired (1-4)\n"
     "- return_pct: Final return percentage\n"
     "- days_held: Calendar days held\n"
@@ -88,6 +108,16 @@ The criteria object can include any combination of:
 - iv_percentile_max / iv_percentile_min: IV percentile thresholds
 - iv_rv_ratio_max / iv_rv_ratio_min: IV/RV ratio (1.0 = IV < realized vol)
 - theta_adjusted_edge_min: minimum theta-adjusted edge ratio
+- gate_margin_min: minimum gate margin
+- underlying_price_min / underlying_price_max: stock price range
+- moneyness_pct_min / moneyness_pct_max: OTM/ITM depth range
+- spread_pct_max: maximum bid-ask spread percentage
+- open_interest_min: minimum open interest
+- volume_min: minimum volume
+- days_to_earnings_min / days_to_earnings_max: earnings proximity
+- atr14_pct_min / atr14_pct_max: stock volatility range
+- rs_20d_min: minimum relative strength vs SPY
+- feasibility_ratio_max: max feasibility ratio (lower = easier)
 """
 
 

@@ -392,6 +392,319 @@ class TestMatchesRule:
             [],
         )
 
+    # --- Gate margin criteria ---
+
+    def test_gate_margin_min_passes(self):
+        assert matches_rule(
+            {"gate_margin_min": 5.0},
+            _eval(),
+            _decision(gate_margin=10.0),
+            [],
+        )
+
+    def test_gate_margin_min_fails(self):
+        assert not matches_rule(
+            {"gate_margin_min": 15.0},
+            _eval(),
+            _decision(gate_margin=10.0),
+            [],
+        )
+
+    def test_gate_margin_min_from_evaluation(self):
+        """Falls back to evaluation dict if not in decision."""
+        assert matches_rule(
+            {"gate_margin_min": 5.0},
+            _eval(gate_margin=10.0),
+            _decision(),
+            [],
+        )
+
+    # --- Underlying price criteria ---
+
+    def test_underlying_price_min_passes(self):
+        assert matches_rule(
+            {"underlying_price_min": 50.0},
+            _eval(underlying_price=102.5),
+            _decision(),
+            [],
+        )
+
+    def test_underlying_price_min_fails(self):
+        assert not matches_rule(
+            {"underlying_price_min": 50.0},
+            _eval(underlying_price=25.0),
+            _decision(),
+            [],
+        )
+
+    def test_underlying_price_max_passes(self):
+        assert matches_rule(
+            {"underlying_price_max": 200.0},
+            _eval(underlying_price=102.5),
+            _decision(),
+            [],
+        )
+
+    def test_underlying_price_max_fails(self):
+        assert not matches_rule(
+            {"underlying_price_max": 50.0},
+            _eval(underlying_price=102.5),
+            _decision(),
+            [],
+        )
+
+    def test_underlying_price_missing_fails(self):
+        assert not matches_rule(
+            {"underlying_price_min": 50.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    # --- Moneyness criteria ---
+
+    def test_moneyness_pct_min_passes(self):
+        assert matches_rule(
+            {"moneyness_pct_min": 2.0},
+            _eval(moneyness_pct=5.0),
+            _decision(),
+            [],
+        )
+
+    def test_moneyness_pct_max_passes(self):
+        assert matches_rule(
+            {"moneyness_pct_max": 10.0},
+            _eval(moneyness_pct=5.0),
+            _decision(),
+            [],
+        )
+
+    def test_moneyness_pct_max_fails(self):
+        assert not matches_rule(
+            {"moneyness_pct_max": 3.0},
+            _eval(moneyness_pct=5.0),
+            _decision(),
+            [],
+        )
+
+    def test_moneyness_pct_missing_fails(self):
+        assert not matches_rule(
+            {"moneyness_pct_min": 2.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    # --- Spread / liquidity criteria ---
+
+    def test_spread_pct_max_passes(self):
+        assert matches_rule(
+            {"spread_pct_max": 5.0},
+            _eval(spread_pct=3.0),
+            _decision(),
+            [],
+        )
+
+    def test_spread_pct_max_fails(self):
+        assert not matches_rule(
+            {"spread_pct_max": 2.0},
+            _eval(spread_pct=3.0),
+            _decision(),
+            [],
+        )
+
+    def test_open_interest_min_passes(self):
+        assert matches_rule(
+            {"open_interest_min": 100},
+            _eval(open_interest=500),
+            _decision(),
+            [],
+        )
+
+    def test_open_interest_min_fails(self):
+        assert not matches_rule(
+            {"open_interest_min": 1000},
+            _eval(open_interest=500),
+            _decision(),
+            [],
+        )
+
+    def test_volume_min_passes(self):
+        assert matches_rule(
+            {"volume_min": 50},
+            _eval(volume=100),
+            _decision(),
+            [],
+        )
+
+    def test_volume_min_fails(self):
+        assert not matches_rule(
+            {"volume_min": 200},
+            _eval(volume=100),
+            _decision(),
+            [],
+        )
+
+    # --- Catalyst criteria ---
+
+    def test_days_to_earnings_min_passes(self):
+        assert matches_rule(
+            {"days_to_earnings_min": 5},
+            _eval(days_to_earnings=10),
+            _decision(),
+            [],
+        )
+
+    def test_days_to_earnings_max_passes(self):
+        assert matches_rule(
+            {"days_to_earnings_max": 15},
+            _eval(days_to_earnings=10),
+            _decision(),
+            [],
+        )
+
+    def test_days_to_earnings_max_fails(self):
+        assert not matches_rule(
+            {"days_to_earnings_max": 5},
+            _eval(days_to_earnings=10),
+            _decision(),
+            [],
+        )
+
+    def test_days_to_earnings_missing_fails(self):
+        assert not matches_rule(
+            {"days_to_earnings_min": 5},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    def test_days_to_earnings_range(self):
+        """Earnings window: 5-15 days out."""
+        criteria = {"days_to_earnings_min": 5, "days_to_earnings_max": 15}
+        assert matches_rule(criteria, _eval(days_to_earnings=10), _decision(), [])
+        assert not matches_rule(criteria, _eval(days_to_earnings=3), _decision(), [])
+        assert not matches_rule(
+            criteria, _eval(days_to_earnings=20), _decision(), []
+        )
+
+    # --- Technical criteria ---
+
+    def test_atr14_pct_min_passes(self):
+        assert matches_rule(
+            {"atr14_pct_min": 2.0},
+            _eval(atr14_pct=3.5),
+            _decision(),
+            [],
+        )
+
+    def test_atr14_pct_max_passes(self):
+        assert matches_rule(
+            {"atr14_pct_max": 5.0},
+            _eval(atr14_pct=3.5),
+            _decision(),
+            [],
+        )
+
+    def test_atr14_pct_min_fails(self):
+        assert not matches_rule(
+            {"atr14_pct_min": 5.0},
+            _eval(atr14_pct=3.5),
+            _decision(),
+            [],
+        )
+
+    def test_atr14_pct_missing_fails(self):
+        assert not matches_rule(
+            {"atr14_pct_min": 2.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    def test_rs_20d_min_passes(self):
+        assert matches_rule(
+            {"rs_20d_min": 3.0},
+            _eval(rs_20d=5.5),
+            _decision(),
+            [],
+        )
+
+    def test_rs_20d_min_fails(self):
+        assert not matches_rule(
+            {"rs_20d_min": 8.0},
+            _eval(rs_20d=5.5),
+            _decision(),
+            [],
+        )
+
+    def test_rs_20d_missing_fails(self):
+        assert not matches_rule(
+            {"rs_20d_min": 3.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    def test_feasibility_ratio_max_passes(self):
+        assert matches_rule(
+            {"feasibility_ratio_max": 1.0},
+            _eval(feasibility_ratio=0.75),
+            _decision(),
+            [],
+        )
+
+    def test_feasibility_ratio_max_fails(self):
+        assert not matches_rule(
+            {"feasibility_ratio_max": 0.5},
+            _eval(feasibility_ratio=0.75),
+            _decision(),
+            [],
+        )
+
+    def test_feasibility_ratio_missing_fails(self):
+        assert not matches_rule(
+            {"feasibility_ratio_max": 1.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    # --- Combined patterns with new criteria ---
+
+    def test_earnings_catalyst_pattern(self):
+        """Breakout + near earnings + tight spread + high OI."""
+        criteria = {
+            "scanners": ["BREAKOUT"],
+            "days_to_earnings_min": 5,
+            "days_to_earnings_max": 15,
+            "spread_pct_max": 5.0,
+            "open_interest_min": 200,
+        }
+        assert matches_rule(
+            criteria,
+            _eval(
+                spread_pct=3.0, open_interest=500,
+                days_to_earnings=10,
+            ),
+            _decision(),
+            ["BREAKOUT"],
+        )
+
+    def test_momentum_alpha_pattern(self):
+        """RS outperforming + high ATR + achievable breakeven."""
+        criteria = {
+            "rs_20d_min": 3.0,
+            "atr14_pct_min": 2.0,
+            "feasibility_ratio_max": 0.9,
+        }
+        assert matches_rule(
+            criteria,
+            _eval(rs_20d=5.5, atr14_pct=3.5, feasibility_ratio=0.75),
+            _decision(),
+            [],
+        )
+
 
 class TestMatchRules:
     def test_returns_matching_rules(self):

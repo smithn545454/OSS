@@ -96,6 +96,68 @@ def _check_criterion(
             edge = evaluation.get("theta_adjusted_edge")
             return edge is not None and edge >= float(value)
 
+        # Gate margin (from decision dict or evaluation enrichment)
+        if key == "gate_margin_min":
+            val = decision.get("gate_margin") or evaluation.get("gate_margin")
+            return val is not None and float(val) >= float(value)
+
+        # Underlying price
+        if key == "underlying_price_min":
+            val = evaluation.get("underlying_price")
+            return val is not None and float(val) >= float(value)
+
+        if key == "underlying_price_max":
+            val = evaluation.get("underlying_price")
+            return val is not None and float(val) <= float(value)
+
+        # Moneyness
+        if key == "moneyness_pct_min":
+            val = evaluation.get("moneyness_pct")
+            return val is not None and float(val) >= float(value)
+
+        if key == "moneyness_pct_max":
+            val = evaluation.get("moneyness_pct")
+            return val is not None and float(val) <= float(value)
+
+        # Liquidity
+        if key == "spread_pct_max":
+            val = evaluation.get("spread_pct")
+            return val is not None and float(val) <= float(value)
+
+        if key == "open_interest_min":
+            val = evaluation.get("open_interest")
+            return val is not None and int(val) >= int(value)
+
+        if key == "volume_min":
+            val = evaluation.get("volume")
+            return val is not None and int(val) >= int(value)
+
+        # Catalyst
+        if key == "days_to_earnings_min":
+            val = evaluation.get("days_to_earnings")
+            return val is not None and int(val) >= int(value)
+
+        if key == "days_to_earnings_max":
+            val = evaluation.get("days_to_earnings")
+            return val is not None and int(val) <= int(value)
+
+        # Technical
+        if key == "atr14_pct_min":
+            val = evaluation.get("atr14_pct")
+            return val is not None and float(val) >= float(value)
+
+        if key == "atr14_pct_max":
+            val = evaluation.get("atr14_pct")
+            return val is not None and float(val) <= float(value)
+
+        if key == "rs_20d_min":
+            val = evaluation.get("rs_20d")
+            return val is not None and float(val) >= float(value)
+
+        if key == "feasibility_ratio_max":
+            val = evaluation.get("feasibility_ratio")
+            return val is not None and float(val) <= float(value)
+
         # Unknown criteria are ignored for forward compatibility
         return True
 

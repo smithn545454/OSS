@@ -50,6 +50,27 @@ def _position_summary(p: PaperPosition) -> dict[str, Any]:
             if p.entry_theta_adjusted_edge is not None else None
         ),
         "entry_delta": p.entry_delta,
+        "gate_margin": p.gate_margin,
+        "theta_adj_ev": p.theta_adj_ev,
+        "strike": p.strike,
+        "underlying_price": p.entry_underlying_price,
+        "moneyness_pct": p.entry_moneyness_pct,
+        "spread_pct": p.entry_spread_pct,
+        "open_interest": p.entry_open_interest,
+        "volume": p.entry_volume,
+        "days_to_earnings": p.entry_days_to_earnings,
+        "atr14_pct": (
+            round(p.entry_atr14_pct, 2)
+            if p.entry_atr14_pct is not None else None
+        ),
+        "rs_20d": (
+            round(p.entry_rs_20d, 2)
+            if p.entry_rs_20d is not None else None
+        ),
+        "feasibility_ratio": (
+            round(p.entry_feasibility_ratio, 2)
+            if p.entry_feasibility_ratio is not None else None
+        ),
         "return_pct": round(p.current_pnl_pct, 2),
         "days_held": p.days_held,
         "mfe": round(p.max_favorable_excursion, 2),
