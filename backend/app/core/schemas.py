@@ -428,6 +428,17 @@ class PaperPosition(OSSBaseModel):
     entry_iv_percentile: Optional[float] = None
     entry_iv_rv_ratio: Optional[float] = None
     entry_theta_adjusted_edge: Optional[float] = None
+    # Contract context (from Evaluation)
+    entry_underlying_price: Optional[float] = None
+    entry_moneyness_pct: Optional[float] = None
+    entry_spread_pct: Optional[float] = None
+    entry_open_interest: Optional[int] = None
+    entry_volume: Optional[int] = None
+    # Technical/catalyst context (from FeatureValueTable)
+    entry_days_to_earnings: Optional[int] = None
+    entry_atr14_pct: Optional[float] = None
+    entry_rs_20d: Optional[float] = None
+    entry_feasibility_ratio: Optional[float] = None
 
     # Thesis-driven exit thresholds (applied when thesis is generated)
     thesis_tp1_pct: Optional[float] = None

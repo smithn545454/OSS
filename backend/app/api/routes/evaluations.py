@@ -382,7 +382,10 @@ async def get_evaluation_detail_by_id(
     )
 
     # Merge feature values into evaluation dict for rule matching
-    for feat_key in ("iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"):
+    for feat_key in (
+        "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
+        "days_to_earnings", "atr14_pct", "rs_20d", "feasibility_ratio",
+    ):
         feat = features_dict.get(feat_key)
         if feat and feat.get("value") is not None:
             evaluation[feat_key] = feat["value"]
@@ -898,7 +901,11 @@ async def list_approve_evaluations(
 
         # Merge volatility features into item for rule matching
         for fv in feature_values:
-            if fv.feature_name in ("iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"):
+            if fv.feature_name in (
+                "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
+                "days_to_earnings", "atr14_pct", "rs_20d",
+                "feasibility_ratio",
+            ):
                 if fv.value is not None:
                     item[fv.feature_name] = fv.value
 
