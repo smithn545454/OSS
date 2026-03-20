@@ -1590,6 +1590,7 @@ class SetupRuleRequest(BaseModel):
 
     name: str
     criteria: dict[str, Any]
+    source: Optional[str] = "ai"  # "ai" | "manual"
     source_analysis_id: Optional[str] = None
     performance_at_creation: Optional[dict[str, Any]] = None
     mode: Optional[str] = "production"  # "production" | "test"
@@ -1620,8 +1621,9 @@ async def create_setup_rule_endpoint(request: SetupRuleRequest) -> dict[str, Any
     rule = await create_setup_rule({
         "name": request.name,
         "criteria": request.criteria,
+        "source": request.source or "ai",
         "source_analysis_id": request.source_analysis_id,
-        "performance_at_creation": request.performance_at_creation or {},
+        "performance_at_creation": request.performance_at_creation,
         "mode": request.mode or "production",
     })
     return {"rule": rule, "message": "Setup rule created"}

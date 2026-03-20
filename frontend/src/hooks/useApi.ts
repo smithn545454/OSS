@@ -863,8 +863,10 @@ export function useCreateSetupRule() {
     mutationFn: (data: {
       name: string
       criteria: Record<string, unknown>
+      source?: 'ai' | 'manual'
       source_analysis_id?: string
-      performance_at_creation?: Record<string, unknown>
+      performance_at_creation?: Record<string, unknown> | null
+      mode?: 'production' | 'test'
     }) => api.createSetupRule(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['paper-trading', 'setup-rules'] })

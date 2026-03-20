@@ -1664,17 +1664,19 @@ export interface SetupRule {
   criteria: Record<string, unknown>
   is_active: boolean
   mode: 'production' | 'test'
+  source: 'ai' | 'manual'
   created_at: string
   source_analysis_id: string | null
-  performance_at_creation: ArchetypePerformance
+  performance_at_creation: ArchetypePerformance | null
 }
 
 export interface MatchedRule {
   rule_id: string
   name: string
   mode: 'production' | 'test'
+  source?: 'ai' | 'manual'
   criteria?: Record<string, unknown>
-  performance_at_creation?: ArchetypePerformance
+  performance_at_creation?: ArchetypePerformance | null
 }
 
 // Edge Intelligence types

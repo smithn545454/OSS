@@ -227,7 +227,8 @@ def format_matched_rules(
             "rule_id": rule["rule_id"],
             "name": rule["name"],
             "mode": rule.get("mode", "production"),
-            "performance_at_creation": rule.get("performance_at_creation", {}),
+            "source": rule.get("source", "ai"),
+            "performance_at_creation": rule.get("performance_at_creation"),
         }
         if include_criteria:
             entry["criteria"] = rule.get("criteria", {})

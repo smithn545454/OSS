@@ -19,6 +19,8 @@ import {
   Loader2,
   Radio,
   FlaskConical,
+  Plus,
+  Crosshair,
 } from 'lucide-react'
 import {
   useRunPatternDiscovery,
@@ -31,6 +33,7 @@ import {
   useSetupRulePerformance,
 } from '@/hooks/useApi'
 import type { ArchetypeResult, PatternAnalysis, SetupRule } from '@/lib/types'
+import ManualRuleForm from './ManualRuleForm'
 
 function fmt(val: number | null | undefined, decimals: number = 1): string {
   if (val == null) return '--'
@@ -214,7 +217,7 @@ function ArchetypeCard({ archetype, onPromote, isSaving, isSaved }: ArchetypeCar
 
 function PerformanceComparison({ ruleId, creation }: {
   ruleId: string
-  creation: { win_rate?: number; avg_return?: number; sample_size?: number; avg_days_held?: number }
+  creation: { win_rate?: number; avg_return?: number; sample_size?: number; avg_days_held?: number } | null
 }) {
   const { data, isLoading } = useSetupRulePerformance(ruleId, true)
 
@@ -231,12 +234,31 @@ function PerformanceComparison({ ruleId, creation }: {
     )
   }
 
+  const hasCreationData = creation && (creation.win_rate != null || creation.avg_return != null)
+
   const rows = [
     { label: 'Win Rate', creation: creation?.win_rate != null ? creation.win_rate * 100 : null, current: current.win_rate * 100, suffix: '%' },
     { label: 'Avg Return', creation: creation?.avg_return ?? null, current: current.avg_return, suffix: '%' },
     { label: 'Sample Size', creation: creation?.sample_size ?? null, current: current.sample_size, suffix: '' },
     { label: 'Avg Days Held', creation: creation?.avg_days_held ?? null, current: current.avg_days_held, suffix: '' },
   ]
+
+  if (!hasCreationData) {
+    return (
+      <div className="grid grid-cols-[1fr_80px] gap-x-4 gap-y-1 text-xs">
+        <div className="text-oss-muted font-medium" />
+        <div className="text-oss-muted font-medium text-right">Current</div>
+        {rows.map(({ label, current: cur, suffix }) => (
+          <div key={label} className="contents">
+            <div className="text-oss-muted">{label}</div>
+            <div className="font-mono text-oss-text text-right">
+              {fmt(cur)}{suffix}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className="grid grid-cols-[1fr_80px_80px] gap-x-4 gap-y-1 text-xs">
@@ -292,16 +314,28 @@ function SetupRuleRow({ rule }: { rule: SetupRule }) {
             >
               {rule.is_active ? 'Active' : 'Inactive'}
             </span>
+            {(rule.source ?? 'ai') === 'manual' && (
+              <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-oss-accent/10 text-oss-accent border border-oss-accent/20">
+                <Crosshair className="h-2.5 w-2.5" />
+                Manual
+              </span>
+            )}
             <ModeBadge mode={mode} />
           </div>
           <div className="flex items-center gap-3 mt-0.5 ml-5 text-xs text-oss-muted">
-            <span>
-              WR: {fmt(rule.performance_at_creation?.win_rate ? rule.performance_at_creation.win_rate * 100 : null)}%
-            </span>
-            <span>
-              Avg: {fmt(rule.performance_at_creation?.avg_return)}%
-            </span>
-            <span>n={rule.performance_at_creation?.sample_size ?? '--'}</span>
+            {rule.performance_at_creation && rule.performance_at_creation.win_rate != null ? (
+              <>
+                <span>
+                  WR: {fmt(rule.performance_at_creation.win_rate * 100)}%
+                </span>
+                <span>
+                  Avg: {fmt(rule.performance_at_creation.avg_return)}%
+                </span>
+                <span>n={rule.performance_at_creation.sample_size ?? '--'}</span>
+              </>
+            ) : (
+              <span className="italic">No historical data</span>
+            )}
             <span>Created: {rule.created_at?.slice(0, 10)}</span>
           </div>
         </div>
@@ -357,7 +391,7 @@ function SetupRuleRow({ rule }: { rule: SetupRule }) {
             </h4>
             <PerformanceComparison
               ruleId={rule.rule_id}
-              creation={rule.performance_at_creation ?? {}}
+              creation={rule.performance_at_creation ?? null}
             />
           </div>
         </div>
@@ -382,6 +416,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
   const [pollingId, setPollingId] = useState<string | null>(null)
   const [savedArchetypes, setSavedArchetypes] = useState<Set<string>>(new Set())
   const [savingArchetype, setSavingArchetype] = useState<string | null>(null)
+  const [showManualForm, setShowManualForm] = useState(false)
 
   // Poll for results while analysis is running
   const { data: polledResult } = usePatternAnalysis(pollingId ?? '', pollingId != null)
@@ -417,6 +452,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
         {
           name: archetype.name,
           criteria: archetype.criteria,
+          source: 'ai',
           source_analysis_id: analysisId,
           performance_at_creation: archetype.performance as unknown as Record<string, unknown>,
         },
@@ -526,18 +562,33 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
       )}
 
       {/* Saved Setup Rules */}
-      {rules && rules.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-oss-text mb-2">
-            Saved Setup Rules ({rules.length})
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-oss-text">
+            Saved Setup Rules ({rules?.length ?? 0})
           </h3>
+          <button
+            onClick={() => setShowManualForm(true)}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-oss-accent border border-oss-accent/20 hover:bg-oss-accent/10 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Create Rule
+          </button>
+        </div>
+        {rules && rules.length > 0 ? (
           <div className="rounded-lg border border-oss-border bg-oss-surface overflow-hidden">
             {rules.map((rule) => (
               <SetupRuleRow key={rule.rule_id} rule={rule} />
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="rounded-lg border border-oss-border bg-oss-surface p-4 text-center text-xs text-oss-muted">
+            No setup rules yet. Run AI analysis or create a manual rule to get started.
+          </div>
+        )}
+      </div>
+
+      <ManualRuleForm isOpen={showManualForm} onClose={() => setShowManualForm(false)} />
     </div>
   )
 }

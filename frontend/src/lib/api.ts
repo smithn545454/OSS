@@ -774,8 +774,9 @@ export async function listSetupRules(): Promise<import('./types').SetupRule[]> {
 export async function createSetupRule(data: {
   name: string
   criteria: Record<string, unknown>
+  source?: 'ai' | 'manual'
   source_analysis_id?: string
-  performance_at_creation?: Record<string, unknown>
+  performance_at_creation?: Record<string, unknown> | null
   mode?: 'production' | 'test'
 }): Promise<import('./types').SetupRule> {
   const response = await fetchApi<{ rule: import('./types').SetupRule; message: string }>(

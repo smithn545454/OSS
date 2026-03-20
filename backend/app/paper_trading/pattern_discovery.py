@@ -450,8 +450,9 @@ async def create_setup_rule(rule_data: dict[str, Any]) -> dict[str, Any]:
         "is_active": True,
         "mode": rule_data.get("mode", "production"),
         "created_at": now,
+        "source": rule_data.get("source", "ai"),
         "source_analysis_id": rule_data.get("source_analysis_id"),
-        "performance_at_creation": rule_data.get("performance_at_creation", {}),
+        "performance_at_creation": rule_data.get("performance_at_creation"),
     }
 
     await db.put_item(PaperPositionTable.TABLE, item)
