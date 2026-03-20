@@ -381,6 +381,12 @@ async def get_evaluation_detail_by_id(
         dte=evaluation.get("dte", 30),
     )
 
+    # Merge feature values into evaluation dict for rule matching
+    for feat_key in ("iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"):
+        feat = features_dict.get(feat_key)
+        if feat and feat.get("value") is not None:
+            evaluation[feat_key] = feat["value"]
+
     # Match setup rules (all active rules, both production and test)
     matched_rules_list: list[dict[str, Any]] = []
     try:
@@ -883,11 +889,18 @@ async def list_approve_evaluations(
     async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
         evaluation_id = item.get("evaluation_id", "")
 
-        pillar_scores, gate_results, thesis = await asyncio.gather(
+        pillar_scores, gate_results, thesis, feature_values = await asyncio.gather(
             _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
             _limited(GateResultTable.list_by_evaluation(evaluation_id)),
             _limited(TradeThesisTable.get_by_evaluation_id(evaluation_id)),
+            _limited(FeatureValueTable.list_by_evaluation(evaluation_id)),
         )
+
+        # Merge volatility features into item for rule matching
+        for fv in feature_values:
+            if fv.feature_name in ("iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"):
+                if fv.value is not None:
+                    item[fv.feature_name] = fv.value
 
         pillar_dict = {
             _enum_str(ps.pillar_id): ps.score

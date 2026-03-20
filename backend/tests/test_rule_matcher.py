@@ -233,6 +233,165 @@ class TestMatchesRule:
             [],
         )
 
+    # --- Volatility feature criteria ---
+
+    def test_iv_percentile_max_passes(self):
+        assert matches_rule(
+            {"iv_percentile_max": 30},
+            _eval(iv_percentile=21.0),
+            _decision(),
+            [],
+        )
+
+    def test_iv_percentile_max_fails(self):
+        assert not matches_rule(
+            {"iv_percentile_max": 30},
+            _eval(iv_percentile=45.0),
+            _decision(),
+            [],
+        )
+
+    def test_iv_percentile_max_exact(self):
+        assert matches_rule(
+            {"iv_percentile_max": 30},
+            _eval(iv_percentile=30.0),
+            _decision(),
+            [],
+        )
+
+    def test_iv_percentile_max_missing_data_fails(self):
+        """Missing iv_percentile means we can't confirm the setup — no match."""
+        assert not matches_rule(
+            {"iv_percentile_max": 30},
+            _eval(),  # No iv_percentile field
+            _decision(),
+            [],
+        )
+
+    def test_iv_percentile_min_passes(self):
+        assert matches_rule(
+            {"iv_percentile_min": 70},
+            _eval(iv_percentile=80.0),
+            _decision(),
+            [],
+        )
+
+    def test_iv_percentile_min_fails(self):
+        assert not matches_rule(
+            {"iv_percentile_min": 70},
+            _eval(iv_percentile=50.0),
+            _decision(),
+            [],
+        )
+
+    def test_iv_rv_ratio_max_passes(self):
+        """IV < HV means ratio < 1.0."""
+        assert matches_rule(
+            {"iv_rv_ratio_max": 1.0},
+            _eval(iv_rv_ratio=0.87),
+            _decision(),
+            [],
+        )
+
+    def test_iv_rv_ratio_max_fails(self):
+        assert not matches_rule(
+            {"iv_rv_ratio_max": 1.0},
+            _eval(iv_rv_ratio=1.15),
+            _decision(),
+            [],
+        )
+
+    def test_iv_rv_ratio_max_missing_data_fails(self):
+        """Missing iv_rv_ratio means we can't confirm the setup — no match."""
+        assert not matches_rule(
+            {"iv_rv_ratio_max": 1.0},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    def test_iv_rv_ratio_min_passes(self):
+        assert matches_rule(
+            {"iv_rv_ratio_min": 1.25},
+            _eval(iv_rv_ratio=1.5),
+            _decision(),
+            [],
+        )
+
+    def test_iv_rv_ratio_min_fails(self):
+        assert not matches_rule(
+            {"iv_rv_ratio_min": 1.25},
+            _eval(iv_rv_ratio=1.0),
+            _decision(),
+            [],
+        )
+
+    def test_theta_adjusted_edge_min_passes(self):
+        assert matches_rule(
+            {"theta_adjusted_edge_min": 1.5},
+            _eval(theta_adjusted_edge=2.0),
+            _decision(),
+            [],
+        )
+
+    def test_theta_adjusted_edge_min_fails(self):
+        assert not matches_rule(
+            {"theta_adjusted_edge_min": 1.5},
+            _eval(theta_adjusted_edge=1.0),
+            _decision(),
+            [],
+        )
+
+    def test_theta_adjusted_edge_min_missing_data_fails(self):
+        """Missing theta_adjusted_edge means we can't confirm the setup — no match."""
+        assert not matches_rule(
+            {"theta_adjusted_edge_min": 1.5},
+            _eval(),
+            _decision(),
+            [],
+        )
+
+    def test_volatility_tailwind_combined(self):
+        """Combined IV < HV + low percentile = volatility tailwind setup."""
+        criteria = {
+            "iv_rv_ratio_max": 1.0,
+            "iv_percentile_max": 30,
+        }
+        # Matches: IV/RV = 0.87 (cheap), percentile = 21 (historically cheap)
+        assert matches_rule(
+            criteria,
+            _eval(iv_rv_ratio=0.87, iv_percentile=21.0),
+            _decision(),
+            [],
+        )
+
+    def test_volatility_tailwind_one_criterion_fails(self):
+        """If IV is cheap but percentile is high, rule doesn't match."""
+        criteria = {
+            "iv_rv_ratio_max": 1.0,
+            "iv_percentile_max": 30,
+        }
+        assert not matches_rule(
+            criteria,
+            _eval(iv_rv_ratio=0.87, iv_percentile=55.0),
+            _decision(),
+            [],
+        )
+
+    def test_full_volatility_tailwind_with_theta_edge(self):
+        """Full tailwind: cheap IV + low percentile + strong theta edge."""
+        criteria = {
+            "iv_rv_ratio_max": 1.0,
+            "iv_percentile_max": 30,
+            "theta_adjusted_edge_min": 1.5,
+        }
+        assert matches_rule(
+            criteria,
+            _eval(iv_rv_ratio=0.87, iv_percentile=21.0, theta_adjusted_edge=2.3),
+            _decision(),
+            [],
+        )
+
 
 class TestMatchRules:
     def test_returns_matching_rules(self):

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from app.core.schemas import (
     Decision,
@@ -153,7 +153,7 @@ async def create_position_from_evaluation(
 
         all_rules = await list_setup_rules()
         if all_rules:
-            eval_dict = {
+            eval_dict: dict[str, Any] = {
                 "option_type": (
                     evaluation.option_type.value
                     if hasattr(evaluation.option_type, "value")
@@ -166,6 +166,20 @@ async def create_position_from_evaluation(
                 "open_interest": getattr(evaluation, "open_interest", None),
                 "volume": getattr(evaluation, "volume", None),
             }
+            # Load volatility features for rule matching
+            try:
+                from app.db.tables import FeatureValueTable
+                feat_values = await FeatureValueTable.list_by_evaluation(
+                    evaluation.evaluation_id
+                )
+                for fv in feat_values:
+                    if fv.feature_name in (
+                        "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge"
+                    ):
+                        if fv.value is not None:
+                            eval_dict[fv.feature_name] = fv.value
+            except Exception as e:
+                logger.warning(f"Failed to load features for rule matching: {e}")
             decision_dict = {
                 "final_score": decision.final_score,
                 "directional_score": decision.directional_score,

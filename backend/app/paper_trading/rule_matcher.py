@@ -75,6 +75,27 @@ def _check_criterion(
             iv = evaluation.get("iv")
             return iv is not None and iv <= float(value)
 
+        # Volatility feature criteria (from FeatureValueTable, merged into evaluation dict)
+        if key == "iv_percentile_max":
+            pct = evaluation.get("iv_percentile")
+            return pct is not None and pct <= float(value)
+
+        if key == "iv_percentile_min":
+            pct = evaluation.get("iv_percentile")
+            return pct is not None and pct >= float(value)
+
+        if key == "iv_rv_ratio_max":
+            ratio = evaluation.get("iv_rv_ratio")
+            return ratio is not None and ratio <= float(value)
+
+        if key == "iv_rv_ratio_min":
+            ratio = evaluation.get("iv_rv_ratio")
+            return ratio is not None and ratio >= float(value)
+
+        if key == "theta_adjusted_edge_min":
+            edge = evaluation.get("theta_adjusted_edge")
+            return edge is not None and edge >= float(value)
+
         # Unknown criteria are ignored for forward compatibility
         return True
 
