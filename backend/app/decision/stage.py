@@ -217,25 +217,95 @@ class DecisionStage:
             return []
         
         logger.info(f"Generating theses for {len(approved)} APPROVE evaluations")
-        
+
         generator = self._get_thesis_generator()
         theses: list[TradeThesis] = []
-        
+
+        # Fetch setup rules once for all evaluations
+        all_setup_rules: list[dict[str, Any]] = []
+        total_active_rules = 0
+        try:
+            from app.paper_trading.pattern_discovery import list_setup_rules
+            all_setup_rules = await list_setup_rules()
+            total_active_rules = len(
+                [r for r in all_setup_rules if r.get("is_active", True)]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fetch setup rules for thesis generation: {e}")
+
         for evaluation in approved:
             try:
                 eval_id = evaluation.evaluation_id
                 decision = decisions[eval_id]
-                
+
                 # Get pillar results - convert to PillarScore list
                 pillar_result_list = pillar_results.get(eval_id, [])
                 pillar_scores = [pr.to_pillar_score() for pr in pillar_result_list]
-                
+
                 # Get scanner triggers
                 triggers = list(scanner_triggers.get(eval_id, []))
-                
+
                 # Get features
                 eval_features = features.get(eval_id, {})
-                
+
+                # Match setup rules against this evaluation
+                matched_rules: list[dict[str, Any]] = []
+                if all_setup_rules:
+                    try:
+                        from app.paper_trading.rule_matcher import (
+                            format_matched_rules,
+                            match_rules,
+                        )
+                        eval_dict: dict[str, Any] = {
+                            "option_type": str(
+                                evaluation.option_type.value
+                                if hasattr(evaluation.option_type, "value")
+                                else evaluation.option_type
+                            ),
+                            "dte": evaluation.dte,
+                            "iv": evaluation.iv,
+                            "delta": evaluation.delta,
+                            "spread_pct": evaluation.spread_pct,
+                            "open_interest": evaluation.open_interest,
+                            "volume": evaluation.volume,
+                            "underlying_price": evaluation.underlying_price,
+                            "strike": evaluation.strike,
+                            "mid": evaluation.mid,
+                        }
+                        # Add feature-based fields if available
+                        for feat_key in (
+                            "iv_percentile", "iv_rv_ratio", "atr14_pct",
+                            "rs_20d", "feasibility_ratio", "theta_adjusted_edge",
+                            "days_to_earnings",
+                        ):
+                            if feat_key in eval_features:
+                                eval_dict[feat_key] = eval_features[feat_key]
+
+                        decision_dict: dict[str, Any] = {
+                            "final_score": decision.final_score,
+                            "directional_score": decision.directional_score,
+                            "volatility_score": decision.volatility_score,
+                            "structure_score": decision.structure_score,
+                        }
+                        scanner_names = [
+                            str(
+                                t.scanner_type.value
+                                if hasattr(t.scanner_type, "value")
+                                else t.scanner_type
+                            )
+                            for t in triggers
+                        ]
+                        matched = match_rules(
+                            all_setup_rules, eval_dict, decision_dict, scanner_names
+                        )
+                        matched_rules = format_matched_rules(
+                            matched, include_criteria=True
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Setup rule matching failed for {eval_id}: {e}"
+                        )
+
                 # Generate thesis
                 thesis = await generator.generate(
                     evaluation=evaluation,
@@ -243,6 +313,8 @@ class DecisionStage:
                     pillar_scores=pillar_scores,
                     scanner_triggers=triggers,
                     features=eval_features,
+                    matched_rules=matched_rules,
+                    total_active_rules=total_active_rules,
                 )
                 
                 # Persist thesis

@@ -105,6 +105,8 @@ class ThesisGenerator:
         pillar_scores: Sequence[PillarScore],
         scanner_triggers: Sequence[ScannerTrigger],
         features: Optional[dict[str, Any]] = None,
+        matched_rules: Optional[list[dict[str, Any]]] = None,
+        total_active_rules: int = 0,
     ) -> ThesisInput:
         """Build ThesisInput from evaluation data.
 
@@ -196,6 +198,23 @@ class ThesisGenerator:
         if decision.quality_tier:
             quality_tier = str(decision.quality_tier.value) if hasattr(decision.quality_tier, 'value') else str(decision.quality_tier)
 
+        # Enrich matched rules with top-level performance fields for prompt formatting
+        enriched_rules: list[dict[str, Any]] = []
+        for rule in (matched_rules or []):
+            enriched: dict[str, Any] = {
+                "name": rule.get("name", "Unknown Rule"),
+                "mode": rule.get("mode", "production"),
+                "source": rule.get("source", "ai"),
+                "matched_criteria": rule.get("criteria", {}),
+            }
+            # Extract performance from performance_at_creation if available
+            perf = rule.get("performance_at_creation") or {}
+            if perf:
+                enriched["win_rate"] = perf.get("win_rate")
+                enriched["avg_return"] = perf.get("avg_return")
+                enriched["sample_size"] = perf.get("sample_size")
+            enriched_rules.append(enriched)
+
         return ThesisInput(
             underlying=underlying,
             contract=contract,
@@ -205,6 +224,8 @@ class ThesisGenerator:
             policy_version=evaluation.policy_version,
             quality_tier=quality_tier,
             evaluation_id=evaluation.evaluation_id,
+            setup_rule_matches=enriched_rules,
+            total_active_rules=total_active_rules,
         )
 
     async def generate(
@@ -214,6 +235,8 @@ class ThesisGenerator:
         pillar_scores: Sequence[PillarScore],
         scanner_triggers: Sequence[ScannerTrigger],
         features: Optional[dict[str, Any]] = None,
+        matched_rules: Optional[list[dict[str, Any]]] = None,
+        total_active_rules: int = 0,
     ) -> TradeThesis:
         """Generate trade thesis for an APPROVE evaluation.
 
@@ -271,6 +294,8 @@ class ThesisGenerator:
                 pillar_scores=pillar_scores,
                 scanner_triggers=scanner_triggers,
                 features=features,
+                matched_rules=matched_rules,
+                total_active_rules=total_active_rules,
             )
             prompt = build_thesis_prompt(input_data)
 

@@ -17,6 +17,7 @@ You will receive data about:
 - The option contract (type, strike, expiration, Greeks, breakeven, expected move)
 - Scoring metrics (directional, volatility, structure scores)
 - The factors that contributed to the recommendation
+- Setup rule matches (codified trade archetypes from the trader's rule library)
 
 Based on this data, provide a comprehensive trade thesis that explains:
 1. Why this trade setup is favorable
@@ -34,14 +35,42 @@ EXIT TARGET GUIDELINES:
 - Time exit should consider theta decay acceleration near expiration
 - All option_pnl_pct values represent the percentage change in the option's price (positive for gains, negative for losses)
 
+SETUP RULE CONTEXT:
+The trader maintains a library of setup rules — codified trade archetypes based on historical
+patterns and volatility research. When one or more rules match this opportunity, incorporate
+this into your thesis:
+
+- Reference which rules matched and why that archetype applies to this trade
+- If a rule has historical performance data (win rate, sample size), cite it as supporting
+  evidence. Weight rules with larger samples (n>15) and higher win rates (>70%) more heavily.
+- If multiple rules match (confluence), explicitly call this out as increasing conviction.
+  Multi-rule confluence is the trader's highest-confidence signal.
+- If a matched rule has no historical data yet (no win rate or sample size), note that the
+  thesis aligns with the archetype but remains unvalidated by historical performance.
+- If zero rules match, note this explicitly — it means the trade does not fit any established
+  archetype, which is a caution flag worth acknowledging.
+
 Your response MUST be valid JSON matching the exact schema provided."""
 
 THESIS_OUTPUT_SCHEMA = """{
-  "setup_summary": "string - One paragraph executive summary of the trade setup",
-  "thesis": "string - Detailed 2-3 paragraph explanation of why this trade is attractive",
-  "supporting_evidence": ["string - List of 3-5 specific data points supporting the trade"],
+  "setup_summary": "string - One paragraph executive summary of the trade setup, referencing matched setup rules if any",
+  "thesis": "string - Detailed 2-3 paragraph explanation of why this trade is attractive, integrating setup rule context",
+  "supporting_evidence": ["string - List of 3-5 specific data points supporting the trade, including setup rule performance where available"],
   "risks": ["string - List of 2-4 key risks to monitor"],
   "invalidation_conditions": ["string - List of 2-3 conditions that would invalidate this thesis"],
+  "setup_rule_matches": {
+    "count": 2,
+    "total_active_rules": 9,
+    "matched_rules": [
+      {
+        "name": "Rule Name Here",
+        "has_historical_data": true,
+        "win_rate": 74.0,
+        "sample_size": 19
+      }
+    ],
+    "confluence_assessment": "string - How rule overlap affects conviction level for this trade"
+  },
   "exit_plan": {
     "take_profits": [
       {
@@ -185,6 +214,49 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
     else:
         triggers_text += "- No specific scanner triggers\n"
 
+    # Format setup rule matches
+    setup_rules_text = "\n**Setup Rule Matches**\n"
+    setup_rules = data.get("setup_rule_matches", [])
+    total_active_rules = data.get("total_active_rules", 0)
+
+    if setup_rules:
+        for rule in setup_rules:
+            rule_name = rule.get("name", "Unknown Rule")
+            rule_mode = rule.get("mode", "Production")
+            rule_source = rule.get("source", "AI-Discovered")
+
+            # Build tag string
+            tags = []
+            if rule_source == "Manual":
+                tags.append("Manual")
+            tags.append(rule_mode)
+            tag_str = f"[{', '.join(tags)}]"
+
+            setup_rules_text += f"- {rule_name} {tag_str}\n"
+
+            # Historical performance if available
+            win_rate = rule.get("win_rate")
+            avg_return = rule.get("avg_return")
+            sample_size = rule.get("sample_size")
+            if win_rate is not None and sample_size is not None:
+                setup_rules_text += f"  Win Rate: {win_rate:.1f}%, Avg Return: {avg_return:.1f}%, Sample: n={sample_size}\n"
+            else:
+                setup_rules_text += "  Win Rate: N/A (no historical data yet)\n"
+
+            # Matched criteria
+            matched_criteria = rule.get("matched_criteria", {})
+            if matched_criteria:
+                criteria_parts = [
+                    f"{k}: {v}" for k, v in matched_criteria.items()
+                ]
+                setup_rules_text += f"  Matched Criteria: {', '.join(criteria_parts)}\n"
+
+        setup_rules_text += f"\nRule Confluence Count: {len(setup_rules)} of {total_active_rules} active rules matched\n"
+    else:
+        setup_rules_text += "- No setup rules matched this opportunity\n"
+        if total_active_rules > 0:
+            setup_rules_text += f"  (0 of {total_active_rules} active rules triggered — trade does not fit any established archetype)\n"
+
     # Build the complete prompt
     prompt = f"""{THESIS_SYSTEM_PROMPT}
 
@@ -198,6 +270,7 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 {scores_text}
 {contributors_text}
 {triggers_text}
+{setup_rules_text}
 
 ---
 
@@ -257,6 +330,18 @@ def parse_thesis_response(response: str) -> dict[str, Any]:
     missing = [f for f in required_fields if f not in data]
     if missing:
         raise ValueError(f"Missing required fields in thesis: {missing}")
+
+    # Validate setup_rule_matches if present (not required for backward compatibility)
+    setup_rule_matches = data.get("setup_rule_matches")
+    if setup_rule_matches and isinstance(setup_rule_matches, dict):
+        if "matched_rules" in setup_rule_matches:
+            for rule in setup_rule_matches["matched_rules"]:
+                rule_required = ["name", "has_historical_data"]
+                rule_missing = [f for f in rule_required if f not in rule]
+                if rule_missing:
+                    raise ValueError(
+                        f"setup_rule_matches.matched_rules entry missing fields: {rule_missing}"
+                    )
 
     # Validate exit_plan structure
     exit_plan = data.get("exit_plan", {})

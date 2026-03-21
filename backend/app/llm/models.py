@@ -91,6 +91,8 @@ class ThesisInput:
     policy_version: str
     quality_tier: Optional[str] = None
     evaluation_id: Optional[str] = None
+    setup_rule_matches: list[dict[str, Any]] = field(default_factory=list)
+    total_active_rules: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for prompt formatting."""
@@ -153,6 +155,8 @@ class ThesisInput:
             ],
             "policy_version": self.policy_version,
             "quality_tier": self.quality_tier,
+            "setup_rule_matches": self.setup_rule_matches,
+            "total_active_rules": self.total_active_rules,
         }
 
 
