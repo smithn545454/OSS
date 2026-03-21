@@ -1025,6 +1025,38 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
 
         features_dict = {f.feature_name: f.value for f in features}
 
+        # Match setup rules against this evaluation
+        matched_rules: list[dict[str, Any]] = []
+        total_active_rules = 0
+        try:
+            from app.paper_trading.pattern_discovery import list_setup_rules
+            from app.paper_trading.rule_matcher import format_matched_rules, match_rules
+
+            all_rules = await list_setup_rules()
+            total_active_rules = len(
+                [r for r in all_rules if r.get("is_active", True)]
+            )
+            if all_rules:
+                eval_match_dict = evaluation.model_dump()
+                eval_match_dict["option_type"] = str(
+                    evaluation.option_type.value
+                    if hasattr(evaluation.option_type, "value")
+                    else evaluation.option_type
+                )
+                eval_match_dict.update(features_dict)
+                decision_dict = {
+                    "final_score": decision.final_score,
+                    "directional_score": decision.directional_score,
+                    "volatility_score": decision.volatility_score,
+                    "structure_score": decision.structure_score,
+                }
+                matched = match_rules(
+                    all_rules, eval_match_dict, decision_dict, scanner_triggers
+                )
+                matched_rules = format_matched_rules(matched, include_criteria=True)
+        except Exception as e:
+            logger.warning(f"Setup rule matching failed for thesis worker: {e}")
+
         # Generate thesis (the LLM call — no timeout pressure here)
         generator = ThesisGenerator()
         thesis = await generator.generate(
@@ -1033,6 +1065,8 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
             pillar_scores=pillar_scores,
             scanner_triggers=scanner_triggers,
             features=features_dict,
+            matched_rules=matched_rules,
+            total_active_rules=total_active_rules,
         )
 
         # Overwrite the GENERATING stub with the same thesis_id (same PK+SK)
