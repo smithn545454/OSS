@@ -73,7 +73,7 @@ export function CompactRowCard({ evaluation, rank, className = '' }: CompactRowC
       </div>
 
       {/* Zone 3: Identity Block */}
-      <IdentityBlock evaluation={evaluation} rank={rank} />
+      <IdentityBlock evaluation={evaluation} />
 
       {/* Zone 4: Signals & Setup Rules */}
       <SignalsZone evaluation={evaluation} />
@@ -84,9 +84,8 @@ export function CompactRowCard({ evaluation, rank, className = '' }: CompactRowC
   )
 }
 
-function IdentityBlock({ evaluation, rank }: { evaluation: ApproveEvaluation; rank: number }) {
+function IdentityBlock({ evaluation }: { evaluation: ApproveEvaluation }) {
   const isCall = evaluation.option_type === 'CALL'
-  const isTopPick = rank === 1
 
   // Format expiry: "Mar 26" (short, no year for current year)
   const expiryDisplay = formatExpirationDate(evaluation.expiration_date)
@@ -129,20 +128,6 @@ function IdentityBlock({ evaluation, rank }: { evaluation: ApproveEvaluation; ra
           ${evaluation.strike}
         </span>
 
-        {isTopPick && (
-          <span style={{
-            padding: '2px 8px',
-            borderRadius: '4px',
-            fontSize: '10px',
-            fontWeight: 700,
-            letterSpacing: '0.05em',
-            color: '#FFB800',
-            background: 'linear-gradient(135deg, #FFB80030, #FF6B0030)',
-            border: '1px solid #FFB80040',
-          }}>
-            TOP PICK
-          </span>
-        )}
       </div>
 
       {/* Line 2: Expiry + DTE */}
