@@ -256,30 +256,15 @@ class DecisionStage:
                             format_matched_rules,
                             match_rules,
                         )
-                        eval_dict: dict[str, Any] = {
-                            "option_type": str(
-                                evaluation.option_type.value
-                                if hasattr(evaluation.option_type, "value")
-                                else evaluation.option_type
-                            ),
-                            "dte": evaluation.dte,
-                            "iv": evaluation.iv,
-                            "delta": evaluation.delta,
-                            "spread_pct": evaluation.spread_pct,
-                            "open_interest": evaluation.open_interest,
-                            "volume": evaluation.volume,
-                            "underlying_price": evaluation.underlying_price,
-                            "strike": evaluation.strike,
-                            "mid": evaluation.mid,
-                        }
-                        # Add feature-based fields if available
-                        for feat_key in (
-                            "iv_percentile", "iv_rv_ratio", "atr14_pct",
-                            "rs_20d", "feasibility_ratio", "theta_adjusted_edge",
-                            "days_to_earnings",
-                        ):
-                            if feat_key in eval_features:
-                                eval_dict[feat_key] = eval_features[feat_key]
+                        # Use full evaluation dict (mirrors evaluation_snapshot pattern)
+                        eval_dict = evaluation.model_dump()
+                        eval_dict["option_type"] = str(
+                            evaluation.option_type.value
+                            if hasattr(evaluation.option_type, "value")
+                            else evaluation.option_type
+                        )
+                        # Overlay Stage 4 feature fields
+                        eval_dict.update(eval_features)
 
                         decision_dict: dict[str, Any] = {
                             "final_score": decision.final_score,
