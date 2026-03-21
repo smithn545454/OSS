@@ -9,35 +9,54 @@ import { getConvictionColorClass } from '@/lib/convictionScore'
 
 interface ConvictionGaugeProps {
   score: number
-  size?: 'default' | 'mini'
+  size?: 'default' | 'mini' | 'compact'
   className?: string
 }
 
+// Score color for compact size (spec §2.2): cyan for ≥75, amber 60-74, red <60
+function getCompactScoreColor(score: number): string {
+  if (score >= 75) return '#00E5CC'
+  if (score >= 60) return '#FFB800'
+  return '#FF4D6A'
+}
+
+const SIZE_CONFIG = {
+  default: { diameter: 56, strokeWidth: 4 },
+  mini: { diameter: 32, strokeWidth: 3 },
+  compact: { diameter: 44, strokeWidth: 3 },
+} as const
+
 export function ConvictionGauge({ score, size = 'default', className = '' }: ConvictionGaugeProps) {
-  const isMini = size === 'mini'
-  const diameter = isMini ? 32 : 56
-  const strokeWidth = isMini ? 3 : 4
+  const { diameter, strokeWidth } = SIZE_CONFIG[size]
   const radius = (diameter - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
   const progress = Math.max(0, Math.min(100, score)) / 100
   const strokeDashoffset = circumference * (1 - progress)
-  
+  const isCompact = size === 'compact'
+
   // Get color class based on score
   const colorClass = getConvictionColorClass(score)
   const fillClass = `conviction-gauge-fill conviction-gauge-fill--${colorClass.split('-')[1]}`
 
+  // Compact size uses spec-defined colors and inline glow
+  const compactColor = isCompact ? getCompactScoreColor(score) : undefined
+
+  const sizeClass = size === 'mini' ? 'conviction-gauge--mini'
+    : size === 'compact' ? 'conviction-gauge--compact'
+    : ''
+
   return (
-    <div 
-      className={`conviction-gauge ${isMini ? 'conviction-gauge--mini' : ''} ${className}`}
+    <div
+      className={`conviction-gauge ${sizeClass} ${className}`}
       role="meter"
       aria-valuenow={Math.round(score)}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-label={`Conviction score: ${Math.round(score)}`}
     >
-      <svg 
-        width={diameter} 
-        height={diameter} 
+      <svg
+        width={diameter}
+        height={diameter}
         viewBox={`0 0 ${diameter} ${diameter}`}
       >
         {/* Background track */}
@@ -46,10 +65,11 @@ export function ConvictionGauge({ score, size = 'default', className = '' }: Con
           cx={diameter / 2}
           cy={diameter / 2}
           r={radius}
+          style={isCompact ? { stroke: '#1A1F2E' } : undefined}
         />
         {/* Progress fill */}
         <circle
-          className={fillClass}
+          className={isCompact ? undefined : fillClass}
           cx={diameter / 2}
           cy={diameter / 2}
           r={radius}
@@ -57,17 +77,28 @@ export function ConvictionGauge({ score, size = 'default', className = '' }: Con
           strokeDashoffset={strokeDashoffset}
           style={{
             transformOrigin: 'center',
+            ...(isCompact ? {
+              fill: 'none',
+              stroke: compactColor,
+              strokeWidth,
+              strokeLinecap: 'round' as const,
+              transform: 'rotate(-90deg)',
+              filter: `drop-shadow(0 0 4px ${compactColor}40)`,
+            } : {}),
           }}
         />
       </svg>
-      <span 
+      <span
         className="conviction-gauge-value"
         style={{
-          color: score >= 85 
-            ? 'var(--color-conviction-high)' 
-            : score >= 75 
-              ? 'var(--color-conviction-medium)' 
-              : 'var(--color-conviction-low)',
+          color: isCompact
+            ? compactColor
+            : score >= 85
+              ? 'var(--color-conviction-high)'
+              : score >= 75
+                ? 'var(--color-conviction-medium)'
+                : 'var(--color-conviction-low)',
+          ...(isCompact ? { fontSize: '14px', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" } : {}),
         }}
       >
         {Math.round(score)}

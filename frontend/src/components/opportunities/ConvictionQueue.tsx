@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import type { ApproveEvaluation } from '@/lib/types'
 import { filterByConvictionThreshold, sortByConviction, sortByComposite } from '@/lib/convictionScore'
-import { OpportunityCard } from './OpportunityCard'
+import { CompactRowCard } from './CompactRowCard'
 
 interface ConvictionQueueProps {
   evaluations: ApproveEvaluation[]
@@ -156,13 +156,13 @@ export function ConvictionQueue({
           style={{ 
             display: 'flex', 
             flexDirection: 'column', 
-            gap: '12px' 
+            gap: '8px'
           }}
           role="list"
           aria-label="High conviction opportunities"
         >
           {highConviction.map((evaluation, index) => (
-            <OpportunityCard
+            <CompactRowCard
               key={evaluation.evaluation_id}
               evaluation={evaluation}
               rank={index + 1}
