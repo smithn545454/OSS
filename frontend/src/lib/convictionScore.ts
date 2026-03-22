@@ -9,6 +9,7 @@ import type {
   ApproveEvaluation,
   ConvictionScoreBreakdown,
   ConvictionScoreWeights,
+  MatchedRule,
   UrgencyLevel,
   ScannerType,
 } from './types'
@@ -18,11 +19,12 @@ export type { ConvictionScoreWeights }
 
 // Default weights (Section 4.1)
 export const DEFAULT_WEIGHTS: ConvictionScoreWeights = {
-  thetaAdjustedEv: 0.40,
-  compositePillar: 0.25,
-  gateMargin: 0.15,
-  scannerConvergence: 0.10,
-  timeSensitivity: 0.10,
+  thetaAdjustedEv: 0.37,
+  compositePillar: 0.23,
+  gateMargin: 0.13,
+  scannerConvergence: 0.09,
+  timeSensitivity: 0.08,
+  setupRules: 0.10,
 }
 
 // Default EV benchmark for normalization.
@@ -90,6 +92,38 @@ export function getTimeSensitivityBoost(urgency: UrgencyLevel): number {
   return URGENCY_BOOST[urgency] ?? 0
 }
 
+// Sample size threshold for setup rule quality ramp
+const SETUP_RULE_SAMPLE_THRESHOLD = 20
+
+/**
+ * Calculate setup rule component score (0-100).
+ *
+ * For each matched rule, compute a quality-adjusted score:
+ *   rule_score = win_rate * 100 * quality_factor
+ *   quality_factor = min(1.0, sample_size / SAMPLE_THRESHOLD)
+ *
+ * Final score = min(100, sum of top 3 rule scores).
+ * Returns 0 when no rules match (neutral, not penalizing).
+ */
+export function calculateSetupRuleScore(matchedRules?: MatchedRule[]): number {
+  if (!matchedRules || matchedRules.length === 0) return 0
+
+  const ruleScores = matchedRules
+    .map(rule => {
+      const perf = rule.performance_at_creation
+      if (!perf) return 0
+      const winRate = perf.win_rate ?? 0
+      const sampleSize = perf.sample_size ?? 0
+      const qualityFactor = Math.min(1.0, sampleSize / SETUP_RULE_SAMPLE_THRESHOLD)
+      return winRate * 100 * qualityFactor
+    })
+    .sort((a, b) => b - a) // Descending
+
+  // Take top 3 to prevent inflation from many overlapping rules
+  const top3Sum = ruleScores.slice(0, 3).reduce((sum, s) => sum + s, 0)
+  return Math.min(100, top3Sum)
+}
+
 /**
  * Calculate the full conviction score with breakdown.
  * Per Section 4.3:
@@ -128,8 +162,13 @@ export function calculateConvictionScore(
   const timeNormalized = timeRaw // Already 0-100
   const timeWeighted = timeNormalized * weights.timeSensitivity
 
+  // 6. Setup Rules Score
+  const setupRulesRaw = calculateSetupRuleScore(evaluation.matchedRules)
+  const setupRulesNormalized = setupRulesRaw // Already 0-100
+  const setupRulesWeighted = setupRulesNormalized * weights.setupRules
+
   // Calculate total
-  const total = evWeighted + pillarWeighted + marginWeighted + convergenceWeighted + timeWeighted
+  const total = evWeighted + pillarWeighted + marginWeighted + convergenceWeighted + timeWeighted + setupRulesWeighted
 
   return {
     total: Math.round(total * 10) / 10, // Round to 1 decimal
@@ -158,6 +197,11 @@ export function calculateConvictionScore(
         raw: timeRaw,
         normalized: timeNormalized,
         weighted: Math.round(timeWeighted * 10) / 10,
+      },
+      setupRules: {
+        raw: setupRulesRaw,
+        normalized: Math.round(setupRulesNormalized * 10) / 10,
+        weighted: Math.round(setupRulesWeighted * 10) / 10,
       },
     },
   }
