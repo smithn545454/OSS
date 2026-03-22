@@ -119,6 +119,8 @@ def _position_to_dict(pos: Any) -> dict[str, Any]:
         "entry_theta": pos.entry_theta,
         "gate_margin": pos.gate_margin,
         "theta_adj_ev": pos.theta_adj_ev,
+        "matched_rule_ids": pos.matched_rule_ids,
+        "matched_rules": pos.matched_rules,
     }
 
 

@@ -447,6 +447,7 @@ class PaperPosition(OSSBaseModel):
 
     # Setup rule matching (populated at creation for performance tracking)
     matched_rule_ids: Optional[list[str]] = None
+    matched_rules: Optional[list[dict[str, Any]]] = None  # Full rule snapshots at creation
 
 
 # ============================================================================

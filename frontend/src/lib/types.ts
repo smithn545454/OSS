@@ -193,6 +193,8 @@ export interface PaperPosition {
   entry_theta: number | null
   gate_margin: number | null
   theta_adj_ev: number | null
+  matched_rule_ids: string[] | null
+  matched_rules: MatchedRule[] | null
 }
 
 // Enriched position — now just an alias since enrichment is on PaperPosition

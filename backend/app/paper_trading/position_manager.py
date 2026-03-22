@@ -184,7 +184,7 @@ async def create_position_from_evaluation(
     # Match setup rules at position creation time
     try:
         from app.paper_trading.pattern_discovery import list_setup_rules
-        from app.paper_trading.rule_matcher import match_rules
+        from app.paper_trading.rule_matcher import format_matched_rules, match_rules
 
         all_rules = await list_setup_rules()
         if all_rules:
@@ -215,6 +215,7 @@ async def create_position_from_evaluation(
             matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
             if matched:
                 position.matched_rule_ids = [r["rule_id"] for r in matched]
+                position.matched_rules = format_matched_rules(matched, include_criteria=True)
     except Exception as e:
         logger.warning(f"Setup rule matching failed during position creation: {e}")
 
