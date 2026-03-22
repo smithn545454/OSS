@@ -1050,8 +1050,16 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
                     "volatility_score": decision.volatility_score,
                     "structure_score": decision.structure_score,
                 }
+                scanner_names = [
+                    str(
+                        st.scanner_type.value
+                        if hasattr(st.scanner_type, "value")
+                        else st.scanner_type
+                    )
+                    for st in scanner_triggers
+                ]
                 matched = match_rules(
-                    all_rules, eval_match_dict, decision_dict, scanner_triggers
+                    all_rules, eval_match_dict, decision_dict, scanner_names
                 )
                 matched_rules = format_matched_rules(matched, include_criteria=True)
         except Exception as e:
