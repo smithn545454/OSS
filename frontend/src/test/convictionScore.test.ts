@@ -4,7 +4,6 @@ import {
   calculateCompositePillar,
   getConvergenceBonus,
   getTimeSensitivityBoost,
-  calculateSetupRuleScore,
   calculateConvictionScore,
   enhanceWithConvictionScores,
   sortByConviction,
@@ -18,7 +17,7 @@ import {
   DEFAULT_WEIGHTS,
   DEFAULT_EV_BENCHMARK,
 } from '../lib/convictionScore'
-import type { ApproveEvaluation, MatchedRule, ScannerType, UrgencyLevel } from '../lib/types'
+import type { ApproveEvaluation, ScannerType, UrgencyLevel } from '../lib/types'
 
 // ---------------------------------------------------------------------------
 // Helper: builds a minimal ApproveEvaluation with overrides
@@ -208,110 +207,6 @@ describe('getTimeSensitivityBoost', () => {
 })
 
 // ===========================================================================
-// calculateSetupRuleScore
-// ===========================================================================
-describe('calculateSetupRuleScore', () => {
-  function makeRule(overrides: Partial<MatchedRule> = {}): MatchedRule {
-    return {
-      rule_id: 'rule-001',
-      name: 'Test Rule',
-      mode: 'production',
-      performance_at_creation: {
-        win_rate: 0.7,
-        avg_return: 15,
-        median_return: 12,
-        sample_size: 25,
-        avg_days_held: 5,
-      },
-      ...overrides,
-    }
-  }
-
-  it('returns 0 for undefined matchedRules', () => {
-    expect(calculateSetupRuleScore(undefined)).toBe(0)
-  })
-
-  it('returns 0 for empty matchedRules array', () => {
-    expect(calculateSetupRuleScore([])).toBe(0)
-  })
-
-  it('scores a single rule with high win rate and high sample size', () => {
-    const rules = [makeRule({
-      performance_at_creation: {
-        win_rate: 0.8, avg_return: 20, median_return: 18,
-        sample_size: 30, avg_days_held: 5,
-      },
-    })]
-    // quality = min(1, 30/20) = 1.0, score = 0.8 * 100 * 1.0 = 80
-    expect(calculateSetupRuleScore(rules)).toBe(80)
-  })
-
-  it('reduces score for low sample size (quality ramp)', () => {
-    const rules = [makeRule({
-      performance_at_creation: {
-        win_rate: 0.8, avg_return: 20, median_return: 18,
-        sample_size: 5, avg_days_held: 5,
-      },
-    })]
-    // quality = 5/20 = 0.25, score = 0.8 * 100 * 0.25 = 20
-    expect(calculateSetupRuleScore(rules)).toBe(20)
-  })
-
-  it('sums top 3 rules and caps at 100', () => {
-    const rules = [
-      makeRule({ rule_id: 'r1', performance_at_creation: { win_rate: 0.6, avg_return: 10, median_return: 8, sample_size: 20, avg_days_held: 5 } }),
-      makeRule({ rule_id: 'r2', performance_at_creation: { win_rate: 0.7, avg_return: 15, median_return: 12, sample_size: 20, avg_days_held: 5 } }),
-      makeRule({ rule_id: 'r3', performance_at_creation: { win_rate: 0.5, avg_return: 5, median_return: 3, sample_size: 20, avg_days_held: 5 } }),
-    ]
-    // r1=60, r2=70, r3=50 → top 3 sum = 180, capped at 100
-    expect(calculateSetupRuleScore(rules)).toBe(100)
-  })
-
-  it('only uses top 3 when more than 3 rules match', () => {
-    const rules = [
-      makeRule({ rule_id: 'r1', performance_at_creation: { win_rate: 0.3, avg_return: 5, median_return: 3, sample_size: 20, avg_days_held: 5 } }),
-      makeRule({ rule_id: 'r2', performance_at_creation: { win_rate: 0.2, avg_return: 3, median_return: 2, sample_size: 20, avg_days_held: 5 } }),
-      makeRule({ rule_id: 'r3', performance_at_creation: { win_rate: 0.25, avg_return: 4, median_return: 3, sample_size: 20, avg_days_held: 5 } }),
-      makeRule({ rule_id: 'r4', performance_at_creation: { win_rate: 0.1, avg_return: 1, median_return: 0, sample_size: 20, avg_days_held: 5 } }),
-    ]
-    // r1=30, r2=20, r3=25, r4=10 → top 3 = 30+25+20 = 75
-    expect(calculateSetupRuleScore(rules)).toBe(75)
-  })
-
-  it('returns 0 when performance_at_creation is null', () => {
-    const rules = [makeRule({ performance_at_creation: null })]
-    expect(calculateSetupRuleScore(rules)).toBe(0)
-  })
-
-  it('returns 0 when performance_at_creation is undefined', () => {
-    const rules = [makeRule({ performance_at_creation: undefined })]
-    expect(calculateSetupRuleScore(rules)).toBe(0)
-  })
-
-  it('handles minimum sample size (3)', () => {
-    const rules = [makeRule({
-      performance_at_creation: {
-        win_rate: 1.0, avg_return: 50, median_return: 40,
-        sample_size: 3, avg_days_held: 5,
-      },
-    })]
-    // quality = 3/20 = 0.15, score = 1.0 * 100 * 0.15 = 15
-    expect(calculateSetupRuleScore(rules)).toBe(15)
-  })
-
-  it('caps quality factor at 1.0 for large sample sizes', () => {
-    const rules = [makeRule({
-      performance_at_creation: {
-        win_rate: 0.9, avg_return: 25, median_return: 20,
-        sample_size: 100, avg_days_held: 5,
-      },
-    })]
-    // quality = min(1.0, 100/20) = 1.0, score = 90
-    expect(calculateSetupRuleScore(rules)).toBe(90)
-  })
-})
-
-// ===========================================================================
 // calculateConvictionScore
 // ===========================================================================
 describe('calculateConvictionScore', () => {
@@ -326,14 +221,13 @@ describe('calculateConvictionScore', () => {
 
     const result = calculateConvictionScore(evaluation)
 
-    // EV: normalizeEV(7.5, 15) = 50 → weighted = 50 * 0.37 = 18.5
-    // Pillar: (75 + 80 + 85) / 3 = 80 → weighted = 80 * 0.23 = 18.4
-    // Margin: clamp(60, 0, 100) = 60 → weighted = 60 * 0.13 = 7.8
-    // Convergence: 1 scanner = 0 → weighted = 0 * 0.09 = 0
-    // Time: act_now = 100 → weighted = 100 * 0.08 = 8
-    // Setup Rules: no matchedRules → 0 * 0.10 = 0
-    // Total = 18.5 + 18.4 + 7.8 + 0 + 8 + 0 = 52.7
-    expect(result.total).toBe(52.7)
+    // EV: normalizeEV(7.5, 15) = 50 → weighted = 50 * 0.40 = 20
+    // Pillar: (75 + 80 + 85) / 3 = 80 → weighted = 80 * 0.25 = 20
+    // Margin: clamp(60, 0, 100) = 60 → weighted = 60 * 0.15 = 9
+    // Convergence: 1 scanner = 0 → weighted = 0 * 0.10 = 0
+    // Time: act_now = 100 → weighted = 100 * 0.10 = 10
+    // Total = 20 + 20 + 9 + 0 + 10 = 59
+    expect(result.total).toBe(59)
   })
 
   it('handles maximum conviction case', () => {
@@ -343,20 +237,15 @@ describe('calculateConvictionScore', () => {
       gateMargin: 100,
       scannerConvergence: 4,
       urgency: 'act_now',
-      matchedRules: [{
-        rule_id: 'r1', name: 'Strong Rule', mode: 'production',
-        performance_at_creation: { win_rate: 1.0, avg_return: 50, median_return: 40, sample_size: 30, avg_days_held: 5 },
-      }],
     })
 
     const result = calculateConvictionScore(evaluation)
 
-    // EV: 100 * 0.37 = 37
-    // Pillar: 100 * 0.23 = 23
-    // Margin: 100 * 0.13 = 13
-    // Convergence: 100 * 0.09 = 9
-    // Time: 100 * 0.08 = 8
-    // Setup Rules: 100 * 0.10 = 10
+    // EV: 100 * 0.40 = 40
+    // Pillar: 100 * 0.25 = 25
+    // Margin: 100 * 0.15 = 15
+    // Convergence: 100 * 0.10 = 10
+    // Time: 100 * 0.10 = 10
     // Total = 100
     expect(result.total).toBe(100)
   })
@@ -374,11 +263,10 @@ describe('calculateConvictionScore', () => {
 
     // EV: null → 0 → normalized 0 → weighted 0
     // Pillar: null → {} → 0 → weighted 0
-    // Margin: null → 50 (default) → weighted 50 * 0.13 = 6.5
+    // Margin: null → 50 (default) → weighted 50 * 0.15 = 7.5
     // Convergence: null → 1 → 0 → weighted 0
     // Time: null → 'patient' → 0 → weighted 0
-    // Setup Rules: no matchedRules → 0
-    expect(result.total).toBe(6.5)
+    expect(result.total).toBe(7.5)
   })
 
   it('clamps gate margin to 0-100', () => {
@@ -407,7 +295,6 @@ describe('calculateConvictionScore', () => {
       gateMargin: 0,
       scannerConvergence: 0,
       timeSensitivity: 0,
-      setupRules: 0,
     }
 
     const result = calculateConvictionScore(evaluation, weights)
@@ -454,7 +341,6 @@ describe('calculateConvictionScore', () => {
     expect(result.components).toHaveProperty('gateMargin')
     expect(result.components).toHaveProperty('scannerConvergence')
     expect(result.components).toHaveProperty('timeSensitivity')
-    expect(result.components).toHaveProperty('setupRules')
 
     // Each component should have raw, normalized, weighted
     for (const comp of Object.values(result.components)) {
@@ -462,35 +348,6 @@ describe('calculateConvictionScore', () => {
       expect(comp).toHaveProperty('normalized')
       expect(comp).toHaveProperty('weighted')
     }
-  })
-
-  it('includes setup rules in total score', () => {
-    const evaluation = makeEval({
-      thetaAdjustedEV: 15,  // normalized = 100
-      pillarScores: { DIRECTIONAL: 100, VOLATILITY: 100, STRUCTURE: 100 },
-      gateMargin: 100,
-      scannerConvergence: 4,  // bonus = 100
-      urgency: 'act_now',     // boost = 100
-      matchedRules: [{
-        rule_id: 'r1', name: 'Strong Pattern', mode: 'production' as const,
-        performance_at_creation: { win_rate: 0.8, avg_return: 20, median_return: 18, sample_size: 40, avg_days_held: 5 },
-      }],
-    })
-    const result = calculateConvictionScore(evaluation)
-    // Setup rules: 0.8 * 100 * 1.0 = 80 → weighted = 80 * 0.10 = 8
-    // All other components at 100 → 37 + 23 + 13 + 9 + 8 = 90
-    // Total = 90 + 8 = 98
-    expect(result.total).toBe(98)
-    expect(result.components.setupRules.raw).toBe(80)
-    expect(result.components.setupRules.normalized).toBe(80)
-    expect(result.components.setupRules.weighted).toBe(8)
-  })
-
-  it('scores 0 for setup rules when no rules match', () => {
-    const evaluation = makeEval({ matchedRules: undefined })
-    const result = calculateConvictionScore(evaluation)
-    expect(result.components.setupRules.raw).toBe(0)
-    expect(result.components.setupRules.weighted).toBe(0)
   })
 })
 
@@ -525,7 +382,7 @@ describe('enhanceWithConvictionScores', () => {
 
   it('passes custom weights and benchmark', () => {
     const evals = [makeEval({ thetaAdjustedEV: 100 })]
-    const weights = { ...DEFAULT_WEIGHTS, thetaAdjustedEv: 1.0, compositePillar: 0, gateMargin: 0, scannerConvergence: 0, timeSensitivity: 0, setupRules: 0 }
+    const weights = { ...DEFAULT_WEIGHTS, thetaAdjustedEv: 1.0, compositePillar: 0, gateMargin: 0, scannerConvergence: 0, timeSensitivity: 0 }
 
     const enhanced100 = enhanceWithConvictionScores(evals, weights, 100)
     const enhanced1000 = enhanceWithConvictionScores(evals, weights, 1000)
@@ -854,17 +711,15 @@ describe('DEFAULT_WEIGHTS', () => {
       + DEFAULT_WEIGHTS.gateMargin
       + DEFAULT_WEIGHTS.scannerConvergence
       + DEFAULT_WEIGHTS.timeSensitivity
-      + DEFAULT_WEIGHTS.setupRules
     expect(sum).toBeCloseTo(1.0)
   })
 
   it('has expected values per spec', () => {
-    expect(DEFAULT_WEIGHTS.thetaAdjustedEv).toBe(0.37)
-    expect(DEFAULT_WEIGHTS.compositePillar).toBe(0.23)
-    expect(DEFAULT_WEIGHTS.gateMargin).toBe(0.13)
-    expect(DEFAULT_WEIGHTS.scannerConvergence).toBe(0.09)
-    expect(DEFAULT_WEIGHTS.timeSensitivity).toBe(0.08)
-    expect(DEFAULT_WEIGHTS.setupRules).toBe(0.10)
+    expect(DEFAULT_WEIGHTS.thetaAdjustedEv).toBe(0.40)
+    expect(DEFAULT_WEIGHTS.compositePillar).toBe(0.25)
+    expect(DEFAULT_WEIGHTS.gateMargin).toBe(0.15)
+    expect(DEFAULT_WEIGHTS.scannerConvergence).toBe(0.10)
+    expect(DEFAULT_WEIGHTS.timeSensitivity).toBe(0.10)
   })
 })
 
