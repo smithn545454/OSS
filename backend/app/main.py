@@ -1013,7 +1013,7 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
         pillar_scores, features, opportunities = await asyncio.gather(
             PillarScoreTable.list_by_evaluation(evaluation_id),
             FeatureValueTable.list_by_evaluation(evaluation_id),
-            OpportunityTable.list_by_ticker(ticker, limit=20),
+            OpportunityTable.list_by_ticker(ticker, limit=50),
         )
 
         # Extract scanner triggers from the matching opportunity
@@ -1058,6 +1058,11 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
                     )
                     for st in scanner_triggers
                 ]
+                # Fallback: use evaluation's scanner_source if opportunity wasn't found
+                if not scanner_names:
+                    eval_scanner_source = getattr(evaluation, "scanner_source", None) or ""
+                    if eval_scanner_source:
+                        scanner_names = [eval_scanner_source]
                 matched = match_rules(
                     all_rules, eval_match_dict, decision_dict, scanner_names
                 )

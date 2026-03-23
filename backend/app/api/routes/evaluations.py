@@ -249,7 +249,7 @@ async def get_evaluation_detail_by_id(
         PillarScoreTable.list_by_evaluation(evaluation_id),
         GateResultTable.list_by_evaluation(evaluation_id),
         PaperPositionTable.get_by_evaluation_id(evaluation_id),
-        OpportunityTable.list_by_ticker(ticker, limit=20) if opportunity_id else _noop_list(),
+        OpportunityTable.list_by_ticker(ticker, limit=50) if opportunity_id else _noop_list(),
         FeatureValueTable.list_by_evaluation(evaluation_id),
         TradeThesisTable.get_by_evaluation_id(evaluation_id),
         _get_company_name(ticker),
@@ -420,6 +420,12 @@ async def get_evaluation_detail_by_id(
                 if st.get("scanner_type")
             ]
 
+            # Fallback: use evaluation's scanner_source if opportunity wasn't found
+            if not eval_scanners:
+                eval_scanner_source = evaluation.get("scanner_source")
+                if eval_scanner_source:
+                    eval_scanners = [eval_scanner_source]
+
             matched = match_rules(all_rules, evaluation, eval_decision, eval_scanners)
             matched_rules_list = format_matched_rules(matched, include_criteria=True)
     except Exception as e:
@@ -499,7 +505,7 @@ async def get_evaluation_detail(
         PillarScoreTable.list_by_evaluation(evaluation_id),
         GateResultTable.list_by_evaluation(evaluation_id),
         PaperPositionTable.get_by_evaluation_id(evaluation_id),
-        OpportunityTable.list_by_ticker(ticker, limit=20) if opportunity_id else _noop_list(),
+        OpportunityTable.list_by_ticker(ticker, limit=50) if opportunity_id else _noop_list(),
         FeatureValueTable.list_by_evaluation(evaluation_id),
         TradeThesisTable.get_by_evaluation_id(evaluation_id),
     )
