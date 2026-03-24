@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -111,11 +112,22 @@ async def get_alert_history_endpoint(
 async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     """Estimate how many alerts per day a configuration would produce.
 
-    Analyzes recent APPROVE evaluations against the current alert config
+    Analyzes recent evaluations against the current alert config
     (score threshold, urgency/convergence requirement, setup rule filter)
-    to estimate daily alert volume.
+    to estimate daily alert volume. Enriches raw evaluation items with
+    pillar scores, gate results, and scanner types from their respective
+    tables — matching how the pipeline computes conviction scores.
     """
-    from app.db.tables import EvaluationTable
+    from app.api.routes.evaluations import (
+        calculate_gate_margin,
+        calculate_theta_adjusted_ev,
+    )
+    from app.db.tables import (
+        EvaluationTable,
+        GateResultTable,
+        OpportunityTable,
+        PillarScoreTable,
+    )
     from app.scoring.conviction import calculate_conviction_score, determine_urgency
     from app.services.slack import load_alert_config
 
@@ -123,26 +135,28 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     threshold = config.get("score_threshold", 75)
     require_uc = config.get("require_urgency_or_convergence", True)
     filter_ids = config.get("setup_rule_filter_ids", [])
+    allowed_verdicts = config.get("verdicts", ["APPROVE"])
 
     # Load setup rules if filter is active
     rules_by_id: dict[str, dict[str, Any]] = {}
     if filter_ids:
         try:
             from app.paper_trading.pattern_discovery import list_setup_rules
-            from app.paper_trading.rule_matcher import match_rules
 
             all_rules = await list_setup_rules()
             rules_by_id = {r["rule_id"]: r for r in all_rules if r["rule_id"] in filter_ids}
         except Exception as e:
             logger.warning(f"Failed to load setup rules for preview: {e}")
 
-    # Query recent APPROVE evaluations
+    # Query recent evaluations for all configured verdicts
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    try:
-        evaluations = await EvaluationTable.list_by_verdict_since("APPROVE", since, limit=500)
-    except Exception:
-        # Fallback: try listing recent evaluations directly
-        evaluations = []
+    evaluations: list[dict[str, Any]] = []
+    for verdict in allowed_verdicts:
+        try:
+            evals = await EvaluationTable.list_by_verdict_since(verdict, since, limit=500)
+            evaluations.extend(evals)
+        except Exception:
+            pass
 
     breakdown = {
         "totalEvaluations": len(evaluations),
@@ -152,26 +166,108 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         "wouldAlert": 0,
     }
 
-    for eval_item in evaluations:
-        # Extract data needed for conviction score
-        pillar_scores = {}
-        for pillar in ("DIRECTIONAL", "VOLATILITY", "STRUCTURE"):
-            key = f"{pillar.lower()}_score"
-            val = eval_item.get(key) or eval_item.get(f"pillar_{key}")
-            if val is not None:
-                pillar_scores[pillar] = float(val)
+    if not evaluations:
+        return {
+            "estimatedAlertsPerDay": 0,
+            "daysAnalyzed": days,
+            "breakdown": breakdown,
+        }
 
-        theta_ev = eval_item.get("theta_adjusted_ev") or eval_item.get("thetaAdjustedEV") or 0.0
-        gate_margin = eval_item.get("gate_margin") or eval_item.get("gateMargin") or 50.0
-        scanner_types = eval_item.get("scanner_source_list") or eval_item.get("scanner_list") or []
-        if isinstance(scanner_types, str):
-            scanner_types = [scanner_types]
+    # ------------------------------------------------------------------
+    # Enrich evaluations with pillar scores, gate results, scanner types
+    # (these live in separate tables, not on the raw Evaluation item)
+    # ------------------------------------------------------------------
 
-        # Compute conviction score
+    def _enum_str(val: Any) -> str:
+        return str(val.value) if hasattr(val, "value") else str(val)
+
+    sem = asyncio.Semaphore(50)
+
+    async def _limited(coro):  # type: ignore[no-untyped-def]
+        async with sem:
+            return await coro
+
+    # Pre-fetch opportunities by ticker for scanner type resolution
+    unique_tickers = list({
+        item.get("underlying_ticker", "")
+        for item in evaluations
+    } - {""})
+
+    opp_results = await asyncio.gather(*[
+        _limited(OpportunityTable.list_by_ticker(t, limit=50))
+        for t in unique_tickers
+    ])
+    opp_by_ticker: dict[str, list[Any]] = dict(zip(unique_tickers, opp_results))
+
+    def _scanner_types_for(item: dict[str, Any]) -> list[str]:
+        opportunity_id = item.get("opportunity_id")
+        ticker = item.get("underlying_ticker", "")
+        if opportunity_id and ticker in opp_by_ticker:
+            for opp in opp_by_ticker[ticker]:
+                if opp.opportunity_id == opportunity_id:
+                    return [_enum_str(st.scanner_type) for st in opp.scanner_triggers]
+        scanner_source = item.get("scanner_source")
+        if scanner_source:
+            return [scanner_source]
+        return []
+
+    # Enrich each evaluation with pillar scores and gate results
+    async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
+        evaluation_id = item.get("evaluation_id", "")
+        pillar_scores_raw, gate_results_raw = await asyncio.gather(
+            _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
+            _limited(GateResultTable.list_by_evaluation(evaluation_id)),
+        )
+
+        pillar_dict = {
+            _enum_str(ps.pillar_id): ps.score
+            for ps in pillar_scores_raw
+        }
+
+        gate_list = [
+            {
+                "enabled": gr.enabled,
+                "passed": gr.passed,
+                "measured_value": gr.measured_value,
+                "threshold_value": gr.threshold_value,
+                "operator": _enum_str(gr.operator),
+            }
+            for gr in gate_results_raw
+        ]
+
+        scanner_types = _scanner_types_for(item)
+
+        theta_ev = calculate_theta_adjusted_ev(
+            delta=item.get("delta") or 0,
+            theta=item.get("theta") or 0,
+            mid=item.get("mid") or 0,
+            iv=item.get("iv") or 0,
+            underlying_price=item.get("underlying_price") or 0,
+            dte=item.get("dte") or 30,
+        )
+
+        return {
+            "pillar_scores": pillar_dict,
+            "gate_margin": calculate_gate_margin(gate_list),
+            "theta_ev": theta_ev,
+            "scanner_types": scanner_types,
+            "item": item,
+        }
+
+    enriched = list(await asyncio.gather(*[_enrich(item) for item in evaluations]))
+
+    # ------------------------------------------------------------------
+    # Score and filter against alert criteria
+    # ------------------------------------------------------------------
+    for e in enriched:
+        pillar_scores = e["pillar_scores"]
+        scanner_types = e["scanner_types"]
+        item = e["item"]
+
         result = calculate_conviction_score(
-            theta_adj_ev=float(theta_ev),
+            theta_adj_ev=e["theta_ev"],
             pillar_scores=pillar_scores,
-            gate_margin=float(gate_margin),
+            gate_margin=e["gate_margin"],
             scanner_types=scanner_types,
         )
 
@@ -192,14 +288,14 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             from app.paper_trading.rule_matcher import match_rules
 
             decision_data = {
-                "final_score": eval_item.get("final_score", 0),
-                "directional_score": eval_item.get("directional_score", 0),
-                "volatility_score": eval_item.get("volatility_score", 0),
-                "structure_score": eval_item.get("structure_score", 0),
+                "final_score": item.get("final_score", 0),
+                "directional_score": pillar_scores.get("DIRECTIONAL", 0),
+                "volatility_score": pillar_scores.get("VOLATILITY", 0),
+                "structure_score": pillar_scores.get("STRUCTURE", 0),
             }
             matched = match_rules(
                 list(rules_by_id.values()),
-                eval_item,
+                item,
                 decision_data,
                 scanner_types,
             )
