@@ -257,6 +257,25 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     enriched = list(await asyncio.gather(*[_enrich(item) for item in evaluations]))
 
     # ------------------------------------------------------------------
+    # Aggregate scanner convergence per-ticker (matches /approve endpoint)
+    # Multiple evaluations for the same ticker from different scanners
+    # should all reflect the full convergence count.
+    # ------------------------------------------------------------------
+    from collections import defaultdict
+
+    ticker_scanners: dict[str, set[str]] = defaultdict(set)
+    ticker_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, e in enumerate(enriched):
+        ticker = e["item"].get("underlying_ticker", "")
+        ticker_scanners[ticker].update(e["scanner_types"])
+        ticker_indices[ticker].append(idx)
+
+    for ticker, indices in ticker_indices.items():
+        all_scanners = list(ticker_scanners[ticker])
+        for idx in indices:
+            enriched[idx]["scanner_types"] = all_scanners
+
+    # ------------------------------------------------------------------
     # Score and filter against alert criteria
     # ------------------------------------------------------------------
     for e in enriched:
