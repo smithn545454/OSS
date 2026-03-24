@@ -1798,6 +1798,23 @@ class SP500TickerTable:
         )
         return sorted(item["ticker"] for item in items if item.get("is_active", True))
 
+    @staticmethod
+    async def get_sector_map() -> dict[str, str]:
+        """Get a mapping of ticker → sector for all active S&P 500 tickers.
+
+        Returns:
+            Dict mapping ticker symbol to sector string (e.g. {"AAPL": "Technology"})
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            SP500TickerTable.TABLE, "TICKER_LIST", limit=None, scan_forward=True
+        )
+        return {
+            item["ticker"]: item.get("sector", "")
+            for item in items
+            if item.get("is_active", True) and item.get("sector")
+        }
+
 
 class ScanStatusTable:
     """Operations for the scan-status table.

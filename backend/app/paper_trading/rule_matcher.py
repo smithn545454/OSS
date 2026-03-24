@@ -158,6 +158,15 @@ def _check_criterion(
             val = evaluation.get("feasibility_ratio")
             return val is not None and float(val) <= float(value)
 
+        if key == "sectors":
+            # Rule specifies which sectors it applies to
+            eval_sector = evaluation.get("sector")
+            if not isinstance(value, list) or not value:
+                return True  # No sector filter = match all
+            if eval_sector is None:
+                return False  # Sector required but missing = no match
+            return eval_sector in value
+
         # Unknown criteria are ignored for forward compatibility
         return True
 

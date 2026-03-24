@@ -19,6 +19,8 @@ DISCOVERY_SYSTEM_PROMPT = (
     "of characteristics that correlate with above-average win rates and returns.\n"
     "\n"
     "Available fields per trade:\n"
+    "- sector: Stock sector (e.g. Technology, Healthcare, Energy, Materials, "
+    "Financials, Consumer Discretionary, Industrials, etc.)\n"
     "- scanner: Which scanner detected the opportunity "
     "(BREAKOUT, COMPRESSION, CHEAP_OPTIONS, UNUSUAL_VOLUME)\n"
     "- scanner_list: All scanners that fired (multi-scanner confluence)\n"
@@ -98,6 +100,8 @@ DISCOVERY_OUTPUT_SCHEMA = """{
 }
 
 The criteria object can include any combination of:
+- sectors: list of sector names (e.g. ["Energy", "Materials"])
+  — only include when the pattern is sector-specific
 - scanners: list of scanner names
 - scanner_confluence: true (requires 2+ scanners)
 - conviction_score_min / conviction_score_max: score thresholds

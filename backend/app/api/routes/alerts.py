@@ -293,6 +293,17 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         for idx in indices:
             enriched[idx]["scanner_types"] = all_scanners
 
+    # Enrich with sector for sector-aware rule matching
+    try:
+        from app.db.tables import SP500TickerTable
+        sector_map = await SP500TickerTable.get_sector_map()
+        for e in enriched:
+            t = e["item"].get("underlying_ticker", "")
+            if t in sector_map:
+                e["item"]["sector"] = sector_map[t]
+    except Exception:
+        pass
+
     # ------------------------------------------------------------------
     # Score and filter against alert criteria
     # ------------------------------------------------------------------

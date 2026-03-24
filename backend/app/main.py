@@ -1044,6 +1044,15 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
                     else evaluation.option_type
                 )
                 eval_match_dict.update(features_dict)
+                # Enrich with sector for sector-aware rule matching
+                try:
+                    from app.db.tables import SP500TickerTable
+                    sector_map = await SP500TickerTable.get_sector_map()
+                    ticker = evaluation.underlying_ticker or ""
+                    if ticker in sector_map:
+                        eval_match_dict["sector"] = sector_map[ticker]
+                except Exception:
+                    pass
                 decision_dict = {
                     "final_score": decision.final_score,
                     "directional_score": decision.directional_score,

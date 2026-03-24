@@ -707,6 +707,16 @@ class SlackAlertService:
                         if hasattr(thesis, "setup_summary") and thesis.setup_summary:
                             headline = thesis.setup_summary
 
+                    # Enrich with sector for sector-aware rule matching
+                    try:
+                        from app.db.tables import SP500TickerTable
+                        sector_map = await SP500TickerTable.get_sector_map()
+                        slack_ticker = item.get("underlying_ticker", "")
+                        if slack_ticker in sector_map:
+                            item["sector"] = sector_map[slack_ticker]
+                    except Exception:
+                        pass
+
                     # Get matched rules
                     matched_rule_names: list[str] = []
                     try:

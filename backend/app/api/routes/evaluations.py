@@ -390,6 +390,16 @@ async def get_evaluation_detail_by_id(
         if feat and feat.get("value") is not None:
             evaluation[feat_key] = feat["value"]
 
+    # Enrich with sector for sector-aware rule matching
+    try:
+        from app.db.tables import SP500TickerTable
+        sector_map = await SP500TickerTable.get_sector_map()
+        eval_ticker = evaluation.get("underlying_ticker", "")
+        if eval_ticker in sector_map:
+            evaluation["sector"] = sector_map[eval_ticker]
+    except Exception:
+        pass
+
     # Match setup rules (all active rules, both production and test)
     matched_rules_list: list[dict[str, Any]] = []
     try:
@@ -989,6 +999,17 @@ async def list_approve_evaluations(
     # ------------------------------------------------------------------
     # 7. Match setup rules (production mode only)
     # ------------------------------------------------------------------
+    # Enrich with sector for sector-aware rule matching
+    try:
+        from app.db.tables import SP500TickerTable
+        sector_map = await SP500TickerTable.get_sector_map()
+        for item in enhanced_items:
+            t = item.get("underlying_ticker", "")
+            if t in sector_map:
+                item["sector"] = sector_map[t]
+    except Exception:
+        pass
+
     try:
         from app.paper_trading.pattern_discovery import list_setup_rules  # noqa: I001
         from app.paper_trading.rule_matcher import match_rules, format_matched_rules

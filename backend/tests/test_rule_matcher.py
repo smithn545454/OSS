@@ -705,6 +705,65 @@ class TestMatchesRule:
             [],
         )
 
+    # --- Sector criteria ---
+
+    def test_sectors_match(self):
+        assert matches_rule(
+            {"sectors": ["Energy", "Materials"]},
+            _eval(sector="Energy"),
+            _decision(),
+            [],
+        )
+
+    def test_sectors_no_match(self):
+        """Healthcare ticker should not match Energy/Materials rule."""
+        assert not matches_rule(
+            {"sectors": ["Energy", "Materials"]},
+            _eval(sector="Healthcare"),
+            _decision(),
+            [],
+        )
+
+    def test_sectors_missing_sector_no_match(self):
+        """If evaluation has no sector data, sector rule should not match."""
+        assert not matches_rule(
+            {"sectors": ["Energy", "Materials"]},
+            _eval(),  # No sector field
+            _decision(),
+            [],
+        )
+
+    def test_sectors_empty_list_matches_all(self):
+        """Empty sectors list = no sector filter, matches everything."""
+        assert matches_rule(
+            {"sectors": []},
+            _eval(sector="Healthcare"),
+            _decision(),
+            [],
+        )
+
+    def test_sectors_combined_with_other_criteria(self):
+        """Sector + technical criteria must all pass."""
+        criteria = {
+            "sectors": ["Energy", "Materials"],
+            "option_type": "PUT",
+            "conviction_score_min": 75,
+        }
+        # Energy PUT with high score = match
+        assert matches_rule(
+            criteria,
+            _eval(sector="Energy", option_type="PUT"),
+            _decision(final_score=80),
+            [],
+        )
+        # Healthcare PUT with high score = no match (wrong sector)
+        assert not matches_rule(
+            criteria,
+            _eval(sector="Healthcare", option_type="PUT"),
+            _decision(final_score=80),
+            [],
+        )
+
 
 class TestMatchRules:
     def test_returns_matching_rules(self):

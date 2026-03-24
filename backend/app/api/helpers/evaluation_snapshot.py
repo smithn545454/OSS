@@ -174,6 +174,16 @@ async def build_evaluation_snapshot_data(
             "error_message": thesis.error_message,
         }
 
+    # Enrich with sector for sector-aware rule matching
+    try:
+        from app.db.tables import SP500TickerTable
+        sector_map = await SP500TickerTable.get_sector_map()
+        eval_ticker = evaluation.get("underlying_ticker", "")
+        if eval_ticker in sector_map:
+            evaluation["sector"] = sector_map[eval_ticker]
+    except Exception:
+        pass
+
     # Match setup rules
     matched_rules_list: list[dict[str, Any]] = []
     try:

@@ -27,10 +27,14 @@ ANALYSIS_PK_PREFIX = "ANALYSIS#"
 SETUP_RULE_PK = "SETUP_RULE"
 
 
-def _position_summary(p: PaperPosition) -> dict[str, Any]:
+def _position_summary(
+    p: PaperPosition, sector_map: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Convert a position to a compact summary for LLM analysis."""
-    return {
-        "ticker": p.underlying_ticker or p.option_ticker,
+    ticker = p.underlying_ticker or p.option_ticker
+    summary: dict[str, Any] = {
+        "ticker": ticker,
+        "sector": (sector_map or {}).get(ticker or "", "Unknown"),
         "scanner": p.scanner_source or "UNKNOWN",
         "scanner_list": p.scanner_list or ([p.scanner_source] if p.scanner_source else []),
         "conviction_score": p.conviction_score,
@@ -78,6 +82,7 @@ def _position_summary(p: PaperPosition) -> dict[str, Any]:
         "verdict": str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry)),
         "convergence_count": p.convergence_count or 1,
     }
+    return summary
 
 
 async def create_analysis_stub(
@@ -248,9 +253,16 @@ async def run_pattern_analysis(
             "min_win_rate_pct": round(min_win_rate * 100, 1),
         }
 
+        # Fetch sector map for sector-aware pattern discovery
+        try:
+            from app.db.tables import SP500TickerTable
+            sector_map = await SP500TickerTable.get_sector_map()
+        except Exception:
+            sector_map = {}
+
         # Sample most recent trades for LLM prompt
         closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)[:1000]
-        trade_data = [_position_summary(p) for p in closed_sorted]
+        trade_data = [_position_summary(p, sector_map) for p in closed_sorted]
 
         # Build and send prompt
         prompt = build_discovery_prompt(trade_data, context)
