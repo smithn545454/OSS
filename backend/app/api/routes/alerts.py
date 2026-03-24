@@ -124,6 +124,7 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     )
     from app.db.tables import (
         EvaluationTable,
+        FeatureValueTable,
         GateResultTable,
         OpportunityTable,
         PillarScoreTable,
@@ -211,13 +212,25 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             return [scanner_source]
         return []
 
-    # Enrich each evaluation with pillar scores and gate results
+    # Feature names needed for setup rule matching
+    _feature_names = {
+        "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
+        "days_to_earnings", "atr14_pct", "rs_20d", "feasibility_ratio",
+    }
+
+    # Enrich each evaluation with pillar scores, gate results, and features
     async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
         evaluation_id = item.get("evaluation_id", "")
-        pillar_scores_raw, gate_results_raw = await asyncio.gather(
+        pillar_scores_raw, gate_results_raw, feature_values = await asyncio.gather(
             _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
             _limited(GateResultTable.list_by_evaluation(evaluation_id)),
+            _limited(FeatureValueTable.list_by_evaluation(evaluation_id)),
         )
+
+        # Merge feature values into item for rule matching
+        for fv in feature_values:
+            if fv.feature_name in _feature_names and fv.value is not None:
+                item[fv.feature_name] = fv.value
 
         pillar_dict = {
             _enum_str(ps.pillar_id): ps.score
@@ -237,6 +250,8 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
 
         scanner_types = _scanner_types_for(item)
 
+        gate_margin = calculate_gate_margin(gate_list)
+
         theta_ev = calculate_theta_adjusted_ev(
             delta=item.get("delta") or 0,
             theta=item.get("theta") or 0,
@@ -246,9 +261,12 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             dte=item.get("dte") or 30,
         )
 
+        # Merge gate_margin into item for rule matching
+        item["gate_margin"] = gate_margin
+
         return {
             "pillar_scores": pillar_dict,
-            "gate_margin": calculate_gate_margin(gate_list),
+            "gate_margin": gate_margin,
             "theta_ev": theta_ev,
             "scanner_types": scanner_types,
             "item": item,
@@ -317,6 +335,7 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
                 item,
                 decision_data,
                 scanner_types,
+                active_only=False,  # User explicitly selected these rules
             )
             if not matched:
                 breakdown["noMatchingSetupRule"] += 1
