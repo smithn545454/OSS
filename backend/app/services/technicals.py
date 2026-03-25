@@ -647,7 +647,7 @@ def compute_stock_technicals(
     if high_52w and high_52w > 0:
         pct_from_52w_high = round((price - high_52w) / high_52w * 100, 2)
 
-    volume = bars[-1].volume
+    volume = int(bars[-1].volume)
     volumes = [b.volume for b in bars]
     avg_volume_20d = None
     relative_volume = None
