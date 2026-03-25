@@ -6,13 +6,18 @@ Per Section 7 and Section 19.3 of OSS_Opportunities_Page_Specification.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+import asyncio
+import logging
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter
 
 from app.db.tables import PipelineRunTable
 from app.services.polygon import PolygonClient
+from app.services.technicals import compute_stock_technicals
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -161,3 +166,37 @@ async def get_contract_quotes(contracts: str) -> dict[str, Any]:
     quotes: dict[str, dict[str, Any]] = {}
     
     return {"quotes": quotes}
+
+
+@router.get("/stocks/{ticker}/technicals")
+async def get_stock_technicals(ticker: str) -> dict[str, Any]:
+    """Get underlying stock technicals for the Evaluation Detail page.
+
+    Returns company profile, price context, technical indicators (EMA, RSI,
+    MACD, ADX, OBV), and a synthesized Tape Read directional verdict.
+
+    Args:
+        ticker: Stock ticker symbol (e.g. AAPL, MSFT).
+
+    Returns:
+        StockTechnicals data with all indicator values and tape read.
+    """
+    ticker = ticker.upper().strip()
+
+    # Fetch ticker details and ~252 trading days of bars in parallel
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    from_date = (datetime.now(timezone.utc) - timedelta(days=370)).strftime("%Y-%m-%d")
+
+    try:
+        async with PolygonClient() as client:
+            details, bars = await asyncio.gather(
+                client.get_ticker_details(ticker),
+                client.get_daily_bars_parsed(ticker, from_date, today),
+            )
+    except Exception as e:
+        logger.error(f"Failed to fetch data for {ticker}: {e}")
+        details = None
+        bars = []
+
+    result = compute_stock_technicals(ticker, bars, details)
+    return result.model_dump()

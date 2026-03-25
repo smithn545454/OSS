@@ -58,6 +58,7 @@ export const queryKeys = {
   }) => ['evaluations', 'approve', options] as const,
   watchInsights: (sinceDays: number) => ['evaluations', 'watch', 'insights', sinceDays] as const,
   contractQuotes: (contractIds: string[]) => ['market', 'quotes', contractIds] as const,
+  stockTechnicals: (ticker: string) => ['market', 'stock', ticker, 'technicals'] as const,
 }
 
 // Health
@@ -444,6 +445,15 @@ export function useContractQuotes(contractIds: string[], enabled: boolean = true
     enabled: enabled && contractIds.length > 0,
     refetchInterval: 30000, // 30 seconds during market hours
     staleTime: 15000,
+  })
+}
+
+export function useStockTechnicals(ticker: string) {
+  return useQuery({
+    queryKey: queryKeys.stockTechnicals(ticker),
+    queryFn: () => api.getStockTechnicals(ticker),
+    enabled: !!ticker,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }
 

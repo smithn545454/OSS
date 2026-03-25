@@ -1899,3 +1899,59 @@ export interface ScannerAnalysisResponse {
     losers: number
   }
 }
+
+// ---------------------------------------------------------------------------
+// Underlying Stock Technicals
+// ---------------------------------------------------------------------------
+
+export interface TapeSignal {
+  name: string
+  reading: string
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
+  weight: number
+}
+
+export type TapeVerdict =
+  | 'BULLISH'
+  | 'LEAN_BULLISH'
+  | 'NEUTRAL'
+  | 'LEAN_BEARISH'
+  | 'BEARISH'
+
+export interface StockTechnicalsResponse {
+  ticker: string
+  company_name: string | null
+  sector: string | null
+  market_cap: number | null
+  homepage_url: string | null
+
+  price: number
+  prev_close: number | null
+  change_dollar: number | null
+  change_pct: number | null
+  high_52w: number | null
+  low_52w: number | null
+  pct_from_52w_high: number | null
+  volume: number | null
+  avg_volume_20d: number | null
+  relative_volume: number | null
+
+  ema_9: number | null
+  ema_21: number | null
+  ema_50: number | null
+  ema_200: number | null
+  ema_alignment: string | null
+
+  rsi_14: number | null
+  macd: number | null
+  macd_signal: number | null
+  macd_histogram: number | null
+  adx_14: number | null
+  plus_di: number | null
+  minus_di: number | null
+  obv_trend: string | null
+
+  tape_signals: TapeSignal[]
+  tape_verdict: TapeVerdict
+  tape_bullish_pct: number
+}

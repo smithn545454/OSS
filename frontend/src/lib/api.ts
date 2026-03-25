@@ -391,6 +391,12 @@ export async function getMarketContext(): Promise<MarketContext> {
   return fetchApi<MarketContext>('/api/market/context')
 }
 
+export async function getStockTechnicals(
+  ticker: string
+): Promise<import('./types').StockTechnicalsResponse> {
+  return fetchApi(`/api/market/stocks/${encodeURIComponent(ticker)}/technicals`)
+}
+
 /**
  * Get contract quotes for real-time price updates (spec section 19.3).
  */

@@ -30,6 +30,7 @@ import TrackTradeModal from '@/components/TrackTradeModal'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
+import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
 
 // ============================================================================
 // Score Bar Component
@@ -1070,6 +1071,9 @@ export default function EvaluationDetail() {
           quality_tier: decision.quality_tier as QualityTier | null,
         } : null}
       />
+
+      {/* Underlying Stock Details */}
+      <UnderlyingStockDetails ticker={ticker!} />
 
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />
