@@ -240,7 +240,7 @@ function LegacyExitPlanCard({ exitPlan }: ExitPlanCardProps) {
   )
 }
 
-function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
+export function ExitPlanCard({ exitPlan }: ExitPlanCardProps) {
   const isStructured = exitPlan.take_profits && exitPlan.take_profits.length > 0
 
   if (!isStructured) {
