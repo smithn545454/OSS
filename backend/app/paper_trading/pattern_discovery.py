@@ -39,17 +39,27 @@ SCANNER_ABBREV = {
     "UNUSUAL_VOLUME": "UV",
 }
 VERDICT_ABBREV = {"APPROVE": "A", "WATCH": "W", "REJECT": "R"}
+TYPE_ABBREV = {"CALL": "C", "PUT": "P"}
+SECTOR_ABBREV = {
+    "Technology": "Tech", "Healthcare": "HC", "Energy": "Enrg",
+    "Materials": "Matl", "Financials": "Fin",
+    "Consumer Discretionary": "ConD", "Consumer Staples": "ConS",
+    "Industrials": "Ind", "Utilities": "Util", "Real Estate": "RE",
+    "Communication Services": "Comm",
+}
 
 # CSV columns sent to the LLM (short names to save tokens)
+# Dropped: bucket (redundant with dte), mfe/mae (outcome tracking, not criteria),
+# ev (niche), delta (correlated with moneyness+type)
 CSV_COLUMNS = [
     "tkr", "sec", "scn", "conv", "cscore", "p_dir", "p_vol", "p_str",
-    "type", "dte", "bucket", "iv", "iv_pct", "ivrv", "theta_edge",
-    "delta", "gate_m", "ev", "money_pct", "spread", "oi", "vol",
-    "dte_earn", "atr", "rs", "feas", "ret", "days", "mfe", "mae", "verdict",
+    "type", "dte", "iv", "iv_pct", "ivrv", "theta_edge",
+    "gate_m", "money_pct", "spread", "oi", "vol",
+    "dte_earn", "atr", "rs", "feas", "ret", "days", "verdict",
 ]
 
 # Estimated tokens per CSV row for dynamic limit calculation
-TOKENS_PER_ROW_ESTIMATE = 14
+TOKENS_PER_ROW_ESTIMATE = 28
 PROMPT_OVERHEAD_TOKENS = 12_000
 MAX_PROMPT_TOKENS = 195_000
 
@@ -69,8 +79,8 @@ def build_trade_csv(
 ) -> str:
     """Convert positions to a compact CSV string for LLM analysis.
 
-    Uses abbreviated column names and enum values to minimize token count.
-    ~14 tokens per row vs ~35 tokens per row with JSON.
+    Uses abbreviated column names, enum values, and sector names to
+    minimize token count. ~28 tokens per row vs ~205 tokens per row with JSON.
     """
     buf = io.StringIO()
     buf.write(",".join(CSV_COLUMNS))
@@ -81,37 +91,33 @@ def build_trade_csv(
         ticker = p.underlying_ticker or p.option_ticker or ""
         scanner_raw = p.scanner_source or "UNKNOWN"
         verdict_raw = str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry))
+        sector_full = sm.get(ticker, "")
         row = [
             ticker,
-            sm.get(ticker, ""),
+            SECTOR_ABBREV.get(sector_full, sector_full),
             SCANNER_ABBREV.get(scanner_raw, scanner_raw),
             str(p.convergence_count or 1),
             _fmt(p.conviction_score, 0),
             _fmt(p.pillar_directional, 0),
             _fmt(p.pillar_volatility, 0),
             _fmt(p.pillar_structure, 0),
-            str(p.option_type or ""),
+            TYPE_ABBREV.get(str(p.option_type or ""), str(p.option_type or "")),
             _fmt(p.dte_at_entry, 0),
-            str(p.dte_bucket or ""),
             _fmt(p.entry_iv, 2),
             _fmt(p.entry_iv_percentile, 0),
             _fmt(p.entry_iv_rv_ratio, 2),
             _fmt(p.entry_theta_adjusted_edge, 2),
-            _fmt(p.entry_delta, 2),
             _fmt(p.gate_margin, 2),
-            _fmt(p.theta_adj_ev, 2),
-            _fmt(p.entry_moneyness_pct, 2),
+            _fmt(p.entry_moneyness_pct, 1),
             _fmt(p.entry_spread_pct, 2),
             _fmt(p.entry_open_interest, 0),
             _fmt(p.entry_volume, 0),
             _fmt(p.entry_days_to_earnings, 0),
-            _fmt(p.entry_atr14_pct, 2),
-            _fmt(p.entry_rs_20d, 2),
-            _fmt(p.entry_feasibility_ratio, 2),
-            str(round(p.current_pnl_pct, 2)),
+            _fmt(p.entry_atr14_pct, 1),
+            _fmt(p.entry_rs_20d, 1),
+            _fmt(p.entry_feasibility_ratio, 1),
+            str(round(p.current_pnl_pct, 1)),
             _fmt(p.days_held, 0),
-            str(round(p.max_favorable_excursion, 2)),
-            str(round(p.max_adverse_excursion, 2)),
             VERDICT_ABBREV.get(verdict_raw, verdict_raw),
         ]
         buf.write(",".join(row))
