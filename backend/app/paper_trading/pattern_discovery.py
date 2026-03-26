@@ -59,8 +59,9 @@ CSV_COLUMNS = [
 ]
 
 # Estimated tokens per CSV row for dynamic limit calculation
-TOKENS_PER_ROW_ESTIMATE = 28
-PROMPT_OVERHEAD_TOKENS = 12_000
+# Empirically measured: ~33 tokens/row with 26 columns
+TOKENS_PER_ROW_ESTIMATE = 33
+PROMPT_OVERHEAD_TOKENS = 5_000
 MAX_PROMPT_TOKENS = 195_000
 
 
