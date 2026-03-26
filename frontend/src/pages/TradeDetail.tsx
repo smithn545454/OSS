@@ -11,11 +11,15 @@ import {
   TrendingDown,
   DollarSign,
   Loader2,
+  Target,
+  Shield,
+  Timer,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useTrade, useCloseTrade } from '@/hooks/useApi'
 import { formatDateTime } from '@/lib/formatTime'
-import type { TradeExitReason } from '@/lib/types'
+import type { TradeExitReason, StockTechnicalsResponse } from '@/lib/types'
+import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
 
 const EXIT_REASONS: { value: TradeExitReason; label: string }[] = [
   { value: 'PROFIT_TARGET', label: 'Profit Target' },
@@ -78,6 +82,9 @@ export default function TradeDetail() {
   const features = (snapshot?.features as Record<string, unknown>) || {}
   const thesis = snapshot?.thesis as Record<string, unknown> | null
   const scannerTriggers = (snapshot?.scanner_triggers as Record<string, unknown>[]) || []
+  const underlyingTechnicals = snapshot?.underlying_technicals as StockTechnicalsResponse | undefined
+  const exitPlan = thesis?.exit_plan as Record<string, unknown> | undefined
+  const decidedAt = snapshot?.decided_at as string | undefined
 
   const isOpen = trade.status === 'OPEN'
   const isCall = optionType === 'CALL'
@@ -206,6 +213,91 @@ export default function TradeDetail() {
           </div>
         )}
       </div>
+
+      {/* Underlying Stock Details (at entry) */}
+      {underlyingTechnicals && (
+        <UnderlyingStockDetails ticker={ticker} data={underlyingTechnicals} />
+      )}
+
+      {/* Exit Plan */}
+      {exitPlan && (
+        <div className="rounded-xl border border-oss-border bg-oss-card p-6">
+          <h2 className="text-lg font-semibold text-oss-text mb-4">Exit Plan (at entry)</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {exitPlan.profit_target != null && (
+              <div className="rounded-lg bg-oss-approve/5 border border-oss-approve/20 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Target className="h-4 w-4 text-oss-approve" />
+                  <p className="text-xs font-medium text-oss-approve">Profit Target</p>
+                </div>
+                <p className="text-xl font-bold font-mono text-oss-approve">
+                  +{Number(exitPlan.profit_target).toFixed(0)}%
+                </p>
+                {exitPlan.stop_loss_level != null && (
+                  <p className="text-xs text-oss-muted mt-1">
+                    Target price: ${Number(exitPlan.stop_loss_level).toFixed(2)}
+                  </p>
+                )}
+              </div>
+            )}
+            {exitPlan.stop_loss != null && (
+              <div className="rounded-lg bg-oss-reject/5 border border-oss-reject/20 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="h-4 w-4 text-oss-reject" />
+                  <p className="text-xs font-medium text-oss-reject">Stop Loss</p>
+                </div>
+                <p className="text-xl font-bold font-mono text-oss-reject">
+                  -{Number(exitPlan.stop_loss).toFixed(0)}%
+                </p>
+                {exitPlan.stop_loss_level != null && (
+                  <p className="text-xs text-oss-muted mt-1">
+                    Stop price: ${Number(exitPlan.stop_loss_level).toFixed(2)}
+                  </p>
+                )}
+              </div>
+            )}
+            {exitPlan.time_exit != null && (
+              <div className="rounded-lg bg-oss-watch/5 border border-oss-watch/20 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Timer className="h-4 w-4 text-oss-watch" />
+                  <p className="text-xs font-medium text-oss-watch">Time Exit</p>
+                </div>
+                <p className="text-xl font-bold font-mono text-oss-watch">
+                  {Number(exitPlan.time_exit).toFixed(0)} days
+                </p>
+                {exitPlan.time_exit_level != null && (
+                  <p className="text-xs text-oss-muted mt-1">
+                    Exit price: ${Number(exitPlan.time_exit_level).toFixed(2)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Take profit levels */}
+          {(exitPlan.take_profits as Record<string, unknown>[] | undefined)?.length ? (
+            <div className="mt-4">
+              <p className="text-xs font-medium text-oss-muted mb-2">Take Profit Levels</p>
+              <div className="space-y-1.5">
+                {(exitPlan.take_profits as Record<string, unknown>[]).map((tp, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg bg-oss-bg px-4 py-2">
+                    <span className="text-sm text-oss-text">
+                      Level {i + 1}{tp.label ? ` — ${String(tp.label)}` : ''}
+                    </span>
+                    <div className="flex items-center gap-3 text-sm font-mono">
+                      {tp.price != null && (
+                        <span className="text-oss-approve">${Number(tp.price).toFixed(2)}</span>
+                      )}
+                      {tp.pct != null && (
+                        <span className="text-oss-muted">+{Number(tp.pct).toFixed(0)}%</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Close Trade (for open trades) */}
       {isOpen && (
@@ -443,6 +535,13 @@ export default function TradeDetail() {
             <MetricItem label="Directional" value={snapshot?.directional_score != null ? Number(snapshot.directional_score).toFixed(0) : '—'} />
             <MetricItem label="Volatility" value={snapshot?.volatility_score != null ? Number(snapshot.volatility_score).toFixed(0) : '—'} />
             <MetricItem label="Structure" value={snapshot?.structure_score != null ? Number(snapshot.structure_score).toFixed(0) : '—'} />
+            {decidedAt && <MetricItem label="Decided At" value={formatDateTime(decidedAt)} />}
+            {snapshot?.theta_adjusted_ev != null && (
+              <MetricItem label="θ-Adj EV" value={`$${Number(snapshot.theta_adjusted_ev).toFixed(2)}`} />
+            )}
+            {snapshot?.conviction_score != null && (
+              <MetricItem label="Conviction" value={Number(snapshot.conviction_score).toFixed(0)} />
+            )}
           </div>
         </div>
       )}

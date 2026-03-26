@@ -448,11 +448,14 @@ export function useContractQuotes(contractIds: string[], enabled: boolean = true
   })
 }
 
-export function useStockTechnicals(ticker: string) {
+export function useStockTechnicals(
+  ticker: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: queryKeys.stockTechnicals(ticker),
     queryFn: () => api.getStockTechnicals(ticker),
-    enabled: !!ticker,
+    enabled: (options?.enabled ?? true) && !!ticker,
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }

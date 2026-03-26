@@ -286,18 +286,25 @@ function adxLabel(adx: number | null): string {
 
 interface UnderlyingStockDetailsProps {
   ticker: string
+  /** When provided, renders from static snapshot data instead of fetching live. */
+  data?: StockTechnicalsResponse
 }
 
-export default function UnderlyingStockDetails({ ticker }: UnderlyingStockDetailsProps) {
-  const { data, isLoading, error } = useStockTechnicals(ticker)
+export default function UnderlyingStockDetails({ ticker, data: propData }: UnderlyingStockDetailsProps) {
+  const { data: fetchedData, isLoading, error } = useStockTechnicals(ticker, {
+    enabled: !propData,
+  })
 
-  if (isLoading) {
+  const data = propData || fetchedData
+
+  if (!propData && isLoading) {
     return (
       <div className="h-56 animate-pulse rounded-xl border border-oss-border bg-oss-surface" />
     )
   }
 
-  if (error || !data) return null
+  if (!propData && (error || !data)) return null
+  if (!data) return null
 
   const d = data
 

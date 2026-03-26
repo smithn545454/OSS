@@ -38,6 +38,33 @@ async def _noop_list() -> list:
     return []
 
 
+async def _fetch_stock_technicals(ticker: str) -> dict[str, Any] | None:
+    """Fetch stock technicals for the underlying ticker.
+
+    Returns the full StockTechnicals model as a dict, or None on failure.
+    Runs in parallel with other snapshot fetches — no added latency.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.polygon import PolygonClient
+    from app.services.technicals import compute_stock_technicals
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    from_date = (datetime.now(timezone.utc) - timedelta(days=370)).strftime("%Y-%m-%d")
+
+    try:
+        async with PolygonClient() as client:
+            details, bars = await asyncio.gather(
+                client.get_ticker_details(ticker),
+                client.get_daily_bars_parsed(ticker, from_date, today),
+            )
+        result = compute_stock_technicals(ticker, bars, details)
+        return result.model_dump()
+    except Exception as e:
+        logger.warning(f"Failed to fetch stock technicals for {ticker}: {e}")
+        return None
+
+
 async def build_evaluation_snapshot_data(
     ticker: str,
     evaluation_id: str,
@@ -71,12 +98,14 @@ async def build_evaluation_snapshot_data(
         opportunities,
         features,
         thesis,
+        underlying_technicals,
     ) = await asyncio.gather(
         PillarScoreTable.list_by_evaluation(evaluation_id),
         GateResultTable.list_by_evaluation(evaluation_id),
         OpportunityTable.list_by_ticker(ticker, limit=20) if opportunity_id else _noop_list(),
         FeatureValueTable.list_by_evaluation(evaluation_id),
         TradeThesisTable.get_by_evaluation_id(evaluation_id),
+        _fetch_stock_technicals(ticker),
     )
 
     # Process pillar scores
@@ -234,4 +263,5 @@ async def build_evaluation_snapshot_data(
         "thesis": thesis_dict,
         "matched_rules": matched_rules_list,
         "theta_adjusted_ev": theta_adjusted_ev,
+        "underlying_technicals": underlying_technicals,
     }

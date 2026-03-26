@@ -151,9 +151,14 @@ async def track_trade(request: TrackTradeRequest) -> dict[str, Any]:
         features=snapshot_data["features"],
         thesis=snapshot_data["thesis"],
         matched_rules=snapshot_data["matched_rules"],
+        # Underlying stock technicals (point-in-time)
+        underlying_technicals=snapshot_data.get("underlying_technicals"),
+        # Decision timestamp
+        decided_at=decision.get("decided_at"),
         # Computed scores
         theta_adjusted_ev=snapshot_data["theta_adjusted_ev"],
         conviction_score=request.conviction_score,
+        company_name=(snapshot_data.get("underlying_technicals") or {}).get("company_name"),
     )
 
     # Create the trade

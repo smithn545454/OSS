@@ -1413,6 +1413,12 @@ class EvaluationSnapshot(OSSBaseModel):
     # Matched setup rules
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
 
+    # Underlying stock technicals (point-in-time snapshot at trade entry)
+    underlying_technicals: Optional[dict[str, Any]] = None
+
+    # Decision timestamp
+    decided_at: Optional[str] = None
+
     # Computed scores
     theta_adjusted_ev: Optional[float] = None
     conviction_score: Optional[float] = None
