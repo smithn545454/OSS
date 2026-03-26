@@ -414,6 +414,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
 
   const [result, setResult] = useState<PatternAnalysis | null>(null)
   const [pollingId, setPollingId] = useState<string | null>(null)
+  const [pollingStartedAt, setPollingStartedAt] = useState<number | null>(null)
   const [savedArchetypes, setSavedArchetypes] = useState<Set<string>>(new Set())
   const [savingArchetype, setSavingArchetype] = useState<string | null>(null)
   const [showManualForm, setShowManualForm] = useState(false)
@@ -425,8 +426,21 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
     if (polledResult && polledResult.status !== 'running') {
       setResult(polledResult)
       setPollingId(null)
+      setPollingStartedAt(null)
     }
-  }, [polledResult])
+    // Timeout after 5 minutes — worker normally completes in <30 seconds
+    if (pollingId && pollingStartedAt && Date.now() - pollingStartedAt > 5 * 60 * 1000) {
+      setResult({
+        analysis_id: pollingId,
+        status: 'error',
+        positions_analyzed: 0,
+        archetypes: [],
+        message: 'Analysis timed out. Please try again.',
+      })
+      setPollingId(null)
+      setPollingStartedAt(null)
+    }
+  }, [polledResult, pollingId, pollingStartedAt])
 
   const isRunning = runAnalysis.isPending || pollingId != null
 
@@ -436,6 +450,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
       setSavedArchetypes(new Set())
       if (data.status === 'running' && data.analysis_id) {
         setPollingId(data.analysis_id)
+        setPollingStartedAt(Date.now())
       } else {
         setResult(data)
       }

@@ -7,6 +7,7 @@ display on the Pattern Discovery tab.
 
 from __future__ import annotations
 
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -26,63 +27,97 @@ logger = logging.getLogger(__name__)
 ANALYSIS_PK_PREFIX = "ANALYSIS#"
 SETUP_RULE_PK = "SETUP_RULE"
 
+# Abbreviations for token-efficient CSV encoding
+SCANNER_ABBREV = {
+    "BREAKOUT_SCANNER": "BRK",
+    "BREAKOUT": "BRK",
+    "COMPRESSION_SCANNER": "CMP",
+    "COMPRESSION": "CMP",
+    "CHEAP_OPTIONS_SCANNER": "CHP",
+    "CHEAP_OPTIONS": "CHP",
+    "UNUSUAL_VOLUME_SCANNER": "UV",
+    "UNUSUAL_VOLUME": "UV",
+}
+VERDICT_ABBREV = {"APPROVE": "A", "WATCH": "W", "REJECT": "R"}
 
-def _position_summary(
-    p: PaperPosition, sector_map: dict[str, str] | None = None
-) -> dict[str, Any]:
-    """Convert a position to a compact summary for LLM analysis."""
-    ticker = p.underlying_ticker or p.option_ticker
-    summary: dict[str, Any] = {
-        "ticker": ticker,
-        "sector": (sector_map or {}).get(ticker or "", "Unknown"),
-        "scanner": p.scanner_source or "UNKNOWN",
-        "scanner_list": p.scanner_list or ([p.scanner_source] if p.scanner_source else []),
-        "conviction_score": p.conviction_score,
-        "pillar_directional": p.pillar_directional,
-        "pillar_volatility": p.pillar_volatility,
-        "pillar_structure": p.pillar_structure,
-        "option_type": p.option_type,
-        "dte_at_entry": p.dte_at_entry,
-        "dte_bucket": p.dte_bucket,
-        "entry_iv": p.entry_iv,
-        "entry_iv_percentile": p.entry_iv_percentile,
-        "entry_iv_rv_ratio": (
-            round(p.entry_iv_rv_ratio, 3) if p.entry_iv_rv_ratio is not None else None
-        ),
-        "entry_theta_adjusted_edge": (
-            round(p.entry_theta_adjusted_edge, 2)
-            if p.entry_theta_adjusted_edge is not None else None
-        ),
-        "entry_delta": p.entry_delta,
-        "gate_margin": p.gate_margin,
-        "theta_adj_ev": p.theta_adj_ev,
-        "strike": p.strike,
-        "underlying_price": p.entry_underlying_price,
-        "moneyness_pct": p.entry_moneyness_pct,
-        "spread_pct": p.entry_spread_pct,
-        "open_interest": p.entry_open_interest,
-        "volume": p.entry_volume,
-        "days_to_earnings": p.entry_days_to_earnings,
-        "atr14_pct": (
-            round(p.entry_atr14_pct, 2)
-            if p.entry_atr14_pct is not None else None
-        ),
-        "rs_20d": (
-            round(p.entry_rs_20d, 2)
-            if p.entry_rs_20d is not None else None
-        ),
-        "feasibility_ratio": (
-            round(p.entry_feasibility_ratio, 2)
-            if p.entry_feasibility_ratio is not None else None
-        ),
-        "return_pct": round(p.current_pnl_pct, 2),
-        "days_held": p.days_held,
-        "mfe": round(p.max_favorable_excursion, 2),
-        "mae": round(p.max_adverse_excursion, 2),
-        "verdict": str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry)),
-        "convergence_count": p.convergence_count or 1,
-    }
-    return summary
+# CSV columns sent to the LLM (short names to save tokens)
+CSV_COLUMNS = [
+    "tkr", "sec", "scn", "conv", "cscore", "p_dir", "p_vol", "p_str",
+    "type", "dte", "bucket", "iv", "iv_pct", "ivrv", "theta_edge",
+    "delta", "gate_m", "ev", "money_pct", "spread", "oi", "vol",
+    "dte_earn", "atr", "rs", "feas", "ret", "days", "mfe", "mae", "verdict",
+]
+
+# Estimated tokens per CSV row for dynamic limit calculation
+TOKENS_PER_ROW_ESTIMATE = 14
+PROMPT_OVERHEAD_TOKENS = 12_000
+MAX_PROMPT_TOKENS = 195_000
+
+
+def _fmt(val: Any, decimals: int = 2) -> str:
+    """Format a value for CSV: round floats, empty string for None."""
+    if val is None:
+        return ""
+    if isinstance(val, float):
+        return str(round(val, decimals))
+    return str(val)
+
+
+def build_trade_csv(
+    positions: list[PaperPosition],
+    sector_map: dict[str, str] | None = None,
+) -> str:
+    """Convert positions to a compact CSV string for LLM analysis.
+
+    Uses abbreviated column names and enum values to minimize token count.
+    ~14 tokens per row vs ~35 tokens per row with JSON.
+    """
+    buf = io.StringIO()
+    buf.write(",".join(CSV_COLUMNS))
+    buf.write("\n")
+
+    sm = sector_map or {}
+    for p in positions:
+        ticker = p.underlying_ticker or p.option_ticker or ""
+        scanner_raw = p.scanner_source or "UNKNOWN"
+        verdict_raw = str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry))
+        row = [
+            ticker,
+            sm.get(ticker, ""),
+            SCANNER_ABBREV.get(scanner_raw, scanner_raw),
+            str(p.convergence_count or 1),
+            _fmt(p.conviction_score, 0),
+            _fmt(p.pillar_directional, 0),
+            _fmt(p.pillar_volatility, 0),
+            _fmt(p.pillar_structure, 0),
+            str(p.option_type or ""),
+            _fmt(p.dte_at_entry, 0),
+            str(p.dte_bucket or ""),
+            _fmt(p.entry_iv, 2),
+            _fmt(p.entry_iv_percentile, 0),
+            _fmt(p.entry_iv_rv_ratio, 2),
+            _fmt(p.entry_theta_adjusted_edge, 2),
+            _fmt(p.entry_delta, 2),
+            _fmt(p.gate_margin, 2),
+            _fmt(p.theta_adj_ev, 2),
+            _fmt(p.entry_moneyness_pct, 2),
+            _fmt(p.entry_spread_pct, 2),
+            _fmt(p.entry_open_interest, 0),
+            _fmt(p.entry_volume, 0),
+            _fmt(p.entry_days_to_earnings, 0),
+            _fmt(p.entry_atr14_pct, 2),
+            _fmt(p.entry_rs_20d, 2),
+            _fmt(p.entry_feasibility_ratio, 2),
+            str(round(p.current_pnl_pct, 2)),
+            _fmt(p.days_held, 0),
+            str(round(p.max_favorable_excursion, 2)),
+            str(round(p.max_adverse_excursion, 2)),
+            VERDICT_ABBREV.get(verdict_raw, verdict_raw),
+        ]
+        buf.write(",".join(row))
+        buf.write("\n")
+
+    return buf.getvalue()
 
 
 async def create_analysis_stub(
@@ -260,12 +295,34 @@ async def run_pattern_analysis(
         except Exception:
             sector_map = {}
 
-        # Sample most recent trades for LLM prompt
-        closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)[:1000]
-        trade_data = [_position_summary(p, sector_map) for p in closed_sorted]
+        # Sort by most recent and compute dynamic cap based on token budget
+        closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)
+        max_rows = (MAX_PROMPT_TOKENS - PROMPT_OVERHEAD_TOKENS) // TOKENS_PER_ROW_ESTIMATE
+        sampled = len(closed_sorted) > max_rows
 
-        # Build and send prompt
-        prompt = build_discovery_prompt(trade_data, context)
+        if sampled:
+            # Stratified sampling: proportional across scanners
+            from collections import defaultdict
+            by_scanner: dict[str, list[PaperPosition]] = defaultdict(list)
+            for p in closed_sorted:
+                by_scanner[p.scanner_source or "UNKNOWN"].append(p)
+            sample: list[PaperPosition] = []
+            for scanner_name, positions in by_scanner.items():
+                n = max(1, round(len(positions) / len(closed_sorted) * max_rows))
+                sample.extend(positions[:n])
+            # Trim to max_rows in case rounding pushed us over
+            closed_sorted = sample[:max_rows]
+            logger.info(
+                f"Sampled {len(closed_sorted)} of {total_closed} trades "
+                f"(max_rows={max_rows})"
+            )
+
+        context["sampled"] = sampled
+        context["sample_size"] = len(closed_sorted)
+
+        # Build CSV and prompt
+        trade_csv = build_trade_csv(closed_sorted, sector_map)
+        prompt = build_discovery_prompt(trade_csv, context)
 
         provider = get_provider("anthropic")
         llm_response = await provider.generate(prompt, max_tokens=4000)
@@ -328,7 +385,7 @@ async def run_pattern_analysis(
 
     except Exception as e:
         logger.error(f"Pattern analysis {analysis_id} failed: {e}")
-        # Update stub to error status
+        # Update stub and index to error status
         try:
             await db.update_item(
                 PaperPositionTable.TABLE,
@@ -336,6 +393,17 @@ async def run_pattern_analysis(
                 "META",
                 {"status": "error", "error_message": str(e)},
             )
+            # Also update the index item so listing shows "error" not "running"
+            index_items = await db.query(PaperPositionTable.TABLE, "ANALYSIS_INDEX")
+            for item in index_items:
+                if item.get("analysis_id") == analysis_id:
+                    await db.update_item(
+                        PaperPositionTable.TABLE,
+                        "ANALYSIS_INDEX",
+                        item["SK"],
+                        {"status": "error"},
+                    )
+                    break
         except Exception:
             logger.error(f"Failed to update analysis {analysis_id} error status")
 
