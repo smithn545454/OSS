@@ -102,6 +102,7 @@ def _make_trade(
         "trade_id": trade_id,
         "entry_price": 8.80,
         "quantity": 1,
+        "trader": "TestTrader",
         "tracked_at": "2026-01-17T16:30:00+00:00",
         "snapshot": snapshot,
     }

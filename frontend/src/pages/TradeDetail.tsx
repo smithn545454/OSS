@@ -177,6 +177,7 @@ export default function TradeDetail() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <MetricItem label="Entry Price" value={`$${Number(trade.entry_price).toFixed(2)}`} />
           <MetricItem label="Quantity" value={`${trade.quantity} contract${trade.quantity !== 1 ? 's' : ''}`} />
+          <MetricItem label="Trader" value={trade.trader || '—'} />
           <MetricItem
             label="Total Cost"
             value={`$${(Number(trade.entry_price) * trade.quantity * 100).toLocaleString()}`}

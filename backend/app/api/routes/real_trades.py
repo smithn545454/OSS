@@ -36,6 +36,7 @@ class TrackTradeRequest(BaseModel):
     evaluation_id: str
     entry_price: float
     quantity: int = 1
+    trader: str
     entry_notes: Optional[str] = None
     conviction_score: Optional[float] = None
 
@@ -159,6 +160,7 @@ async def track_trade(request: TrackTradeRequest) -> dict[str, Any]:
     trade = RealTrade(
         entry_price=request.entry_price,
         quantity=request.quantity,
+        trader=request.trader,
         entry_notes=request.entry_notes,
         snapshot=snapshot,
     )

@@ -24,6 +24,7 @@ export default function TrackTradeModal({
 }: TrackTradeModalProps) {
   const [entryPrice, setEntryPrice] = useState(askPrice.toFixed(2))
   const [quantity, setQuantity] = useState('1')
+  const [trader, setTrader] = useState('')
   const [notes, setNotes] = useState('')
   const trackTrade = useTrackTrade()
 
@@ -37,6 +38,7 @@ export default function TrackTradeModal({
         evaluation_id: evaluationId,
         entry_price: parseFloat(entryPrice),
         quantity: parseInt(quantity, 10),
+        trader,
         entry_notes: notes || undefined,
         conviction_score: convictionScore,
       },
@@ -147,6 +149,21 @@ export default function TrackTradeModal({
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-oss-text font-mono focus:border-oss-accent focus:outline-none focus:ring-1 focus:ring-oss-accent"
+                required
+              />
+            </div>
+
+            {/* Trader */}
+            <div>
+              <label className="block text-sm font-medium text-oss-muted mb-1.5">
+                Trader
+              </label>
+              <input
+                type="text"
+                value={trader}
+                onChange={(e) => setTrader(e.target.value)}
+                placeholder="Who is trading?"
+                className="w-full rounded-lg border border-oss-border bg-oss-bg px-3 py-2 text-oss-text text-sm placeholder:text-oss-muted/50 focus:border-oss-accent focus:outline-none focus:ring-1 focus:ring-oss-accent"
                 required
               />
             </div>

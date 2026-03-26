@@ -1007,6 +1007,7 @@ export function useTrackTrade() {
       evaluation_id: string
       entry_price: number
       quantity: number
+      trader: string
       entry_notes?: string
       conviction_score?: number
     }) => api.trackTrade(params),

@@ -88,6 +88,12 @@ export default function TradeCard({ trade }: TradeCardProps) {
           <span className="text-oss-muted">Qty </span>
           <span className="font-mono text-oss-text">{trade.quantity}</span>
         </div>
+        {trade.trader && (
+          <div>
+            <span className="text-oss-muted">Trader </span>
+            <span className="text-oss-text">{trade.trader}</span>
+          </div>
+        )}
         {finalScore != null && (
           <div>
             <span className="text-oss-muted">Score </span>

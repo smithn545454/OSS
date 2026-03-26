@@ -1813,6 +1813,7 @@ export interface RealTrade {
   status: TradeStatus
   entry_price: number
   quantity: number
+  trader: string
   entry_notes?: string | null
   exit_price?: number | null
   exit_reason?: TradeExitReason | null

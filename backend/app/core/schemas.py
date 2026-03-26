@@ -1433,6 +1433,7 @@ class RealTrade(OSSBaseModel):
     # Execution details (provided by user at track time)
     entry_price: float
     quantity: int = 1
+    trader: str
     entry_notes: Optional[str] = None
 
     # Exit details (updated later)
