@@ -302,33 +302,40 @@ async def run_pattern_analysis(
         except Exception:
             sector_map = {}
 
-        # Sort by most recent and compute dynamic cap based on token budget
+        # Sort by most recent, build CSV, and trim to fit token budget
         closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)
-        max_rows = (MAX_PROMPT_TOKENS - PROMPT_OVERHEAD_TOKENS) // TOKENS_PER_ROW_ESTIMATE
-        sampled = len(closed_sorted) > max_rows
+        trade_csv = build_trade_csv(closed_sorted, sector_map)
+
+        # Estimate tokens from actual character count (empirical: ~3.5 chars/token)
+        estimated_tokens = len(trade_csv) / 3.5 + PROMPT_OVERHEAD_TOKENS
+        sampled = estimated_tokens > MAX_PROMPT_TOKENS
 
         if sampled:
-            # Stratified sampling: proportional across scanners
-            from collections import defaultdict
-            by_scanner: dict[str, list[PaperPosition]] = defaultdict(list)
-            for p in closed_sorted:
-                by_scanner[p.scanner_source or "UNKNOWN"].append(p)
-            sample: list[PaperPosition] = []
-            for scanner_name, positions in by_scanner.items():
-                n = max(1, round(len(positions) / len(closed_sorted) * max_rows))
-                sample.extend(positions[:n])
-            # Trim to max_rows in case rounding pushed us over
-            closed_sorted = sample[:max_rows]
+            # Calculate how many rows we can fit
+            csv_lines = trade_csv.split("\n")
+            header = csv_lines[0]
+            data_lines = [line for line in csv_lines[1:] if line.strip()]
+            # Target: (MAX_PROMPT_TOKENS - overhead) * 3.5 chars for data
+            target_chars = int((MAX_PROMPT_TOKENS - PROMPT_OVERHEAD_TOKENS) * 3.5)
+            # Trim rows from the end until we fit
+            trimmed = []
+            char_count = len(header) + 1  # +1 for newline
+            for line in data_lines:
+                char_count += len(line) + 1
+                if char_count > target_chars:
+                    break
+                trimmed.append(line)
+            trade_csv = header + "\n" + "\n".join(trimmed) + "\n"
+            closed_sorted = closed_sorted[:len(trimmed)]
             logger.info(
-                f"Sampled {len(closed_sorted)} of {total_closed} trades "
-                f"(max_rows={max_rows})"
+                f"Trimmed to {len(trimmed)} of {total_closed} trades "
+                f"(est_tokens={int(estimated_tokens)}, target_chars={target_chars})"
             )
 
         context["sampled"] = sampled
         context["sample_size"] = len(closed_sorted)
 
-        # Build CSV and prompt
-        trade_csv = build_trade_csv(closed_sorted, sector_map)
+        # Build prompt
         prompt = build_discovery_prompt(trade_csv, context)
 
         provider = get_provider("anthropic")
