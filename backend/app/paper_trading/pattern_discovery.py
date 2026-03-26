@@ -306,17 +306,18 @@ async def run_pattern_analysis(
         closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)
         trade_csv = build_trade_csv(closed_sorted, sector_map)
 
-        # Estimate tokens from actual character count (empirical: ~3.5 chars/token)
-        estimated_tokens = len(trade_csv) / 3.5 + PROMPT_OVERHEAD_TOKENS
+        # Estimate tokens from actual character count
+        # CSV with numbers tokenizes at ~3.0 chars/token (less efficient than prose)
+        chars_per_token = 3.0
+        estimated_tokens = len(trade_csv) / chars_per_token + PROMPT_OVERHEAD_TOKENS
         sampled = estimated_tokens > MAX_PROMPT_TOKENS
 
         if sampled:
-            # Calculate how many rows we can fit
+            # Calculate how many chars of CSV data we can fit
             csv_lines = trade_csv.split("\n")
             header = csv_lines[0]
             data_lines = [line for line in csv_lines[1:] if line.strip()]
-            # Target: (MAX_PROMPT_TOKENS - overhead) * 3.5 chars for data
-            target_chars = int((MAX_PROMPT_TOKENS - PROMPT_OVERHEAD_TOKENS) * 3.5)
+            target_chars = int((MAX_PROMPT_TOKENS - PROMPT_OVERHEAD_TOKENS) * chars_per_token)
             # Trim rows from the end until we fit
             trimmed = []
             char_count = len(header) + 1  # +1 for newline
@@ -329,7 +330,8 @@ async def run_pattern_analysis(
             closed_sorted = closed_sorted[:len(trimmed)]
             logger.info(
                 f"Trimmed to {len(trimmed)} of {total_closed} trades "
-                f"(est_tokens={int(estimated_tokens)}, target_chars={target_chars})"
+                f"(csv_chars={len(trade_csv)}, est_tokens={int(estimated_tokens)}, "
+                f"target_chars={target_chars})"
             )
 
         context["sampled"] = sampled
