@@ -1130,9 +1130,14 @@ export interface OpportunitiesConfig {
 export interface ContractQuote {
   bid: number
   ask: number
-  last: number
+  mid: number
+  last?: number
+  iv: number | null
+  delta: number | null
+  theta: number | null
   volume: number
   openInterest: number
+  updatedAt: string
 }
 
 export interface ContractQuotesResponse {

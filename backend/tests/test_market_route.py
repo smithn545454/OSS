@@ -99,11 +99,135 @@ class TestGetContractQuotes:
         assert resp.json()["quotes"] == {}
 
     @pytest.mark.asyncio
-    async def test_with_contracts(self, app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.get(
-                "/api/market/quotes?contracts=O:AAPL260320C00185000,O:MSFT260320C00400000"
-            )
+    async def test_returns_quotes_during_market_hours(self, app):
+        """When market is open and Polygon returns data, quotes are populated."""
+        chain_data = [
+            {
+                "ticker": "O:AAPL260320C00185000",
+                "last_quote": {"bid": 5.10, "ask": 5.30},
+                "day": {"close": 5.15, "volume": 1200},
+                "implied_volatility": 0.35,
+                "greeks": {"delta": 0.55, "theta": -0.08},
+                "open_interest": 3400,
+            },
+            {
+                "ticker": "O:AAPL260320C00190000",
+                "last_quote": {"bid": 3.00, "ask": 3.20},
+                "day": {"close": 3.05, "volume": 800},
+                "implied_volatility": 0.32,
+                "greeks": {"delta": 0.42, "theta": -0.06},
+                "open_interest": 1500,
+            },
+        ]
+
+        mock_polygon = MagicMock()
+        mock_polygon.__aenter__ = AsyncMock(return_value=mock_polygon)
+        mock_polygon.__aexit__ = AsyncMock(return_value=False)
+        mock_polygon.get_options_chain_minimal = AsyncMock(return_value=chain_data)
+
+        with patch("app.api.routes.market.PolygonClient", return_value=mock_polygon), \
+             patch("app.api.routes.market.get_market_status", return_value="open"):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/market/quotes?contracts=O:AAPL260320C00185000"
+                )
+
         assert resp.status_code == 200
+        data = resp.json()
+        quote = data["quotes"]["O:AAPL260320C00185000"]
+        assert quote["bid"] == 5.10
+        assert quote["ask"] == 5.30
+        assert quote["mid"] == pytest.approx(5.20)
+        assert quote["iv"] == 0.35
+        assert quote["delta"] == 0.55
+        assert quote["theta"] == -0.08
+        assert quote["volume"] == 1200
+        assert quote["openInterest"] == 3400
+        assert "updatedAt" in quote
+
+    @pytest.mark.asyncio
+    async def test_missing_contract_omitted(self, app):
+        """Contracts not found in chain are silently omitted."""
+        chain_data = [
+            {
+                "ticker": "O:AAPL260320C00185000",
+                "last_quote": {"bid": 5.10, "ask": 5.30},
+                "day": {"close": 5.15, "volume": 100},
+                "implied_volatility": 0.35,
+                "greeks": {"delta": 0.55, "theta": -0.08},
+                "open_interest": 500,
+            },
+        ]
+
+        mock_polygon = MagicMock()
+        mock_polygon.__aenter__ = AsyncMock(return_value=mock_polygon)
+        mock_polygon.__aexit__ = AsyncMock(return_value=False)
+        mock_polygon.get_options_chain_minimal = AsyncMock(return_value=chain_data)
+
+        with patch("app.api.routes.market.PolygonClient", return_value=mock_polygon), \
+             patch("app.api.routes.market.get_market_status", return_value="open"):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/market/quotes?contracts=O:AAPL260320C00185000,O:AAPL260320C00999000"
+                )
+
+        data = resp.json()
+        assert "O:AAPL260320C00185000" in data["quotes"]
+        assert "O:AAPL260320C00999000" not in data["quotes"]
+
+    @pytest.mark.asyncio
+    async def test_closed_market_returns_empty(self, app):
+        """During closed market, returns empty quotes without calling Polygon."""
+        with patch("app.api.routes.market.get_market_status", return_value="closed"):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/market/quotes?contracts=O:AAPL260320C00185000"
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["quotes"] == {}
+
+    @pytest.mark.asyncio
+    async def test_groups_by_underlying(self, app):
+        """Contracts for the same underlying should result in one chain fetch."""
+        mock_polygon = MagicMock()
+        mock_polygon.__aenter__ = AsyncMock(return_value=mock_polygon)
+        mock_polygon.__aexit__ = AsyncMock(return_value=False)
+        mock_polygon.get_options_chain_minimal = AsyncMock(return_value=[
+            {
+                "ticker": "O:AAPL260320C00185000",
+                "last_quote": {"bid": 5.0, "ask": 5.2},
+                "day": {"volume": 100},
+                "implied_volatility": 0.3,
+                "greeks": {"delta": 0.5, "theta": -0.05},
+                "open_interest": 200,
+            },
+            {
+                "ticker": "O:AAPL260320P00185000",
+                "last_quote": {"bid": 2.0, "ask": 2.2},
+                "day": {"volume": 50},
+                "implied_volatility": 0.28,
+                "greeks": {"delta": -0.45, "theta": -0.04},
+                "open_interest": 150,
+            },
+        ])
+
+        with patch("app.api.routes.market.PolygonClient", return_value=mock_polygon), \
+             patch("app.api.routes.market.get_market_status", return_value="open"):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get(
+                    "/api/market/quotes?contracts=O:AAPL260320C00185000,O:AAPL260320P00185000"
+                )
+
+        # Should only call get_options_chain_minimal once for AAPL
+        assert mock_polygon.get_options_chain_minimal.call_count == 1
+        data = resp.json()
+        assert len(data["quotes"]) == 2

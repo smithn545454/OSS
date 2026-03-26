@@ -146,25 +146,85 @@ async def get_market_context() -> dict[str, Any]:
 @router.get("/quotes")
 async def get_contract_quotes(contracts: str) -> dict[str, Any]:
     """Get current quotes for multiple option contracts.
-    
-    Per Section 19.3 - Real-time price updates.
-    
+
+    Fetches live bid/ask/mid prices from Polygon for the requested option
+    contracts. Groups by underlying to minimize API calls.
+
     Args:
-        contracts: Comma-separated list of option contract IDs
-        
+        contracts: Comma-separated list of option tickers (e.g. O:NVDA250402P00180000)
+
     Returns:
-        Dict mapping contract ID to pricing data
+        Dict mapping option ticker to quote data (bid, ask, mid, iv, greeks, etc.)
     """
+    from app.paper_trading.position_manager import extract_underlying_from_option_ticker
+
     contract_list = [c.strip() for c in contracts.split(",") if c.strip()]
-    
+
     if not contract_list:
         return {"quotes": {}}
-    
-    # For now, return empty quotes - would need to implement
-    # option contract snapshot fetching from Polygon
-    # This is a placeholder for Phase 5 real-time updates
+
+    # Cap at 50 contracts to prevent abuse
+    contract_list = contract_list[:50]
+
+    # Skip during closed market to avoid wasting Polygon API calls
+    market_status = get_market_status()
+    if market_status == "closed":
+        return {"quotes": {}}
+
+    # Group option tickers by underlying for efficient batching
+    by_underlying: dict[str, list[str]] = {}
+    for option_ticker in contract_list:
+        underlying = extract_underlying_from_option_ticker(option_ticker)
+        by_underlying.setdefault(underlying, []).append(option_ticker)
+
     quotes: dict[str, dict[str, Any]] = {}
-    
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        async with PolygonClient() as client:
+
+            async def fetch_underlying(underlying: str, requested: list[str]) -> None:
+                """Fetch chain for one underlying and extract quotes for requested contracts."""
+                try:
+                    chain = await client.get_options_chain_minimal(underlying)
+                    # Build lookup: option ticker -> contract data
+                    chain_lookup = {c.get("ticker"): c for c in chain if c.get("ticker")}
+
+                    for option_ticker in requested:
+                        contract = chain_lookup.get(option_ticker)
+                        if not contract:
+                            continue
+
+                        # Extract bid/ask from last_quote, fallback to day close
+                        last_quote = contract.get("last_quote") or {}
+                        day = contract.get("day") or {}
+                        greeks = contract.get("greeks") or {}
+
+                        bid = last_quote.get("bid") or day.get("close") or 0
+                        ask = last_quote.get("ask") or 0
+                        mid = (bid + ask) / 2 if bid and ask else bid or ask or 0
+
+                        quotes[option_ticker] = {
+                            "bid": bid,
+                            "ask": ask,
+                            "mid": round(mid, 4),
+                            "iv": contract.get("implied_volatility"),
+                            "delta": greeks.get("delta"),
+                            "theta": greeks.get("theta"),
+                            "volume": int(day.get("volume") or 0),
+                            "openInterest": int(contract.get("open_interest") or 0),
+                            "updatedAt": now_iso,
+                        }
+                except Exception as e:
+                    logger.error(f"Failed to fetch quotes for {underlying}: {e}")
+
+            # Fetch all underlyings concurrently
+            await asyncio.gather(
+                *(fetch_underlying(u, tickers) for u, tickers in by_underlying.items())
+            )
+    except Exception as e:
+        logger.error(f"Failed to initialize Polygon client for quotes: {e}")
+
     return {"quotes": quotes}
 
 

@@ -5,8 +5,9 @@
  * Per Section 5 of OSS_Opportunities_Page_Specification.
  */
 
-import { useEffect } from 'react'
-import { useApproveEvaluations } from '@/hooks/useApi'
+import { useEffect, useMemo } from 'react'
+import { useApproveEvaluations, useContractQuotes } from '@/hooks/useApi'
+import { filterByConvictionThreshold } from '@/lib/convictionScore'
 import {
   ContextBar,
   ConvictionQueue,
@@ -43,9 +44,19 @@ export default function Opportunities() {
 
     return () => clearInterval(interval)
   }, [refetch])
-  
-  const evaluations = data?.evaluations ?? []
+
+  const evaluations = useMemo(() => data?.evaluations ?? [], [data?.evaluations])
   const earningsExclusions = data?.excludedForEarnings ?? []
+
+  // Extract option tickers from high-conviction evaluations for live price refresh
+  const highConvictionTickers = useMemo(() => {
+    const highConviction = filterByConvictionThreshold(evaluations, convictionThreshold)
+    return highConviction.map(e => e.option_ticker).filter(Boolean)
+  }, [evaluations, convictionThreshold])
+
+  // Fetch live quotes for high-conviction opportunities (refreshes every 10 min)
+  const { data: quotesData } = useContractQuotes(highConvictionTickers)
+  const liveQuotes = quotesData?.quotes ?? {}
   
   return (
     <div 
@@ -178,6 +189,7 @@ export default function Opportunities() {
             <ConvictionQueue
               evaluations={evaluations}
               threshold={convictionThreshold}
+              liveQuotes={liveQuotes}
             />
             
             {/* All APPROVEs Table */}

@@ -443,8 +443,8 @@ export function useContractQuotes(contractIds: string[], enabled: boolean = true
     queryKey: queryKeys.contractQuotes(contractIds),
     queryFn: () => api.getContractQuotes(contractIds),
     enabled: enabled && contractIds.length > 0,
-    refetchInterval: 30000, // 30 seconds during market hours
-    staleTime: 15000,
+    refetchInterval: 600000, // 10 minutes
+    staleTime: 300000, // 5 minutes
   })
 }
 

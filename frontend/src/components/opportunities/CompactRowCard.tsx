@@ -8,7 +8,7 @@
  */
 
 import { useNavigate } from 'react-router-dom'
-import type { ApproveEvaluation } from '@/lib/types'
+import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
 import { ConvictionGauge } from './ConvictionGauge'
 import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import { formatRelativeTime, formatExpirationDate, getAgeFreshness } from '@/lib/formatTime'
@@ -16,6 +16,7 @@ import { formatRelativeTime, formatExpirationDate, getAgeFreshness } from '@/lib
 interface CompactRowCardProps {
   evaluation: ApproveEvaluation
   rank: number
+  liveQuote?: ContractQuote
   className?: string
 }
 
@@ -26,7 +27,7 @@ function getUrgencyConfig(dte: number): { color: string; label: string } | null 
   return null
 }
 
-export function CompactRowCard({ evaluation, rank, className = '' }: CompactRowCardProps) {
+export function CompactRowCard({ evaluation, rank, liveQuote, className = '' }: CompactRowCardProps) {
   const navigate = useNavigate()
   const freshness = getAgeFreshness(evaluation.evaluated_at)
   const hasSetupRules = (evaluation.matchedRules?.length ?? 0) > 0
@@ -79,7 +80,7 @@ export function CompactRowCard({ evaluation, rank, className = '' }: CompactRowC
       <SignalsZone evaluation={evaluation} />
 
       {/* Zone 5: Metrics */}
-      <MetricsZone evaluation={evaluation} />
+      <MetricsZone evaluation={evaluation} liveQuote={liveQuote} />
     </article>
   )
 }
@@ -271,12 +272,20 @@ function SignalsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
   )
 }
 
-function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
-  const premium = evaluation.mid ?? 0
+function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation; liveQuote?: ContractQuote }) {
+  const hasLiveQuote = !!liveQuote
+  const stalePremium = evaluation.mid ?? 0
+  const premium = hasLiveQuote ? liveQuote.mid : stalePremium
   const contractCost = premium * 100
   const thetaAdjEV = evaluation.thetaAdjustedEV
   const returnPct = calculateReturnPct(thetaAdjEV, premium)
   const returnColor = getReturnColor(returnPct)
+
+  // Price change from evaluation time
+  const priceDelta = hasLiveQuote ? liveQuote.mid - stalePremium : 0
+  // Red = more expensive (bad for entry), green = cheaper (good)
+  const deltaColor = priceDelta >= 0 ? '#FF4D6A' : '#00E676'
+  const deltaSign = priceDelta >= 0 ? '+' : ''
 
   const labelStyle: React.CSSProperties = {
     fontSize: '9px',
@@ -296,15 +305,37 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
     <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexShrink: 0 }}>
       {/* Premium */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-        <span style={labelStyle}>PREMIUM</span>
-        <span style={valueStyle}>${premium.toFixed(2)}</span>
-        <span style={{
-          fontSize: '10px',
-          fontFamily: "'JetBrains Mono', monospace",
-          color: '#FF4D6A80',
-        }}>
-          (${contractCost.toLocaleString('en-US', { maximumFractionDigits: 0 })})
+        <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: '4px' }}>
+          PREMIUM
+          {hasLiveQuote && (
+            <span style={{
+              fontSize: '7px',
+              fontWeight: 700,
+              color: '#00E676',
+              letterSpacing: '0.1em',
+            }}>
+              LIVE
+            </span>
+          )}
         </span>
+        <span style={valueStyle}>${premium.toFixed(2)}</span>
+        {hasLiveQuote && Math.abs(priceDelta) >= 0.01 ? (
+          <span style={{
+            fontSize: '10px',
+            fontFamily: "'JetBrains Mono', monospace",
+            color: deltaColor,
+          }}>
+            {deltaSign}${Math.abs(priceDelta).toFixed(2)}
+          </span>
+        ) : (
+          <span style={{
+            fontSize: '10px',
+            fontFamily: "'JetBrains Mono', monospace",
+            color: '#FF4D6A80',
+          }}>
+            (${contractCost.toLocaleString('en-US', { maximumFractionDigits: 0 })})
+          </span>
+        )}
       </div>
 
       {/* θ-Adj EV */}
