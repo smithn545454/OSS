@@ -839,7 +839,7 @@ class ScannerOrchestrator:
                             theses=theses if 'theses' in dir() else [],
                         )
                     except Exception as e:
-                        logger.warning(f"Slack alerts failed (non-blocking): {e}")
+                        logger.warning(f"Slack alerts failed (non-blocking): {e}", exc_info=True)
 
                 # Mark pipeline run as complete (batch path only)
                 if not streaming:
@@ -1839,7 +1839,10 @@ async def _fire_slack_alerts(
     # Build lookup: opportunity_id → scanner types
     opp_scanners: dict[str, list[str]] = {}
     for opp in filtered_opportunities:
-        scanner_types = [t.scanner_type.value for t in opp.scanner_triggers]
+        scanner_types = [
+            t.scanner_type.value if hasattr(t.scanner_type, "value") else str(t.scanner_type)
+            for t in opp.scanner_triggers
+        ]
         opp_scanners[opp.opportunity_id] = scanner_types
 
     # Build lookup: evaluation_id → trade thesis text
@@ -1948,10 +1951,13 @@ async def _fire_slack_alerts(
         contract_id = ev.option_ticker or ev.evaluation_id
 
         # Send alert (service handles should_alert checks internally)
+        option_type_str = (
+            ev.option_type.value if hasattr(ev.option_type, "value") else str(ev.option_type)
+        )
         success, _ = await service.send_alert(
             ticker=ev.underlying_ticker,
             strike=ev.strike,
-            option_type=ev.option_type,
+            option_type=option_type_str,
             expiration=ev.expiration_date,
             conviction_score=result.total,
             urgency=urgency,
