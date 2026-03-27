@@ -307,10 +307,15 @@ async def run_pattern_analysis(
         closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)
         trade_csv = build_trade_csv(closed_sorted, sector_map)
 
-        # Estimate tokens from actual character count
-        # CSV with numbers tokenizes at ~3.0 chars/token (less efficient than prose)
-        chars_per_token = 3.0
-        estimated_tokens = len(trade_csv) / chars_per_token + PROMPT_OVERHEAD_TOKENS
+        # Estimate tokens from character count. Use conservative 2.7 chars/token
+        # (CSV with numbers/commas tokenizes less efficiently than prose at ~4 c/t)
+        chars_per_token = 2.7
+        csv_chars = len(trade_csv)
+        estimated_tokens = csv_chars / chars_per_token + PROMPT_OVERHEAD_TOKENS
+        logger.info(
+            f"CSV built: {len(closed_sorted)} rows, {csv_chars} chars, "
+            f"est_tokens={int(estimated_tokens)}, limit={MAX_PROMPT_TOKENS}"
+        )
         sampled = estimated_tokens > MAX_PROMPT_TOKENS
 
         if sampled:
@@ -331,8 +336,7 @@ async def run_pattern_analysis(
             closed_sorted = closed_sorted[:len(trimmed)]
             logger.info(
                 f"Trimmed to {len(trimmed)} of {total_closed} trades "
-                f"(csv_chars={len(trade_csv)}, est_tokens={int(estimated_tokens)}, "
-                f"target_chars={target_chars})"
+                f"(csv_chars={len(trade_csv)}, target_chars={target_chars})"
             )
 
         context["sampled"] = sampled
