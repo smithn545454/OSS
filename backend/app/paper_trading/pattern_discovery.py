@@ -345,6 +345,9 @@ async def run_pattern_analysis(
 
         # Build prompt
         prompt = build_discovery_prompt(trade_csv, context)
+        logger.info(
+            f"Prompt built: {len(prompt)} chars, csv_in_prompt={len(trade_csv)} chars"
+        )
 
         provider = get_provider("anthropic")
         llm_response = await provider.generate(prompt, max_tokens=4000)
