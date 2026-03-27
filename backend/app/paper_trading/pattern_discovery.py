@@ -307,9 +307,10 @@ async def run_pattern_analysis(
         closed_sorted = sorted(closed, key=lambda p: p.entry_date, reverse=True)
         trade_csv = build_trade_csv(closed_sorted, sector_map)
 
-        # Estimate tokens from character count. Use conservative 2.7 chars/token
-        # (CSV with numbers/commas tokenizes less efficiently than prose at ~4 c/t)
-        chars_per_token = 2.7
+        # Estimate tokens from character count. Empirical: CSV with numbers/commas
+        # tokenizes at ~2.13 chars/token (much worse than prose at ~4 c/t).
+        # Use 2.0 for safety margin.
+        chars_per_token = 2.0
         csv_chars = len(trade_csv)
         estimated_tokens = csv_chars / chars_per_token + PROMPT_OVERHEAD_TOKENS
         logger.info(
