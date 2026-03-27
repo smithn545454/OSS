@@ -249,7 +249,7 @@ async def run_pattern_analysis(
     Returns:
         Analysis results with archetypes
     """
-    logger.info("run_pattern_analysis v7 (CSV+trimming, chars_per_token=1.6)")
+    logger.info("run_pattern_analysis v8 (CSV+trimming, chars_per_token=1.4)")
     from app.db.dynamodb import get_dynamodb
 
     now = datetime.now(timezone.utc).isoformat()
@@ -308,10 +308,10 @@ async def run_pattern_analysis(
         trade_csv = build_trade_csv(closed_sorted, sector_map)
 
         # Estimate tokens from character count. Empirical measurement:
-        # 346,438 prompt chars = 207,321 API tokens = 1.67 chars/token.
+        # 308,458 prompt chars = 207,668 API tokens = 1.49 chars/token.
         # CSV numbers/commas/decimals each become separate tokens.
-        # Use 1.6 for safety margin.
-        chars_per_token = 1.6
+        # Use 1.4 for safety margin.
+        chars_per_token = 1.4
         csv_chars = len(trade_csv)
         estimated_tokens = csv_chars / chars_per_token + PROMPT_OVERHEAD_TOKENS
         logger.info(
