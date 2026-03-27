@@ -929,6 +929,14 @@ export function useSetupRulePerformance(ruleId: string, enabled: boolean = false
   })
 }
 
+export function useSetupRuleBatchPerformance() {
+  return useQuery({
+    queryKey: ['paper-trading', 'setup-rules', 'performance-batch'] as const,
+    queryFn: () => api.getSetupRuleBatchPerformance(),
+    staleTime: 60000,
+  })
+}
+
 // Edge Intelligence
 export function useEdgeBriefing(days: number = 10) {
   return useQuery({

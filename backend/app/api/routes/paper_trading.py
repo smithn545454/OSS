@@ -1666,6 +1666,43 @@ async def delete_setup_rule_endpoint(rule_id: str) -> dict[str, Any]:
     return {"message": f"Setup rule {rule_id} deleted"}
 
 
+@router.get("/setup-rules/performance/batch")
+async def get_setup_rules_performance_batch() -> dict[str, Any]:
+    """Get performance stats for all setup rules in a single pass."""
+    import statistics
+
+    from app.db.tables import PaperPositionTable
+
+    closed = await PaperPositionTable.list_closed(limit=2000)
+
+    # Bucket positions by matched rule IDs
+    rule_positions: dict[str, list] = {}
+    for p in closed:
+        if not p.matched_rule_ids:
+            continue
+        for rid in p.matched_rule_ids:
+            rule_positions.setdefault(rid, []).append(p)
+
+    performances: dict[str, Any] = {}
+    for rid, positions in rule_positions.items():
+        returns = [p.current_pnl_pct for p in positions]
+        wins = [r for r in returns if r > 0]
+        days_held = [p.days_held for p in positions if p.days_held is not None]
+
+        performances[rid] = {
+            "sample_size": len(positions),
+            "performance": {
+                "win_rate": len(wins) / len(returns),
+                "avg_return": sum(returns) / len(returns),
+                "median_return": statistics.median(returns),
+                "sample_size": len(positions),
+                "avg_days_held": sum(days_held) / len(days_held) if days_held else None,
+            },
+        }
+
+    return {"performances": performances}
+
+
 @router.get("/setup-rules/{rule_id}/performance")
 async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
     """Get ongoing performance for a setup rule from matched closed positions."""

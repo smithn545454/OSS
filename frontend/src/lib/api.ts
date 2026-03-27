@@ -825,6 +825,14 @@ export async function getSetupRulePerformance(ruleId: string): Promise<SetupRule
   return fetchApi(`/api/paper-trading/setup-rules/${encodeURIComponent(ruleId)}/performance`)
 }
 
+export interface SetupRuleBatchPerformance {
+  performances: Record<string, Omit<SetupRulePerformance, 'rule_id'>>
+}
+
+export async function getSetupRuleBatchPerformance(): Promise<SetupRuleBatchPerformance> {
+  return fetchApi('/api/paper-trading/setup-rules/performance/batch')
+}
+
 // Edge Intelligence
 export async function getEdgeBriefing(days: number = 10): Promise<import('./types').EdgeBriefingResponse> {
   return fetchApi(`/api/paper-trading/edge-briefing?days=${days}`)

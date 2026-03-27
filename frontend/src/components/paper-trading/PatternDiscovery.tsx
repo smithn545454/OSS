@@ -31,6 +31,7 @@ import {
   useToggleSetupRule,
   useDeleteSetupRule,
   useSetupRulePerformance,
+  useSetupRuleBatchPerformance,
 } from '@/hooks/useApi'
 import type { ArchetypeResult, PatternAnalysis, SetupRule } from '@/lib/types'
 import ManualRuleForm from './ManualRuleForm'
@@ -283,7 +284,7 @@ function PerformanceComparison({ ruleId, creation }: {
   )
 }
 
-function SetupRuleRow({ rule }: { rule: SetupRule }) {
+function SetupRuleRow({ rule, livePerformance }: { rule: SetupRule; livePerformance: { sample_size: number; performance: import('@/lib/types').ArchetypePerformance | null } | null }) {
   const toggleMutation = useToggleSetupRule()
   const deleteMutation = useDeleteSetupRule()
   const [expanded, setExpanded] = useState(false)
@@ -323,19 +324,20 @@ function SetupRuleRow({ rule }: { rule: SetupRule }) {
             <ModeBadge mode={mode} />
           </div>
           <div className="flex items-center gap-3 mt-0.5 ml-5 text-xs text-oss-muted">
-            {rule.performance_at_creation && rule.performance_at_creation.win_rate != null ? (
-              <>
-                <span>
-                  WR: {fmt(rule.performance_at_creation.win_rate * 100)}%
-                </span>
-                <span>
-                  Avg: {fmt(rule.performance_at_creation.avg_return)}%
-                </span>
-                <span>n={rule.performance_at_creation.sample_size ?? '--'}</span>
-              </>
-            ) : (
-              <span className="italic">No historical data</span>
-            )}
+            {(() => {
+              const livePerf = livePerformance?.performance
+              const perf = livePerf ?? rule.performance_at_creation
+              if (perf && perf.win_rate != null) {
+                return (
+                  <>
+                    <span>WR: {fmt(perf.win_rate * 100)}%</span>
+                    <span>Avg: {fmt(perf.avg_return)}%</span>
+                    <span>n={perf.sample_size ?? '--'}</span>
+                  </>
+                )
+              }
+              return <span className="italic">No historical data</span>
+            })()}
             <span>Created: {rule.created_at?.slice(0, 10)}</span>
           </div>
         </div>
@@ -410,6 +412,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
   const runAnalysis = useRunPatternDiscovery()
   const { data: analyses } = usePatternAnalyses()
   const { data: rules } = useSetupRules()
+  const { data: batchPerf } = useSetupRuleBatchPerformance()
   const createRule = useCreateSetupRule()
 
   const [result, setResult] = useState<PatternAnalysis | null>(null)
@@ -578,7 +581,7 @@ export default function PatternDiscovery({ period, verdict, scanner }: PatternDi
         {rules && rules.length > 0 ? (
           <div className="rounded-lg border border-oss-border bg-oss-surface overflow-hidden">
             {rules.map((rule) => (
-              <SetupRuleRow key={rule.rule_id} rule={rule} />
+              <SetupRuleRow key={rule.rule_id} rule={rule} livePerformance={batchPerf?.performances?.[rule.rule_id] ?? null} />
             ))}
           </div>
         ) : (
