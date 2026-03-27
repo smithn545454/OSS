@@ -249,7 +249,7 @@ async def run_pattern_analysis(
     Returns:
         Analysis results with archetypes
     """
-    logger.info(f"run_pattern_analysis v5 (CSV+trimming, chars_per_token=3.0)")
+    logger.info("run_pattern_analysis v6 (CSV+trimming, chars_per_token=1.8)")
     from app.db.dynamodb import get_dynamodb
 
     now = datetime.now(timezone.utc).isoformat()
@@ -308,9 +308,10 @@ async def run_pattern_analysis(
         trade_csv = build_trade_csv(closed_sorted, sector_map)
 
         # Estimate tokens from character count. Empirical: CSV with numbers/commas
-        # tokenizes at ~2.13 chars/token (much worse than prose at ~4 c/t).
-        # Use 2.0 for safety margin.
-        chars_per_token = 2.0
+        # tokenizes at ~1.85 chars/token (much worse than prose at ~4 c/t)
+        # because each comma, decimal, and number fragment becomes a separate token.
+        # Use 1.8 for safety margin.
+        chars_per_token = 1.8
         csv_chars = len(trade_csv)
         estimated_tokens = csv_chars / chars_per_token + PROMPT_OVERHEAD_TOKENS
         logger.info(
