@@ -226,6 +226,25 @@ export function sortByComposite(evaluations: ApproveEvaluation[]): ApproveEvalua
 }
 
 /**
+ * Sort evaluations by cheapest premium first.
+ * Tie-break: return % descending, then conviction descending.
+ */
+export function sortByCheap(evaluations: ApproveEvaluation[]): ApproveEvaluation[] {
+  return [...evaluations].sort((a, b) => {
+    // Primary: cheapest premium first
+    const costA = (a.mid ?? 0) * 100
+    const costB = (b.mid ?? 0) * 100
+    if (costA !== costB) return costA - costB
+    // Tiebreak: highest return % first
+    const retA = calculateReturnPct(a.thetaAdjustedEV ?? null, a.mid ?? null) ?? 0
+    const retB = calculateReturnPct(b.thetaAdjustedEV ?? null, b.mid ?? null) ?? 0
+    if (retB !== retA) return retB - retA
+    // Final tiebreak: conviction descending
+    return (b.convictionScore ?? 0) - (a.convictionScore ?? 0)
+  })
+}
+
+/**
  * Filter evaluations by conviction threshold.
  * Per Section 4.4:
  * - Default threshold: 75

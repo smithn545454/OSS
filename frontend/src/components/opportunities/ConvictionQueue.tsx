@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
-import { filterByConvictionThreshold, sortByConviction, sortByComposite } from '@/lib/convictionScore'
+import { filterByConvictionThreshold, sortByConviction, sortByComposite, sortByCheap } from '@/lib/convictionScore'
 import { CompactRowCard } from './CompactRowCard'
 
 interface ConvictionQueueProps {
@@ -61,11 +61,15 @@ export function ConvictionQueue({
   liveQuotes = {},
   className = '',
 }: ConvictionQueueProps) {
-  const [sortMode, setSortMode] = useState<'composite' | 'conviction'>('composite')
+  const [sortMode, setSortMode] = useState<'composite' | 'conviction' | 'cheap'>('composite')
 
   // Filter to high-conviction only, then sort
   const filtered = filterByConvictionThreshold(evaluations, threshold)
-  const highConviction = sortMode === 'composite' ? sortByComposite(filtered) : sortByConviction(filtered)
+  const highConviction = sortMode === 'composite'
+    ? sortByComposite(filtered)
+    : sortMode === 'cheap'
+      ? sortByCheap(filtered)
+      : sortByConviction(filtered)
   const isEmpty = highConviction.length === 0
   
   return (
@@ -106,7 +110,7 @@ export function ConvictionQueue({
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Ranked by {sortMode === 'composite' ? 'Composite' : 'Conviction'}
+            Ranked by {sortMode === 'composite' ? 'Composite' : sortMode === 'cheap' ? 'Cheap' : 'Conviction'}
           </span>
           <span style={{
             display: 'inline-flex',
@@ -142,6 +146,21 @@ export function ConvictionQueue({
               }}
             >
               Conviction
+            </button>
+            <button
+              onClick={() => setSortMode('cheap')}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                fontSize: '11px',
+                color: sortMode === 'cheap' ? 'var(--text-secondary)' : 'var(--text-muted)',
+                borderBottom: sortMode === 'cheap' ? '1px solid var(--text-secondary)' : '1px solid transparent',
+                opacity: sortMode === 'cheap' ? 1 : 0.6,
+              }}
+            >
+              Cheap
             </button>
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
