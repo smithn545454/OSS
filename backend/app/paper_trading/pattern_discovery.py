@@ -249,6 +249,7 @@ async def run_pattern_analysis(
     Returns:
         Analysis results with archetypes
     """
+    logger.info(f"run_pattern_analysis v5 (CSV+trimming, chars_per_token=3.0)")
     from app.db.dynamodb import get_dynamodb
 
     now = datetime.now(timezone.utc).isoformat()
