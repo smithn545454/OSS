@@ -38,6 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "webhook_channels": [],
     "setup_rule_filter_ids": [],
     "verdicts": ["APPROVE"],
+    "max_premium": None,
 }
 
 
@@ -240,6 +241,7 @@ class SlackAlertService:
         contract_id: str,
         verdict: str = "APPROVE",
         matched_rule_ids: list[str] | None = None,
+        premium: float = 0,
     ) -> tuple[bool, str | None]:
         """Determine if an alert should be sent.
 
@@ -264,6 +266,11 @@ class SlackAlertService:
         threshold = config.get("score_threshold", 75)
         if conviction_score < threshold:
             return False, f"Score {conviction_score:.1f} below threshold {threshold}"
+
+        # Check max premium
+        max_premium = config.get("max_premium")
+        if max_premium is not None and premium > max_premium:
+            return False, f"Premium ${premium:.2f} above max ${max_premium:.2f}"
 
         # Check urgency/convergence requirement
         if config.get("require_urgency_or_convergence", True):
@@ -489,6 +496,7 @@ class SlackAlertService:
             contract_id,
             verdict=verdict,
             matched_rule_ids=matched_rule_ids,
+            premium=premium,
         )
 
         if not should_send:

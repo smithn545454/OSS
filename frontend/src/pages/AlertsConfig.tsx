@@ -106,6 +106,66 @@ function ScoreSlider({
 }
 
 // ============================================================================
+// Max Premium Slider
+// ============================================================================
+
+function PremiumSlider({
+  value,
+  enabled,
+  onChangeValue,
+  onToggle,
+}: {
+  value: number
+  enabled: boolean
+  onChangeValue: (v: number) => void
+  onToggle: (enabled: boolean) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-oss-muted">Maximum Premium</span>
+          <button
+            onClick={() => onToggle(!enabled)}
+            className={clsx(
+              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+              enabled ? 'bg-oss-accent' : 'bg-oss-border',
+            )}
+          >
+            <span
+              className={clsx(
+                'inline-block h-3 w-3 rounded-full bg-white transition-transform',
+                enabled ? 'translate-x-5' : 'translate-x-1',
+              )}
+            />
+          </button>
+        </div>
+        <span className={clsx('font-mono text-lg font-bold', enabled ? 'text-oss-text' : 'text-oss-muted')}>
+          {enabled ? `$${value.toFixed(2)}` : 'Off'}
+        </span>
+      </div>
+      {enabled && (
+        <>
+          <input
+            type="range"
+            min={0.5}
+            max={30}
+            step={0.5}
+            value={value}
+            onChange={(e) => onChangeValue(Number(e.target.value))}
+            className="w-full accent-oss-accent"
+          />
+          <div className="flex justify-between text-xs text-oss-muted">
+            <span>$0.50 (cheaper)</span>
+            <span>$30.00 (any price)</span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Volume Preview Card
 // ============================================================================
 
@@ -152,6 +212,12 @@ function VolumePreview() {
           <span>Below score threshold</span>
           <span className="font-mono text-oss-reject">{breakdown.belowScoreThreshold}</span>
         </div>
+        {breakdown.aboveMaxPremium > 0 && (
+          <div className="flex justify-between text-oss-muted">
+            <span>Above max premium</span>
+            <span className="font-mono text-oss-reject">{breakdown.aboveMaxPremium}</span>
+          </div>
+        )}
         <div className="flex justify-between text-oss-muted">
           <span>Failed urgency/convergence</span>
           <span className="font-mono text-amber-400">{breakdown.failedUrgencyConvergence}</span>
@@ -500,6 +566,13 @@ export default function AlertsConfig() {
               <ScoreSlider
                 value={draft.score_threshold ?? 75}
                 onChange={(v) => updateDraft('score_threshold', v)}
+              />
+
+              <PremiumSlider
+                value={draft.max_premium ?? 10}
+                enabled={draft.max_premium != null}
+                onChangeValue={(v) => updateDraft('max_premium', v)}
+                onToggle={(on) => updateDraft('max_premium', on ? (draft.max_premium ?? 10) : null)}
               />
 
               <div className="flex items-center justify-between py-2">

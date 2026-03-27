@@ -137,6 +137,7 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     require_uc = config.get("require_urgency_or_convergence", True)
     filter_ids = config.get("setup_rule_filter_ids", [])
     allowed_verdicts = config.get("verdicts", ["APPROVE"])
+    max_premium = config.get("max_premium")
 
     # Load setup rules if filter is active
     rules_by_id: dict[str, dict[str, Any]] = {}
@@ -162,6 +163,7 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     breakdown = {
         "totalEvaluations": len(evaluations),
         "belowScoreThreshold": 0,
+        "aboveMaxPremium": 0,
         "failedUrgencyConvergence": 0,
         "noMatchingSetupRule": 0,
         "wouldAlert": 0,
@@ -323,6 +325,13 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         if result.total < threshold:
             breakdown["belowScoreThreshold"] += 1
             continue
+
+        # Check max premium
+        if max_premium is not None:
+            mid = item.get("mid") or 0
+            if mid > max_premium:
+                breakdown["aboveMaxPremium"] += 1
+                continue
 
         # Check urgency/convergence
         urgency = determine_urgency(scanner_types)

@@ -1754,6 +1754,7 @@ export interface WebhookChannel {
 export interface AlertConfig {
   enabled: boolean
   score_threshold: number
+  max_premium?: number | null
   require_urgency_or_convergence: boolean
   cooldown_minutes: number
   daily_cap: number
@@ -1768,6 +1769,7 @@ export interface AlertConfig {
 export interface AlertPreviewBreakdown {
   totalEvaluations: number
   belowScoreThreshold: number
+  aboveMaxPremium: number
   failedUrgencyConvergence: number
   noMatchingSetupRule: number
   wouldAlert: number
