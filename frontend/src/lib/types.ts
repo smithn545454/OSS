@@ -1655,6 +1655,7 @@ export interface PatternAnalysis {
 
 export interface PatternAnalysisSummary {
   analysis_id: string
+  status?: string
   created_at: string
   positions_analyzed: number
   archetype_count: number

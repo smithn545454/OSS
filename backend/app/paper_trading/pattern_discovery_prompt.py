@@ -14,54 +14,39 @@ logger = logging.getLogger(__name__)
 
 DISCOVERY_SYSTEM_PROMPT = (
     "You are a quantitative trading pattern analyst. "
-    "You receive a dataset of closed options paper trades and must identify "
+    "You receive a dataset of closed options paper trades in CSV format and must identify "
     "statistically significant trade archetypes — repeatable combinations "
     "of characteristics that correlate with above-average win rates and returns.\n"
     "\n"
-    "Available fields per trade:\n"
-    "- sector: Stock sector (e.g. Technology, Healthcare, Energy, Materials, "
-    "Financials, Consumer Discretionary, Industrials, etc.)\n"
-    "- scanner: Which scanner detected the opportunity "
-    "(BREAKOUT, COMPRESSION, CHEAP_OPTIONS, UNUSUAL_VOLUME)\n"
-    "- scanner_list: All scanners that fired (multi-scanner confluence)\n"
-    "- conviction_score: Overall score 0-100\n"
-    "- pillar_directional: Directional edge score 0-100\n"
-    "- pillar_structure: Structure & quality score 0-100\n"
-    "- pillar_volatility: Volatility score 0-100\n"
-    "- option_type: CALL or PUT\n"
-    "- dte_at_entry: Days to expiration when position opened\n"
-    "- dte_bucket: Bucketed DTE range\n"
-    "- entry_iv: Implied volatility at entry\n"
-    "- entry_iv_percentile: IV percentile rank 0-100 "
-    "(lower = historically cheaper options, null if unavailable)\n"
-    "- entry_iv_rv_ratio: IV/RV ratio "
-    "(below 1.0 = IV cheaper than realized volatility — a tailwind for long options, "
-    "null if unavailable)\n"
-    "- entry_theta_adjusted_edge: Expected delta gain per unit of theta decay "
-    "(above 1.5 = strong edge, null if unavailable)\n"
-    "- entry_delta: Option delta at entry\n"
-    "- gate_margin: Distance above minimum gate threshold "
-    "(higher = more comfortable pass)\n"
-    "- theta_adj_ev: Theta-adjusted expected value in dollars\n"
-    "- strike: Option strike price\n"
-    "- underlying_price: Stock price at entry\n"
-    "- moneyness_pct: How far OTM/ITM as percentage "
-    "(positive = OTM for calls)\n"
-    "- spread_pct: Bid-ask spread as % of mid "
-    "(lower = more liquid)\n"
-    "- open_interest: Contract open interest at entry\n"
-    "- volume: Contract volume at entry\n"
-    "- days_to_earnings: Calendar days to next earnings "
-    "(null if unknown)\n"
-    "- atr14_pct: 14-day ATR as % of price "
-    "(higher = more volatile stock, null if unavailable)\n"
-    "- rs_20d: 20-day relative strength vs SPY "
-    "(positive = outperforming, null if unavailable)\n"
-    "- feasibility_ratio: Required move / expected move "
-    "(lower = more achievable breakeven, null if unavailable)\n"
-    "- convergence_count: Number of scanners that fired (1-4)\n"
-    "- return_pct: Final return percentage\n"
-    "- days_held: Calendar days held\n"
+    "## CSV Column Reference\n"
+    "The data uses abbreviated column names and values for compactness:\n"
+    "- tkr: Ticker symbol\n"
+    "- sec: Sector (Tech=Technology, HC=Healthcare, Enrg=Energy, Matl=Materials, "
+    "Fin=Financials, ConD=Consumer Discretionary, ConS=Consumer Staples, "
+    "Ind=Industrials, Util=Utilities, RE=Real Estate, Comm=Communication Services)\n"
+    "- scn: Scanner (BRK=BREAKOUT, CMP=COMPRESSION, CHP=CHEAP_OPTIONS, UV=UNUSUAL_VOLUME)\n"
+    "- conv: Scanner confluence count (1-4)\n"
+    "- cscore: Conviction score 0-100\n"
+    "- p_dir/p_vol/p_str: Directional/Volatility/Structure pillar scores 0-100\n"
+    "- type: C=CALL, P=PUT\n"
+    "- dte: Days to expiration at entry\n"
+    "- iv: Implied volatility at entry\n"
+    "- iv_pct: IV percentile 0-100 (lower = historically cheaper)\n"
+    "- ivrv: IV/RV ratio (below 1.0 = IV < realized vol, tailwind for longs)\n"
+    "- theta_edge: Delta gain per theta decay (above 1.5 = strong)\n"
+    "- gate_m: Distance above gate threshold (higher = safer)\n"
+    "- money_pct: OTM/ITM % (positive = OTM for calls)\n"
+    "- spread: Bid-ask spread % of mid (lower = more liquid)\n"
+    "- oi/vol: Open interest / volume at entry\n"
+    "- dte_earn: Days to earnings\n"
+    "- atr: 14-day ATR as % of price\n"
+    "- rs: 20-day relative strength vs SPY\n"
+    "- feas: Feasibility ratio (lower = easier breakeven)\n"
+    "- ret: Final return %\n"
+    "- days: Days held\n"
+    "- verdict: Entry verdict (A=APPROVE, W=WATCH, R=REJECT)\n"
+    "\n"
+    "Empty cells = data unavailable.\n"
     "\n"
     "Your analysis MUST:\n"
     "1. Look for combinations of 2-4 characteristics "
@@ -71,6 +56,10 @@ DISCOVERY_SYSTEM_PROMPT = (
     "4. Define each archetype with specific, testable criteria "
     "(thresholds, ranges)\n"
     "5. Include reasoning for why each pattern might work\n"
+    "\n"
+    "IMPORTANT: In your output criteria, use FULL scanner names "
+    "(BREAKOUT, COMPRESSION, CHEAP_OPTIONS, UNUSUAL_VOLUME), "
+    "not the CSV abbreviations.\n"
     "\n"
     "Respond with ONLY a valid JSON array of archetype objects."
 )
@@ -102,7 +91,7 @@ DISCOVERY_OUTPUT_SCHEMA = """{
 The criteria object can include any combination of:
 - sectors: list of sector names (e.g. ["Energy", "Materials"])
   — only include when the pattern is sector-specific
-- scanners: list of scanner names
+- scanners: list of FULL scanner names (BREAKOUT, COMPRESSION, CHEAP_OPTIONS, UNUSUAL_VOLUME)
 - scanner_confluence: true (requires 2+ scanners)
 - conviction_score_min / conviction_score_max: score thresholds
 - pillar_directional_min / pillar_structure_min / pillar_volatility_min (score floors)
@@ -113,7 +102,6 @@ The criteria object can include any combination of:
 - iv_rv_ratio_max / iv_rv_ratio_min: IV/RV ratio (1.0 = IV < realized vol)
 - theta_adjusted_edge_min: minimum theta-adjusted edge ratio
 - gate_margin_min: minimum gate margin
-- underlying_price_min / underlying_price_max: stock price range
 - moneyness_pct_min / moneyness_pct_max: OTM/ITM depth range
 - spread_pct_max: maximum bid-ask spread percentage
 - open_interest_min: minimum open interest
@@ -126,19 +114,25 @@ The criteria object can include any combination of:
 
 
 def build_discovery_prompt(
-    trades: list[dict[str, Any]],
+    trade_csv: str,
     context: dict[str, Any],
 ) -> str:
     """Build the pattern discovery prompt.
 
     Args:
-        trades: List of trade summary dicts
+        trade_csv: CSV string with header row and trade data rows
         context: Aggregate context (total_trades, win_rate, avg_return, thresholds)
 
     Returns:
         Complete prompt string for the LLM
     """
-    trade_json = json.dumps(trades, indent=None, default=str)
+    sampling_note = ""
+    if context.get("sampled"):
+        sampling_note = (
+            f"- NOTE: This is a stratified sample of {context['sample_size']} trades "
+            f"from {context['total_trades']} total. "
+            f"Scale sample counts proportionally when estimating archetype sizes.\n"
+        )
 
     prompt = (
         f"{DISCOVERY_SYSTEM_PROMPT}\n\n"
@@ -147,8 +141,9 @@ def build_discovery_prompt(
         f"- Overall win rate: {context['win_rate']}%\n"
         f"- Overall avg return: {context['avg_return']}%\n"
         f"- Minimum sample size per archetype: {context['min_sample_size']}\n"
-        f"- Minimum win rate threshold: {context['min_win_rate_pct']}%\n\n"
-        f"## Trade Data (JSON)\n{trade_json}\n\n"
+        f"- Minimum win rate threshold: {context['min_win_rate_pct']}%\n"
+        f"{sampling_note}\n"
+        f"## Trade Data (CSV)\n{trade_csv}\n"
         f"## Required Output Format\n{DISCOVERY_OUTPUT_SCHEMA}\n\n"
         f"Identify 3-7 distinct archetypes. Focus on combinations "
         f"that meaningfully outperform the overall "
