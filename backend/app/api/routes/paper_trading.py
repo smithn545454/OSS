@@ -1769,8 +1769,8 @@ async def backfill_setup_rule_matches(
     if status_filter in ("all", "closed"):
         all_positions.extend(await PaperPositionTable.list_closed(limit=2000))
 
-    needs_backfill = [p for p in all_positions if not p.matched_rule_ids][:batch_size]
-    total_remaining = sum(1 for p in all_positions if not p.matched_rule_ids)
+    needs_backfill = [p for p in all_positions if p.matched_rule_ids is None][:batch_size]
+    total_remaining = sum(1 for p in all_positions if p.matched_rule_ids is None)
     logger.info(
         f"Setup rule backfill: processing {len(needs_backfill)} of "
         f"{total_remaining} positions needing matching"
@@ -1843,6 +1843,11 @@ async def backfill_setup_rule_matches(
                 })
                 updated += 1
             else:
+                # Mark as processed with empty list so we don't re-check
+                await PaperPositionTable.update(pos, {
+                    "matched_rule_ids": [],
+                    "matched_rules": [],
+                })
                 skipped += 1
 
         except Exception as e:
