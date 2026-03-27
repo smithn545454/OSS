@@ -1668,27 +1668,20 @@ async def delete_setup_rule_endpoint(rule_id: str) -> dict[str, Any]:
 
 @router.get("/setup-rules/performance/batch")
 async def get_setup_rules_performance_batch() -> dict[str, Any]:
-    """Get performance stats for all setup rules via dynamic matching.
-
-    Dynamically matches closed positions against all rules (not just stored
-    matched_rule_ids), so rules created after positions exist still get stats.
-    """
+    """Get performance stats for all setup rules from matched closed positions."""
     import statistics
 
     from app.db.tables import PaperPositionTable
-    from app.paper_trading.pattern_discovery import list_setup_rules
-    from app.paper_trading.rule_matcher import build_dicts_from_position, match_rules
 
     closed = await PaperPositionTable.list_closed(limit=2000)
-    all_rules = await list_setup_rules()
 
-    # Dynamically match each position against all rules
+    # Bucket positions by matched rule IDs (set at position creation or by backfill)
     rule_positions: dict[str, list] = {}
     for p in closed:
-        eval_dict, decision_dict, scanners = build_dicts_from_position(p)
-        matched = match_rules(all_rules, eval_dict, decision_dict, scanners, active_only=False)
-        for rule in matched:
-            rule_positions.setdefault(rule["rule_id"], []).append(p)
+        if not p.matched_rule_ids:
+            continue
+        for rid in p.matched_rule_ids:
+            rule_positions.setdefault(rid, []).append(p)
 
     performances: dict[str, Any] = {}
     for rid, positions in rule_positions.items():
@@ -1712,27 +1705,15 @@ async def get_setup_rules_performance_batch() -> dict[str, Any]:
 
 @router.get("/setup-rules/{rule_id}/performance")
 async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
-    """Get ongoing performance for a setup rule via dynamic matching."""
+    """Get ongoing performance for a setup rule from matched closed positions."""
     from app.db.tables import PaperPositionTable
-    from app.paper_trading.pattern_discovery import list_setup_rules
-    from app.paper_trading.rule_matcher import build_dicts_from_position, matches_rule
     import statistics
 
-    # Find the rule to get its criteria
-    all_rules = await list_setup_rules()
-    rule = next((r for r in all_rules if r["rule_id"] == rule_id), None)
-    if not rule:
-        return {"rule_id": rule_id, "performance": None, "sample_size": 0}
-
-    criteria = rule.get("criteria", {})
     closed = await PaperPositionTable.list_closed(limit=2000)
-
-    # Dynamically match positions against this rule
-    matched_positions = []
-    for p in closed:
-        eval_dict, decision_dict, scanners = build_dicts_from_position(p)
-        if matches_rule(criteria, eval_dict, decision_dict, scanners):
-            matched_positions.append(p)
+    matched_positions = [
+        p for p in closed
+        if p.matched_rule_ids and rule_id in p.matched_rule_ids
+    ]
 
     if not matched_positions:
         return {"rule_id": rule_id, "performance": None, "sample_size": 0}
@@ -1751,6 +1732,115 @@ async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
             "sample_size": len(matched_positions),
             "avg_days_held": sum(days_held) / len(days_held) if days_held else None,
         },
+    }
+
+
+@router.post("/setup-rules/backfill")
+async def backfill_setup_rule_matches() -> dict[str, Any]:
+    """Backfill matched_rule_ids on positions that were created before rules existed.
+
+    For each position missing matched_rule_ids, fetches the original evaluation
+    and feature data, re-runs rule matching, and updates the position in DynamoDB.
+    """
+    from app.db.tables import (
+        EvaluationTable,
+        FeatureValueTable,
+        PaperPositionTable,
+    )
+    from app.paper_trading.pattern_discovery import list_setup_rules
+    from app.paper_trading.rule_matcher import format_matched_rules, match_rules
+
+    all_rules = await list_setup_rules()
+    if not all_rules:
+        return {"message": "No setup rules found", "updated": 0, "skipped": 0}
+
+    # Get all positions (both open and closed) missing matched_rule_ids
+    open_positions = await PaperPositionTable.list_open(limit=2000)
+    closed_positions = await PaperPositionTable.list_closed(limit=2000)
+    all_positions = open_positions + closed_positions
+
+    needs_backfill = [p for p in all_positions if not p.matched_rule_ids]
+    logger.info(f"Setup rule backfill: {len(needs_backfill)} positions need matching")
+
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    for pos in needs_backfill:
+        try:
+            # Fetch original evaluation
+            eval_data = await EvaluationTable.get_by_id(
+                pos.underlying_ticker or pos.option_ticker.split("O:")[1][:4]
+                if pos.underlying_ticker is None else pos.underlying_ticker,
+                pos.evaluation_id,
+            )
+            if not eval_data:
+                skipped += 1
+                continue
+
+            # EvaluationTable.get_by_id returns flat dict with decision nested
+            evaluation = eval_data
+            decision = eval_data.get("decision") or {}
+
+            # Fetch features for this evaluation
+            features = await FeatureValueTable.list_by_evaluation(pos.evaluation_id)
+            vol_features: dict[str, Any] = {}
+            for f in features:
+                if f.feature_name in (
+                    "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
+                    "days_to_earnings", "atr14_pct", "rs_20d", "feasibility_ratio",
+                ):
+                    if f.value is not None:
+                        vol_features[f.feature_name] = f.value
+
+            # Build eval_dict from original evaluation data (same as position_manager)
+            option_type = evaluation.get("option_type", "")
+            if hasattr(option_type, "value"):
+                option_type = option_type.value
+            eval_dict: dict[str, Any] = {
+                "option_type": str(option_type).upper(),
+                "dte": evaluation.get("dte"),
+                "iv": evaluation.get("iv"),
+                "delta": evaluation.get("delta"),
+                "spread_pct": evaluation.get("spread_pct"),
+                "open_interest": evaluation.get("open_interest"),
+                "volume": evaluation.get("volume"),
+                "underlying_price": evaluation.get("underlying_price"),
+                "moneyness_pct": evaluation.get("moneyness_pct"),
+                **vol_features,
+            }
+
+            decision_dict = {
+                "final_score": decision.get("final_score"),
+                "directional_score": decision.get("directional_score"),
+                "volatility_score": decision.get("volatility_score"),
+                "structure_score": decision.get("structure_score"),
+            }
+
+            scanner_list = pos.scanner_list or []
+
+            matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
+            if matched:
+                rule_ids = [r["rule_id"] for r in matched]
+                rule_snapshots = format_matched_rules(matched, include_criteria=True)
+                await PaperPositionTable.update(pos, {
+                    "matched_rule_ids": rule_ids,
+                    "matched_rules": rule_snapshots,
+                })
+                updated += 1
+            else:
+                skipped += 1
+
+        except Exception as e:
+            logger.warning(f"Backfill failed for position {pos.position_id}: {e}")
+            errors += 1
+
+    return {
+        "message": f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors",
+        "total_positions": len(needs_backfill),
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
     }
 
 
