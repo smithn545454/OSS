@@ -1,6 +1,12 @@
 """Tests for setup rule matching engine."""
 
-from app.paper_trading.rule_matcher import matches_rule, match_rules, format_matched_rules
+from app.core.schemas import PaperPosition, Verdict
+from app.paper_trading.rule_matcher import (
+    build_dicts_from_position,
+    format_matched_rules,
+    match_rules,
+    matches_rule,
+)
 
 
 def _eval(**overrides):
@@ -834,3 +840,101 @@ class TestFormatMatchedRules:
         matched = [_rule(criteria, rule_id="r1")]
         formatted = format_matched_rules(matched, include_criteria=True)
         assert formatted[0]["criteria"] == criteria
+
+
+class TestBuildDictsFromPosition:
+    def _make_position(self, **overrides):
+        """Helper to build a PaperPosition with all entry fields populated."""
+        defaults = {
+            "evaluation_id": "eval-1",
+            "option_ticker": "O:AAPL250418C00200000",
+            "entry_price": 3.50,
+            "entry_date": "2026-03-01",
+            "current_price": 4.00,
+            "current_pnl_pct": 14.3,
+            "verdict_at_entry": Verdict.APPROVE,
+            "option_type": "CALL",
+            "dte_at_entry": 30,
+            "entry_iv": 0.45,
+            "entry_spread_pct": 3.0,
+            "entry_open_interest": 500,
+            "entry_volume": 100,
+            "entry_underlying_price": 195.0,
+            "entry_moneyness_pct": 2.5,
+            "entry_iv_percentile": 25.0,
+            "entry_iv_rv_ratio": 0.87,
+            "entry_theta_adjusted_edge": 2.3,
+            "gate_margin": 10.0,
+            "entry_atr14_pct": 3.5,
+            "entry_rs_20d": 5.5,
+            "entry_feasibility_ratio": 0.75,
+            "entry_days_to_earnings": 12,
+            "conviction_score": 82.0,
+            "pillar_directional": 78.0,
+            "pillar_volatility": 72.0,
+            "pillar_structure": 68.0,
+            "scanner_list": ["BREAKOUT", "COMPRESSION"],
+        }
+        defaults.update(overrides)
+        return PaperPosition(**defaults)
+
+    def test_field_mapping(self):
+        """All position fields map to the correct eval/decision dict keys."""
+        pos = self._make_position()
+        eval_dict, decision_dict, scanners = build_dicts_from_position(pos)
+
+        assert eval_dict["option_type"] == "CALL"
+        assert eval_dict["dte"] == 30
+        assert eval_dict["iv"] == 0.45
+        assert eval_dict["spread_pct"] == 3.0
+        assert eval_dict["open_interest"] == 500
+        assert eval_dict["volume"] == 100
+        assert eval_dict["underlying_price"] == 195.0
+        assert eval_dict["moneyness_pct"] == 2.5
+        assert eval_dict["iv_percentile"] == 25.0
+        assert eval_dict["iv_rv_ratio"] == 0.87
+        assert eval_dict["theta_adjusted_edge"] == 2.3
+        assert eval_dict["gate_margin"] == 10.0
+        assert eval_dict["atr14_pct"] == 3.5
+        assert eval_dict["rs_20d"] == 5.5
+        assert eval_dict["feasibility_ratio"] == 0.75
+        assert eval_dict["days_to_earnings"] == 12
+
+        assert decision_dict["final_score"] == 82.0
+        assert decision_dict["directional_score"] == 78.0
+        assert decision_dict["volatility_score"] == 72.0
+        assert decision_dict["structure_score"] == 68.0
+
+        assert scanners == ["BREAKOUT", "COMPRESSION"]
+
+    def test_none_fields_produce_none_values(self):
+        """Sparse positions (older ones) produce None values that the matcher handles."""
+        pos = self._make_position(
+            entry_iv_percentile=None,
+            entry_iv_rv_ratio=None,
+            entry_days_to_earnings=None,
+            scanner_list=None,
+        )
+        eval_dict, decision_dict, scanners = build_dicts_from_position(pos)
+
+        assert eval_dict["iv_percentile"] is None
+        assert eval_dict["iv_rv_ratio"] is None
+        assert eval_dict["days_to_earnings"] is None
+        assert scanners == []
+
+    def test_dynamic_matching_finds_retroactive_matches(self):
+        """A rule created after positions exist can match those positions."""
+        pos = self._make_position(
+            option_type="PUT",
+            conviction_score=85.0,
+            scanner_list=["BREAKOUT"],
+        )
+        eval_dict, decision_dict, scanners = build_dicts_from_position(pos)
+
+        # Rule that would have matched this position
+        criteria = {
+            "option_type": "PUT",
+            "conviction_score_min": 80,
+            "scanners": ["BREAKOUT"],
+        }
+        assert matches_rule(criteria, eval_dict, decision_dict, scanners)

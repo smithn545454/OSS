@@ -1668,20 +1668,27 @@ async def delete_setup_rule_endpoint(rule_id: str) -> dict[str, Any]:
 
 @router.get("/setup-rules/performance/batch")
 async def get_setup_rules_performance_batch() -> dict[str, Any]:
-    """Get performance stats for all setup rules in a single pass."""
+    """Get performance stats for all setup rules via dynamic matching.
+
+    Dynamically matches closed positions against all rules (not just stored
+    matched_rule_ids), so rules created after positions exist still get stats.
+    """
     import statistics
 
     from app.db.tables import PaperPositionTable
+    from app.paper_trading.pattern_discovery import list_setup_rules
+    from app.paper_trading.rule_matcher import build_dicts_from_position, match_rules
 
     closed = await PaperPositionTable.list_closed(limit=2000)
+    all_rules = await list_setup_rules()
 
-    # Bucket positions by matched rule IDs
+    # Dynamically match each position against all rules
     rule_positions: dict[str, list] = {}
     for p in closed:
-        if not p.matched_rule_ids:
-            continue
-        for rid in p.matched_rule_ids:
-            rule_positions.setdefault(rid, []).append(p)
+        eval_dict, decision_dict, scanners = build_dicts_from_position(p)
+        matched = match_rules(all_rules, eval_dict, decision_dict, scanners, active_only=False)
+        for rule in matched:
+            rule_positions.setdefault(rule["rule_id"], []).append(p)
 
     performances: dict[str, Any] = {}
     for rid, positions in rule_positions.items():
@@ -1705,22 +1712,34 @@ async def get_setup_rules_performance_batch() -> dict[str, Any]:
 
 @router.get("/setup-rules/{rule_id}/performance")
 async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
-    """Get ongoing performance for a setup rule from matched closed positions."""
+    """Get ongoing performance for a setup rule via dynamic matching."""
     from app.db.tables import PaperPositionTable
+    from app.paper_trading.pattern_discovery import list_setup_rules
+    from app.paper_trading.rule_matcher import build_dicts_from_position, matches_rule
     import statistics
 
+    # Find the rule to get its criteria
+    all_rules = await list_setup_rules()
+    rule = next((r for r in all_rules if r["rule_id"] == rule_id), None)
+    if not rule:
+        return {"rule_id": rule_id, "performance": None, "sample_size": 0}
+
+    criteria = rule.get("criteria", {})
     closed = await PaperPositionTable.list_closed(limit=2000)
-    matched_positions = [
-        p for p in closed
-        if p.matched_rule_ids and rule_id in p.matched_rule_ids
-    ]
+
+    # Dynamically match positions against this rule
+    matched_positions = []
+    for p in closed:
+        eval_dict, decision_dict, scanners = build_dicts_from_position(p)
+        if matches_rule(criteria, eval_dict, decision_dict, scanners):
+            matched_positions.append(p)
 
     if not matched_positions:
         return {"rule_id": rule_id, "performance": None, "sample_size": 0}
 
     returns = [p.current_pnl_pct for p in matched_positions]
     wins = [r for r in returns if r > 0]
-    days_held = [p.days_held for p in matched_positions]
+    days_held = [p.days_held for p in matched_positions if p.days_held is not None]
 
     return {
         "rule_id": rule_id,
@@ -1730,7 +1749,7 @@ async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
             "avg_return": sum(returns) / len(returns),
             "median_return": statistics.median(returns),
             "sample_size": len(matched_positions),
-            "avg_days_held": sum(days_held) / len(days_held),
+            "avg_days_held": sum(days_held) / len(days_held) if days_held else None,
         },
     }
 

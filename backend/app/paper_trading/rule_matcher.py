@@ -225,6 +225,42 @@ def match_rules(
     return matched
 
 
+def build_dicts_from_position(
+    position: Any,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Build eval_dict, decision_dict, scanner_list from a PaperPosition.
+
+    This allows re-running rule matching against historical positions
+    that were created before a rule existed.
+    """
+    eval_dict: dict[str, Any] = {
+        "option_type": position.option_type,
+        "dte": position.dte_at_entry,
+        "iv": position.entry_iv,
+        "spread_pct": position.entry_spread_pct,
+        "open_interest": position.entry_open_interest,
+        "volume": position.entry_volume,
+        "underlying_price": position.entry_underlying_price,
+        "moneyness_pct": position.entry_moneyness_pct,
+        "iv_percentile": position.entry_iv_percentile,
+        "iv_rv_ratio": position.entry_iv_rv_ratio,
+        "theta_adjusted_edge": position.entry_theta_adjusted_edge,
+        "gate_margin": position.gate_margin,
+        "atr14_pct": position.entry_atr14_pct,
+        "rs_20d": position.entry_rs_20d,
+        "feasibility_ratio": position.entry_feasibility_ratio,
+        "days_to_earnings": position.entry_days_to_earnings,
+    }
+    decision_dict: dict[str, Any] = {
+        "final_score": position.conviction_score,
+        "directional_score": position.pillar_directional,
+        "volatility_score": position.pillar_volatility,
+        "structure_score": position.pillar_structure,
+    }
+    scanners: list[str] = position.scanner_list or []
+    return eval_dict, decision_dict, scanners
+
+
 def format_matched_rules(
     matched: list[dict[str, Any]],
     include_criteria: bool = False,
