@@ -1736,11 +1736,19 @@ async def get_setup_rule_performance(rule_id: str) -> dict[str, Any]:
 
 
 @router.post("/setup-rules/backfill")
-async def backfill_setup_rule_matches() -> dict[str, Any]:
+async def backfill_setup_rule_matches(
+    batch_size: int = 50,
+    status_filter: str = "all",
+) -> dict[str, Any]:
     """Backfill matched_rule_ids on positions that were created before rules existed.
 
     For each position missing matched_rule_ids, fetches the original evaluation
     and feature data, re-runs rule matching, and updates the position in DynamoDB.
+
+    Args:
+        batch_size: Max positions to process per call (default 50, keeps within
+            API Gateway's 30s timeout). Call repeatedly until updated=0.
+        status_filter: "open", "closed", or "all" (default "all")
     """
     from app.db.tables import (
         EvaluationTable,
@@ -1754,13 +1762,19 @@ async def backfill_setup_rule_matches() -> dict[str, Any]:
     if not all_rules:
         return {"message": "No setup rules found", "updated": 0, "skipped": 0}
 
-    # Get all positions (both open and closed) missing matched_rule_ids
-    open_positions = await PaperPositionTable.list_open(limit=2000)
-    closed_positions = await PaperPositionTable.list_closed(limit=2000)
-    all_positions = open_positions + closed_positions
+    # Get positions missing matched_rule_ids
+    all_positions: list[PaperPosition] = []
+    if status_filter in ("all", "open"):
+        all_positions.extend(await PaperPositionTable.list_open(limit=2000))
+    if status_filter in ("all", "closed"):
+        all_positions.extend(await PaperPositionTable.list_closed(limit=2000))
 
-    needs_backfill = [p for p in all_positions if not p.matched_rule_ids]
-    logger.info(f"Setup rule backfill: {len(needs_backfill)} positions need matching")
+    needs_backfill = [p for p in all_positions if not p.matched_rule_ids][:batch_size]
+    total_remaining = sum(1 for p in all_positions if not p.matched_rule_ids)
+    logger.info(
+        f"Setup rule backfill: processing {len(needs_backfill)} of "
+        f"{total_remaining} positions needing matching"
+    )
 
     updated = 0
     skipped = 0
@@ -1835,12 +1849,14 @@ async def backfill_setup_rule_matches() -> dict[str, Any]:
             logger.warning(f"Backfill failed for position {pos.position_id}: {e}")
             errors += 1
 
+    remaining = total_remaining - len(needs_backfill)
     return {
         "message": f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors",
         "total_positions": len(needs_backfill),
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
+        "remaining": remaining,
     }
 
 
