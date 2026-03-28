@@ -57,7 +57,7 @@ function EmptyState() {
 
 export function ConvictionQueue({
   evaluations,
-  threshold = 75,
+  threshold = 70,
   liveQuotes = {},
   className = '',
 }: ConvictionQueueProps) {

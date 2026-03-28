@@ -962,9 +962,6 @@ export interface ConvictionScoreBreakdown {
     thetaAdjustedEv: ComponentScore
     returnPct: ComponentScore
     compositePillar: ComponentScore
-    gateMargin: ComponentScore
-    scannerConvergence: ComponentScore
-    timeSensitivity: ComponentScore
   }
 }
 
@@ -978,12 +975,9 @@ export interface ComponentScore {
  * Conviction scoring weights (spec section 4.1).
  */
 export interface ConvictionScoreWeights {
-  thetaAdjustedEv: number  // Default 25%
-  returnPct: number        // Default 15%
-  compositePillar: number  // Default 25%
-  gateMargin: number       // Default 15%
-  scannerConvergence: number // Default 10%
-  timeSensitivity: number  // Default 10%
+  thetaAdjustedEv: number  // Default 35%
+  returnPct: number        // Default 30%
+  compositePillar: number  // Default 35%
 }
 
 /**
