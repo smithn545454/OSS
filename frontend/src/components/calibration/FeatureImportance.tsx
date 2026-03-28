@@ -385,6 +385,7 @@ function NarrativePanel({
   analysisId: string
 }) {
   const generateMutation = useGenerateFeatureNarrative()
+  const displayNarrative = generateMutation.data?.narrative ?? narrative
 
   return (
     <div className="rounded-xl border border-oss-border bg-oss-surface p-5">
@@ -393,10 +394,15 @@ function NarrativePanel({
         <h3 className="text-sm font-medium text-oss-text">AI Analysis</h3>
       </div>
 
-      {narrative ? (
-        <div className="text-sm text-oss-text/90 leading-relaxed whitespace-pre-wrap">{narrative}</div>
+      {displayNarrative ? (
+        <div className="text-sm text-oss-text/90 leading-relaxed whitespace-pre-wrap">{displayNarrative}</div>
       ) : (
         <div className="text-center py-4">
+          {generateMutation.isError && (
+            <p className="text-xs text-oss-reject mb-3">
+              Failed to generate analysis. Try again.
+            </p>
+          )}
           <p className="text-xs text-oss-muted mb-3">Generate an AI narrative summary of these findings</p>
           <button
             onClick={() => generateMutation.mutate(analysisId)}

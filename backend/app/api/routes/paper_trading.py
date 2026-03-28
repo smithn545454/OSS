@@ -2250,15 +2250,15 @@ async def generate_feature_importance_narrative(analysis_id: str) -> dict[str, A
     prompt = build_narrative_prompt(result)
 
     try:
-        provider = get_provider()
+        provider = get_provider("anthropic")
         llm_response = await provider.generate(
+            prompt=prompt,
             system_prompt=(
                 "You are a quantitative analyst helping a retail options trader. "
                 "Write a concise, actionable analysis based on the statistics provided. "
                 "Use plain language, not academic jargon. Focus on what the trader should "
                 "DO differently. Do not repeat raw numbers — interpret them."
             ),
-            user_prompt=prompt,
             max_tokens=1000,
         )
         narrative = llm_response.content.strip()
