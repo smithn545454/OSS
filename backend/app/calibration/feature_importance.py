@@ -3,7 +3,7 @@
 Pure computation module — no database imports, no side effects.
 Takes lists of PaperPosition objects and returns analysis results.
 
-All statistics computed with Python standard library (math, statistics, random).
+All statistics computed with Python standard library (math, statistics).
 No numpy/scipy/pandas required. Handles 10,000+ positions in <10 seconds.
 """
 
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import math
-import random
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -73,8 +72,6 @@ FEATURE_REGISTRY: list[FeatureRegistryEntry] = [
 # Min sample size for reliable statistics
 MIN_SAMPLE = 20
 MIN_QUINTILE_SAMPLE = 10
-PERMUTATION_COUNT = 200
-PERMUTATION_SEED = 42
 
 
 # ---------------------------------------------------------------------------
@@ -98,24 +95,22 @@ def _pearson_r(xs: list[float], ys: list[float]) -> float:
     return num / denom
 
 
-def _permutation_p_value(
-    xs: list[float],
-    ys: list[float],
-    observed_r: float,
-    n_permutations: int = PERMUTATION_COUNT,
-    seed: int = PERMUTATION_SEED,
-) -> float:
-    """Compute p-value via permutation test. Seeded for reproducibility."""
-    rng = random.Random(seed)
-    observed_abs = abs(observed_r)
-    count_ge = 0
-    ys_shuffled = list(ys)
-    for _ in range(n_permutations):
-        rng.shuffle(ys_shuffled)
-        r_perm = abs(_pearson_r(xs, ys_shuffled))
-        if r_perm >= observed_abs:
-            count_ge += 1
-    return (count_ge + 1) / (n_permutations + 1)  # +1 to avoid p=0
+def _analytical_p_value(observed_r: float, n: int) -> float:
+    """Compute two-tailed p-value for Pearson r via t-distribution.
+
+    Uses the t-statistic: t = r × sqrt(n-2) / sqrt(1-r²)
+    and approximates the CDF via math.erf (normal approximation,
+    accurate for n > 30). O(1) per call — no shuffling needed.
+    """
+    if n < 3:
+        return 1.0
+    r_sq = observed_r ** 2
+    if r_sq >= 1.0:
+        return 0.0  # perfect correlation
+    t = abs(observed_r) * math.sqrt(n - 2) / math.sqrt(1.0 - r_sq)
+    # Two-tailed p via normal CDF approximation (accurate for df > 30)
+    p = math.erfc(t / math.sqrt(2.0))
+    return min(max(p, 0.0), 1.0)
 
 
 def _cohens_d(group_a: list[float], group_b: list[float]) -> float:
@@ -228,7 +223,7 @@ def compute_feature_stats(
         ys = [p[1] for p in pairs]
 
         r = _pearson_r(xs, ys)
-        p_val = _permutation_p_value(xs, ys, r)
+        p_val = _analytical_p_value(r, len(xs))
 
         # Win/loss split
         win_vals = [x for x, y in pairs if y > 0]

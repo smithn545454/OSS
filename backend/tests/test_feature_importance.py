@@ -10,9 +10,9 @@ import math
 
 from app.calibration.feature_importance import (
     FEATURE_REGISTRY,
+    _analytical_p_value,
     _cohens_d,
     _pearson_r,
-    _permutation_p_value,
     _win_rate,
     compute_feature_stats,
     compute_interactions,
@@ -99,25 +99,28 @@ class TestPearsonR:
         assert r == 0.0  # Degenerate, returns 0
 
 
-class TestPermutationPValue:
-    def test_significant_correlation(self) -> None:
-        xs = list(range(100))
-        ys = [x * 2 + 1 for x in xs]  # perfect correlation
-        r = _pearson_r(xs, ys)
-        p = _permutation_p_value(xs, ys, r)
-        assert p < 0.05  # should be highly significant
+class TestAnalyticalPValue:
+    def test_perfect_correlation_significant(self) -> None:
+        # Perfect correlation with 100 points → p ≈ 0
+        p = _analytical_p_value(1.0, 100)
+        assert p < 0.001
 
-    def test_random_data_not_significant(self) -> None:
-        import random
+    def test_strong_correlation_significant(self) -> None:
+        p = _analytical_p_value(0.5, 100)
+        assert p < 0.05
 
-        rng = random.Random(123)
-        xs = [rng.random() for _ in range(50)]
-        ys = [rng.random() for _ in range(50)]
-        r = _pearson_r(xs, ys)
-        p = _permutation_p_value(xs, ys, r)
-        # Random data should NOT be significant (most of the time)
-        # With seed 123 we should get p > 0.05
-        assert p > 0.01  # Very loose bound since random
+    def test_weak_correlation_not_significant(self) -> None:
+        # r=0.01 with n=50 should not be significant
+        p = _analytical_p_value(0.01, 50)
+        assert p > 0.05
+
+    def test_small_sample_returns_one(self) -> None:
+        p = _analytical_p_value(0.9, 2)
+        assert p == 1.0
+
+    def test_zero_correlation(self) -> None:
+        p = _analytical_p_value(0.0, 1000)
+        assert p > 0.99  # should be ~1.0
 
 
 class TestCohensD:
