@@ -8,11 +8,11 @@ export interface OppFilters {
   optionType: 'all' | OptionType
 }
 
-export type SortMode = 'composite' | 'conviction'
+export type SortMode = 'conviction'
 
 interface OppFilterBarProps {
-  sortMode: SortMode
-  onSortChange: (mode: SortMode) => void
+  sortMode?: SortMode
+  onSortChange?: (mode: SortMode) => void
   filters: OppFilters
   onFilterChange: (filters: OppFilters) => void
   totalCount: number
@@ -40,35 +40,6 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'PUT', label: 'Puts' },
 ]
 
-function SortToggle({ mode, onChange }: { mode: SortMode; onChange: (m: SortMode) => void }) {
-  return (
-    <div className="flex items-center rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-xs font-medium">
-      <button
-        onClick={() => onChange('composite')}
-        className={clsx(
-          'px-3 py-1.5 rounded-l-md transition-colors',
-          mode === 'composite'
-            ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-        )}
-      >
-        Composite
-      </button>
-      <button
-        onClick={() => onChange('conviction')}
-        className={clsx(
-          'px-3 py-1.5 rounded-r-md transition-colors',
-          mode === 'conviction'
-            ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-        )}
-      >
-        Conviction
-      </button>
-    </div>
-  )
-}
-
 function FilterSelect({
   value,
   options,
@@ -94,8 +65,6 @@ function FilterSelect({
 }
 
 export function OppFilterBar({
-  sortMode,
-  onSortChange,
   filters,
   onFilterChange,
   totalCount,
@@ -120,8 +89,6 @@ export function OppFilterBar({
         </span>
 
         <div className="ml-auto flex items-center gap-2">
-          <SortToggle mode={sortMode} onChange={onSortChange} />
-
           {/* Mobile filter toggle */}
           <button
             onClick={() => setShowFilters(!showFilters)}

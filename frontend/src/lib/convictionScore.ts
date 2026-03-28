@@ -231,38 +231,6 @@ export function sortByConviction(evaluations: ApproveEvaluation[]): ApproveEvalu
 }
 
 /**
- * Calculate composite score blending conviction with Return%.
- * Formula: conviction * (1 + alpha * returnPct / 100)
- * Falls back to conviction alone when Return% is unavailable.
- */
-export function calculateCompositeScore(
-  evaluation: ApproveEvaluation,
-  alpha: number = 1,
-): number {
-  const conviction = evaluation.convictionScore ?? 0
-  const returnPct = calculateReturnPct(evaluation.thetaAdjustedEV ?? null, evaluation.mid ?? null)
-  if (returnPct == null) return conviction
-  const raw = conviction * (1 + alpha * returnPct / 100)
-  return Math.round(raw * 10) / 10
-}
-
-/**
- * Sort evaluations by composite score descending.
- * Tie-break: conviction descending, then thetaAdjustedEV descending.
- */
-export function sortByComposite(evaluations: ApproveEvaluation[]): ApproveEvaluation[] {
-  return [...evaluations].sort((a, b) => {
-    const compA = calculateCompositeScore(a)
-    const compB = calculateCompositeScore(b)
-    if (compB !== compA) return compB - compA
-    const convA = a.convictionScore ?? 0
-    const convB = b.convictionScore ?? 0
-    if (convB !== convA) return convB - convA
-    return (b.thetaAdjustedEV ?? 0) - (a.thetaAdjustedEV ?? 0)
-  })
-}
-
-/**
  * Sort evaluations by cheapest premium first.
  * Tie-break: return % descending, then conviction descending.
  */

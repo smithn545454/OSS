@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApproveEvaluations } from '@/hooks/useApi'
-import { sortByComposite, sortByConviction } from '@/lib/convictionScore'
+import { sortByConviction } from '@/lib/convictionScore'
 import type { ApproveEvaluation } from '@/lib/types'
 import { OppContextBar } from '@/components/opps/OppContextBar'
-import { OppFilterBar, type OppFilters, type SortMode } from '@/components/opps/OppFilterBar'
+import { OppFilterBar, type OppFilters } from '@/components/opps/OppFilterBar'
 import { OppConvictionList } from '@/components/opps/OppConvictionList'
 import { OppWatchCards } from '@/components/opps/OppWatchCards'
 import { OppEarningsNotice } from '@/components/opps/OppEarningsNotice'
@@ -19,7 +19,6 @@ function applyFilters(evaluations: ApproveEvaluation[], filters: OppFilters): Ap
 }
 
 export default function Opps() {
-  const [sortMode, setSortMode] = useState<SortMode>('composite')
   const [filters, setFilters] = useState<OppFilters>({
     scanner: 'all',
     urgency: 'all',
@@ -73,10 +72,8 @@ export default function Opps() {
   // Filter then sort — no threshold cutoff
   const sorted = useMemo(() => {
     const filtered = applyFilters(evaluations, filters)
-    return sortMode === 'composite'
-      ? sortByComposite(filtered)
-      : sortByConviction(filtered)
-  }, [evaluations, filters, sortMode])
+    return sortByConviction(filtered)
+  }, [evaluations, filters])
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-h-full">
@@ -111,8 +108,6 @@ export default function Opps() {
       {!isLoading && !error && evaluations.length > 0 && (
         <>
           <OppFilterBar
-            sortMode={sortMode}
-            onSortChange={setSortMode}
             filters={filters}
             onFilterChange={setFilters}
             totalCount={sorted.length}
