@@ -62,9 +62,13 @@ export function ConvictionQueue({
   className = '',
 }: ConvictionQueueProps) {
   const [sortMode, setSortMode] = useState<'conviction' | 'cheap'>('conviction')
+  const [rulesOnly, setRulesOnly] = useState(false)
 
-  // Filter to high-conviction only, then sort
-  const filtered = filterByConvictionThreshold(evaluations, threshold)
+  // Filter to high-conviction only, optionally require matched rules, then sort
+  let filtered = filterByConvictionThreshold(evaluations, threshold)
+  if (rulesOnly) {
+    filtered = filtered.filter(e => e.matchedRules && e.matchedRules.length > 0)
+  }
   const highConviction = sortMode === 'cheap'
     ? sortByCheap(filtered)
     : sortByConviction(filtered)
@@ -146,6 +150,21 @@ export function ConvictionQueue({
               Cheap
             </button>
           </span>
+          <button
+            onClick={() => setRulesOnly(!rulesOnly)}
+            style={{
+              background: rulesOnly ? 'var(--accent-primary)' : 'none',
+              border: rulesOnly ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              padding: '2px 8px',
+              fontSize: '11px',
+              color: rulesOnly ? 'var(--bg-primary)' : 'var(--text-muted)',
+              fontWeight: rulesOnly ? 600 : 400,
+            }}
+          >
+            Has Rules
+          </button>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             Score ≥ {threshold}
           </span>
