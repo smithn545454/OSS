@@ -1963,3 +1963,84 @@ export interface StockTechnicalsResponse {
   tape_verdict: TapeVerdict
   tape_bullish_pct: number
 }
+
+// ============================================================================
+// Feature Importance Analysis
+// ============================================================================
+
+export interface QuintileStats {
+  quintile: number
+  range_low: number
+  range_high: number
+  n: number
+  win_rate: number
+  avg_return: number
+  median_return: number
+}
+
+export interface FeatureStats {
+  feature_name: string
+  display_name: string
+  pillar: string | null
+  n_valid: number
+  pearson_r: number
+  p_value: number
+  is_significant: boolean
+  win_mean: number | null
+  loss_mean: number | null
+  difference: number | null
+  effect_size: number | null
+  direction: string
+  quintiles: QuintileStats[]
+}
+
+export interface FeaturePairStats {
+  feature_a: string
+  feature_a_display: string
+  feature_b: string
+  feature_b_display: string
+  both_high_wr: number
+  both_high_avg_return: number
+  both_high_n: number
+  a_only_high_wr: number
+  a_only_high_n: number
+  b_only_high_wr: number
+  b_only_high_n: number
+  both_low_wr: number
+  both_low_n: number
+  interaction_lift: number
+}
+
+export interface WeightComparison {
+  pillar: string
+  subscore: string
+  display_name: string
+  current_weight: number
+  empirical_importance: number
+  delta: number
+  recommendation: string
+}
+
+export interface TemporalWindow {
+  window_start: string
+  window_end: string
+  n_positions: number
+  feature_correlations: Record<string, number | null>
+}
+
+export interface FeatureImportanceResult {
+  analysis_id: string
+  created_at: string
+  period: string
+  outcome: string
+  n_positions: number
+  overall_win_rate: number
+  overall_avg_return: number
+  features: FeatureStats[]
+  interactions: FeaturePairStats[]
+  weight_comparisons: WeightComparison[]
+  temporal_windows: TemporalWindow[]
+  segments: Record<string, unknown>
+  narrative: string | null
+  status: string
+}

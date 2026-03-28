@@ -3,8 +3,11 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEdgeBriefing } from '@/hooks/useApi'
 import type { DimensionStats, EdgeInsight } from '@/lib/types'
 import clsx from 'clsx'
-import { Brain, TrendingUp, TrendingDown, Zap, Target, Layers, Clock, Lightbulb } from 'lucide-react'
+import { Brain, TrendingUp, TrendingDown, Zap, Target, Layers, Clock, Lightbulb, BarChart3 } from 'lucide-react'
 import ScannerAnalysisPanel from '@/components/ScannerAnalysisPanel'
+import FeatureImportance from '@/components/calibration/FeatureImportance'
+
+type IntelTab = 'edge-briefing' | 'feature-importance'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -482,14 +485,20 @@ function InsightsBanner({ insights }: { insights: EdgeInsight[] }) {
 
 export default function Intelligence() {
   usePageTitle('Intelligence')
+  const [tab, setTab] = useState<IntelTab>('edge-briefing')
   const [days, setDays] = useState(10)
   const [selectedScanner, setSelectedScanner] = useState<string | null>(null)
   const { data, isLoading, error } = useEdgeBriefing(days)
 
+  const tabs: { id: IntelTab; label: string; icon: React.ElementType }[] = [
+    { id: 'edge-briefing', label: 'Edge Briefing', icon: Brain },
+    { id: 'feature-importance', label: 'Feature Importance', icon: BarChart3 },
+  ]
+
   return (
     <div className="flex flex-col gap-6 min-h-full">
       {/* Header */}
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <div className="flex items-center gap-3">
             <Brain className="h-6 w-6 text-oss-accent" />
@@ -498,11 +507,39 @@ export default function Intelligence() {
             </h1>
           </div>
           <p className="text-sm text-oss-muted mt-1">
-            Rolling-window performance analytics for pre-trade context
+            Performance analytics and signal analysis
           </p>
         </div>
-        <PeriodSelector value={days} onChange={setDays} />
+        {tab === 'edge-briefing' && <PeriodSelector value={days} onChange={setDays} />}
       </header>
+
+      {/* Tab Navigation */}
+      <div className="flex gap-1 rounded-lg bg-oss-bg p-1 w-fit">
+        {tabs.map((t) => {
+          const Icon = t.icon
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={clsx(
+                'flex items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-colors',
+                tab === t.id
+                  ? 'bg-oss-accent/15 text-oss-accent'
+                  : 'text-oss-muted hover:text-oss-text'
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Feature Importance Tab */}
+      {tab === 'feature-importance' && <FeatureImportance />}
+
+      {/* Edge Briefing Tab */}
+      {tab === 'edge-briefing' && <>
 
       {/* Loading */}
       {isLoading && (
@@ -624,6 +661,8 @@ export default function Intelligence() {
           </p>
         </div>
       )}
+
+      </>}
     </div>
   )
 }

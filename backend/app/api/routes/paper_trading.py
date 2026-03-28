@@ -2036,3 +2036,268 @@ async def analyze_scanner_performance(
     _scanner_analysis_cache[cache_key] = result
 
     return result
+
+
+# ============================================================================
+# Feature Importance Analysis
+# ============================================================================
+
+
+@router.post("/feature-importance/analyze")
+async def run_feature_importance(
+    period: str = "all",
+    outcome: str = "pnl",
+) -> dict[str, Any]:
+    """Run feature importance analysis on closed paper positions.
+
+    Synchronous — computes in <10s for 10K positions, returns results directly.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.calibration.feature_importance import run_feature_importance_analysis
+    from app.db.dynamodb import get_dynamodb
+
+    # Load closed positions
+    closed = await PaperPositionTable.list_closed()
+    if not closed:
+        raise HTTPException(
+            status_code=400,
+            detail="No closed positions available for analysis.",
+        )
+
+    # Apply period filter
+    if period and period != "all":
+        days_map = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+        days = days_map.get(period)
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            closed = [p for p in closed if p.entry_date and p.entry_date >= cutoff]
+
+    if len(closed) < 20:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not enough closed positions for analysis. Found {len(closed)}, need at least 20.",
+        )
+
+    logger.info("Running feature importance analysis: %d closed positions, period=%s", len(closed), period)
+
+    # Run the analysis (pure computation, no external calls)
+    result = run_feature_importance_analysis(closed, period=period, outcome=outcome)
+
+    # Store results in DynamoDB for caching / later retrieval
+    db = get_dynamodb()
+    now = datetime.now(timezone.utc).isoformat()
+
+    result_dict = result.to_dict()
+
+    # Store META item
+    meta_item = {
+        "PK": f"FEAT_IMPORTANCE#{result.analysis_id}",
+        "SK": "META",
+        "analysis_id": result.analysis_id,
+        "created_at": result.created_at,
+        "period": result.period,
+        "outcome": result.outcome,
+        "n_positions": result.n_positions,
+        "overall_win_rate": result.overall_win_rate,
+        "overall_avg_return": result.overall_avg_return,
+        "status": "completed",
+    }
+    await db.put_item(PaperPositionTable.TABLE, meta_item)
+
+    # Store full results
+    results_item = {
+        "PK": f"FEAT_IMPORTANCE#{result.analysis_id}",
+        "SK": "RESULTS",
+        "data": result_dict,
+    }
+    await db.put_item(PaperPositionTable.TABLE, results_item)
+
+    # Store index entry for latest lookup
+    index_item = {
+        "PK": "FEAT_IMPORTANCE_INDEX",
+        "SK": f"{now}#{result.analysis_id}",
+        "analysis_id": result.analysis_id,
+        "period": result.period,
+        "n_positions": result.n_positions,
+        "created_at": result.created_at,
+    }
+    await db.put_item(PaperPositionTable.TABLE, index_item)
+
+    return result_dict
+
+
+@router.get("/feature-importance/latest")
+async def get_latest_feature_importance() -> dict[str, Any]:
+    """Get the most recent feature importance analysis results."""
+    from app.db.dynamodb import get_dynamodb
+
+    db = get_dynamodb()
+
+    # Query the index to find the latest analysis
+    index_items = await db.query(
+        PaperPositionTable.TABLE,
+        "FEAT_IMPORTANCE_INDEX",
+        scan_forward=False,
+        limit=1,
+    )
+
+    if not index_items:
+        raise HTTPException(
+            status_code=404,
+            detail="No feature importance analysis found. Run an analysis first.",
+        )
+
+    analysis_id = index_items[0]["analysis_id"]
+
+    # Fetch full results
+    results_item = await db.get_item(
+        PaperPositionTable.TABLE,
+        f"FEAT_IMPORTANCE#{analysis_id}",
+        "RESULTS",
+    )
+
+    if not results_item or "data" not in results_item:
+        raise HTTPException(
+            status_code=404,
+            detail="Analysis results not found.",
+        )
+
+    return results_item["data"]
+
+
+@router.post("/feature-importance/{analysis_id}/narrative")
+async def generate_feature_importance_narrative(analysis_id: str) -> dict[str, Any]:
+    """Generate an AI narrative summary of the analysis (async)."""
+    import json
+
+    from app.calibration.feature_importance_models import FeatureImportanceResult
+    from app.calibration.feature_importance_prompt import build_narrative_prompt
+    from app.db.dynamodb import get_dynamodb
+    from app.llm.provider import get_provider
+
+    db = get_dynamodb()
+
+    # Fetch results
+    results_item = await db.get_item(
+        PaperPositionTable.TABLE,
+        f"FEAT_IMPORTANCE#{analysis_id}",
+        "RESULTS",
+    )
+
+    if not results_item or "data" not in results_item:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+
+    data = results_item["data"]
+
+    # Build a minimal FeatureImportanceResult for prompt building
+    # We pass the dict through to the prompt builder
+    result = FeatureImportanceResult(
+        analysis_id=data["analysis_id"],
+        created_at=data["created_at"],
+        period=data["period"],
+        outcome=data["outcome"],
+        n_positions=data["n_positions"],
+        overall_win_rate=data["overall_win_rate"],
+        overall_avg_return=data["overall_avg_return"],
+    )
+
+    # Reconstruct features for prompt (lightweight — just top-level stats)
+    from app.calibration.feature_importance_models import (
+        FeaturePairStats,
+        FeatureStats,
+        QuintileStats,
+        TemporalWindow,
+        WeightComparison,
+    )
+
+    for fd in data.get("features", []):
+        quintiles = [QuintileStats(**q) for q in fd.get("quintiles", [])]
+        result.features.append(
+            FeatureStats(
+                feature_name=fd["feature_name"],
+                display_name=fd["display_name"],
+                pillar=fd.get("pillar"),
+                n_valid=fd["n_valid"],
+                pearson_r=fd["pearson_r"],
+                p_value=fd["p_value"],
+                is_significant=fd["is_significant"],
+                win_mean=fd.get("win_mean"),
+                loss_mean=fd.get("loss_mean"),
+                difference=fd.get("difference"),
+                effect_size=fd.get("effect_size"),
+                direction=fd.get("direction", "unclear"),
+                quintiles=quintiles,
+            )
+        )
+
+    for pd_item in data.get("interactions", []):
+        result.interactions.append(FeaturePairStats(**pd_item))
+
+    for wd in data.get("weight_comparisons", []):
+        result.weight_comparisons.append(WeightComparison(**wd))
+
+    for td in data.get("temporal_windows", []):
+        result.temporal_windows.append(
+            TemporalWindow(
+                window_start=td["window_start"],
+                window_end=td["window_end"],
+                n_positions=td["n_positions"],
+                feature_correlations=td["feature_correlations"],
+            )
+        )
+
+    prompt = build_narrative_prompt(result)
+
+    try:
+        provider = get_provider()
+        llm_response = await provider.generate(
+            system_prompt=(
+                "You are a quantitative analyst helping a retail options trader. "
+                "Write a concise, actionable analysis based on the statistics provided. "
+                "Use plain language, not academic jargon. Focus on what the trader should "
+                "DO differently. Do not repeat raw numbers — interpret them."
+            ),
+            user_prompt=prompt,
+            max_tokens=1000,
+        )
+        narrative = llm_response.content.strip()
+    except Exception as e:
+        logger.error("LLM narrative generation failed: %s", e)
+        narrative = None
+
+    # Update stored results with narrative
+    if narrative:
+        data["narrative"] = narrative
+        results_item["data"] = data
+        await db.put_item(PaperPositionTable.TABLE, results_item)
+
+    return {
+        "analysis_id": analysis_id,
+        "status": "completed" if narrative else "error",
+        "narrative": narrative,
+    }
+
+
+@router.get("/feature-importance/{analysis_id}/narrative")
+async def get_feature_importance_narrative(analysis_id: str) -> dict[str, Any]:
+    """Get the narrative for a feature importance analysis."""
+    from app.db.dynamodb import get_dynamodb
+
+    db = get_dynamodb()
+
+    results_item = await db.get_item(
+        PaperPositionTable.TABLE,
+        f"FEAT_IMPORTANCE#{analysis_id}",
+        "RESULTS",
+    )
+
+    if not results_item or "data" not in results_item:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+
+    data = results_item["data"]
+    return {
+        "analysis_id": analysis_id,
+        "status": "completed" if data.get("narrative") else "pending",
+        "narrative": data.get("narrative"),
+    }

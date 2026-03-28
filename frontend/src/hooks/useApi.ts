@@ -1119,3 +1119,37 @@ export function useScannerAnalysis() {
     mutationFn: (scannerName: string) => api.analyzeScannerPerformance(scannerName),
   })
 }
+
+// ============================================================================
+// Feature Importance Analysis
+// ============================================================================
+
+export function useFeatureImportance() {
+  return useQuery({
+    queryKey: ['feature-importance', 'latest'] as const,
+    queryFn: () => api.getLatestFeatureImportance(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+export function useRunFeatureImportance() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { period?: string; outcome?: string }) =>
+      api.runFeatureImportance(params.period, params.outcome),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feature-importance'] })
+    },
+  })
+}
+
+export function useGenerateFeatureNarrative() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (analysisId: string) => api.generateFeatureImportanceNarrative(analysisId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feature-importance'] })
+    },
+  })
+}

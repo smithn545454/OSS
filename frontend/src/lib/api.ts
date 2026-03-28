@@ -992,5 +992,38 @@ export async function analyzeScannerPerformance(
   )
 }
 
+// ============================================================================
+// Feature Importance Analysis
+// ============================================================================
+
+export async function runFeatureImportance(
+  period = 'all',
+  outcome = 'pnl'
+): Promise<import('./types').FeatureImportanceResult> {
+  return fetchApi(
+    `/api/paper-trading/feature-importance/analyze?period=${period}&outcome=${outcome}`,
+    { method: 'POST' }
+  )
+}
+
+export async function getLatestFeatureImportance(): Promise<import('./types').FeatureImportanceResult> {
+  return fetchApi('/api/paper-trading/feature-importance/latest')
+}
+
+export async function generateFeatureImportanceNarrative(
+  analysisId: string
+): Promise<{ analysis_id: string; status: string; narrative: string | null }> {
+  return fetchApi(
+    `/api/paper-trading/feature-importance/${analysisId}/narrative`,
+    { method: 'POST' }
+  )
+}
+
+export async function getFeatureImportanceNarrative(
+  analysisId: string
+): Promise<{ analysis_id: string; status: string; narrative: string | null }> {
+  return fetchApi(`/api/paper-trading/feature-importance/${analysisId}/narrative`)
+}
+
 // Export the ApiError for error handling
 export { ApiError }
