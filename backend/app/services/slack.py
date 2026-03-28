@@ -39,6 +39,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "setup_rule_filter_ids": [],
     "verdicts": ["APPROVE"],
     "max_premium": None,
+    "cheap_gem_enabled": False,
+    "cheap_gem_threshold": 60,
+    "cheap_gem_max_premium": 1.50,
 }
 
 
@@ -262,18 +265,31 @@ class SlackAlertService:
         if verdict not in allowed_verdicts:
             return False, f"Verdict {verdict} not in allowed list {allowed_verdicts}"
 
-        # Check score threshold
+        # Check score threshold (with cheap gem fallback)
         threshold = config.get("score_threshold", 75)
+        is_cheap_gem = False
         if conviction_score < threshold:
-            return False, f"Score {conviction_score:.1f} below threshold {threshold}"
+            # Check if qualifies as a cheap gem (lower threshold for cheap options)
+            cheap_gem_enabled = config.get("cheap_gem_enabled", False)
+            cheap_gem_threshold = config.get("cheap_gem_threshold", 60)
+            cheap_gem_max_premium = config.get("cheap_gem_max_premium", 1.50)
+            if (
+                cheap_gem_enabled
+                and conviction_score >= cheap_gem_threshold
+                and 0 < premium <= cheap_gem_max_premium
+            ):
+                is_cheap_gem = True
+            else:
+                return False, f"Score {conviction_score:.1f} below threshold {threshold}"
 
-        # Check max premium
-        max_premium = config.get("max_premium")
-        if max_premium is not None and premium > max_premium:
-            return False, f"Premium ${premium:.2f} above max ${max_premium:.2f}"
+        # Check max premium (skip for cheap gems — already filtered by cheap_gem_max_premium)
+        if not is_cheap_gem:
+            max_premium = config.get("max_premium")
+            if max_premium is not None and premium > max_premium:
+                return False, f"Premium ${premium:.2f} above max ${max_premium:.2f}"
 
-        # Check urgency/convergence requirement
-        if config.get("require_urgency_or_convergence", True):
+        # Check urgency/convergence requirement (skip for cheap gems)
+        if not is_cheap_gem and config.get("require_urgency_or_convergence", True):
             if urgency != "act_now" and convergence < 2:
                 return False, "Requires Act Now urgency or 2+ scanner convergence"
 
@@ -300,7 +316,7 @@ class SlackAlertService:
             cooldown = config.get("cooldown_minutes", 30)
             return False, f"Contract in {cooldown}min cooldown"
 
-        return True, None
+        return True, "cheap_gem" if is_cheap_gem else None
 
     def _format_message(
         self,
@@ -323,6 +339,7 @@ class SlackAlertService:
         gate_margin: float = 50,
         dte: int = 0,
         is_test: bool = False,
+        is_cheap_gem: bool = False,
     ) -> dict[str, Any]:
         """Format Slack message with rich blocks.
 
@@ -337,6 +354,7 @@ class SlackAlertService:
         urgency_emoji = urgency_map.get(urgency, "\u26aa")
         urgency_label = urgency.replace("_", " ").title()
         test_prefix = "[TEST] " if is_test else ""
+        gem_prefix = "\U0001f48e Cheap Gem: " if is_cheap_gem else ""
 
         blocks: list[dict[str, Any]] = [
             # Header
@@ -345,7 +363,7 @@ class SlackAlertService:
                 "text": {
                     "type": "plain_text",
                     "text": (
-                        f"\U0001f3af {test_prefix}High Conviction: "
+                        f"\U0001f3af {test_prefix}{gem_prefix}High Conviction: "
                         f"{ticker} ${strike} {option_type}"
                     ),
                     "emoji": True,
@@ -503,6 +521,8 @@ class SlackAlertService:
             logger.debug(f"Skipping alert for {contract_id}: {reason}")
             return False, reason
 
+        is_cheap_gem = reason == "cheap_gem"
+
         # Format message
         message = self._format_message(
             ticker,
@@ -523,6 +543,7 @@ class SlackAlertService:
             underlying_price=underlying_price,
             gate_margin=gate_margin,
             dte=dte,
+            is_cheap_gem=is_cheap_gem,
         )
 
         # Send to all configured webhooks
@@ -696,16 +717,18 @@ class SlackAlertService:
                 scanner_types = [scanner_source] if scanner_source else []
 
                 # Calculate conviction score
+                premium = item.get("mid", 0) or 0
                 result = calculate_conviction_score(
                     theta_adj_ev=theta_ev,
                     pillar_scores=pillar_scores,
                     gate_margin=gate_margin,
                     scanner_types=scanner_types,
+                    mid=premium,
                 )
 
                 if result.total > best_score:
                     best_score = result.total
-                    urgency = determine_urgency(scanner_types)
+                    urgency = determine_urgency(scanner_types, mid=premium)
 
                     # Get trade thesis text
                     trade_thesis_text = None

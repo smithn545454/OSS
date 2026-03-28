@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   normalizeEV,
+  normalizeReturnPct,
   calculateCompositePillar,
   getConvergenceBonus,
   getTimeSensitivityBoost,
@@ -16,6 +17,8 @@ import {
   determineUrgency,
   DEFAULT_WEIGHTS,
   DEFAULT_EV_BENCHMARK,
+  DEFAULT_RETURN_PCT_BENCHMARK,
+  CHEAP_UV_PREMIUM_THRESHOLD,
 } from '../lib/convictionScore'
 import type { ApproveEvaluation, ScannerType, UrgencyLevel } from '../lib/types'
 
@@ -119,6 +122,50 @@ describe('normalizeEV', () => {
 })
 
 // ===========================================================================
+// normalizeReturnPct
+// ===========================================================================
+describe('normalizeReturnPct', () => {
+  it('returns 0 for zero mid', () => {
+    expect(normalizeReturnPct(10, 0)).toBe(0)
+  })
+
+  it('returns 0 for negative mid', () => {
+    expect(normalizeReturnPct(10, -1)).toBe(0)
+  })
+
+  it('returns 0 for zero EV', () => {
+    expect(normalizeReturnPct(0, 1)).toBe(0)
+  })
+
+  it('returns 0 for negative EV', () => {
+    expect(normalizeReturnPct(-5, 1)).toBe(0)
+  })
+
+  it('returns 100 for 20% return at default benchmark', () => {
+    // $20 EV on $1.00 option = 20% return → normalized 100
+    expect(normalizeReturnPct(20, 1)).toBe(100)
+  })
+
+  it('returns 50 for 10% return at default benchmark', () => {
+    // $5 EV on $0.50 option = 10% return → normalized 50
+    expect(normalizeReturnPct(5, 0.5)).toBe(50)
+  })
+
+  it('caps at 100 for high return', () => {
+    expect(normalizeReturnPct(40, 1)).toBe(100)
+  })
+
+  it('uses custom benchmark', () => {
+    // $10 EV on $1 option = 10% return / 10% benchmark = 100
+    expect(normalizeReturnPct(10, 1, 10)).toBe(100)
+  })
+
+  it('uses DEFAULT_RETURN_PCT_BENCHMARK by default', () => {
+    expect(DEFAULT_RETURN_PCT_BENCHMARK).toBe(20)
+  })
+})
+
+// ===========================================================================
 // calculateCompositePillar
 // ===========================================================================
 describe('calculateCompositePillar', () => {
@@ -213,6 +260,7 @@ describe('calculateConvictionScore', () => {
   it('calculates score with default weights', () => {
     const evaluation = makeEval({
       thetaAdjustedEV: 7.5,
+      mid: 2.0,
       pillarScores: { DIRECTIONAL: 75, VOLATILITY: 80, STRUCTURE: 85 },
       gateMargin: 60,
       scannerConvergence: 1,
@@ -221,18 +269,20 @@ describe('calculateConvictionScore', () => {
 
     const result = calculateConvictionScore(evaluation)
 
-    // EV: normalizeEV(7.5, 15) = 50 → weighted = 50 * 0.40 = 20
+    // EV: normalizeEV(7.5, 15) = 50 → weighted = 50 * 0.25 = 12.5
+    // ReturnPct: (7.5/(2*100))*100 = 3.75% → 3.75/20*100 = 18.75 → 18.75 * 0.15 = 2.8125 → 2.8
     // Pillar: (75 + 80 + 85) / 3 = 80 → weighted = 80 * 0.25 = 20
     // Margin: clamp(60, 0, 100) = 60 → weighted = 60 * 0.15 = 9
     // Convergence: 1 scanner = 0 → weighted = 0 * 0.10 = 0
     // Time: act_now = 100 → weighted = 100 * 0.10 = 10
-    // Total = 20 + 20 + 9 + 0 + 10 = 59
-    expect(result.total).toBe(59)
+    // Total = 12.5 + 2.8 + 20 + 9 + 0 + 10 = 54.3
+    expect(result.total).toBe(54.3)
   })
 
   it('handles maximum conviction case', () => {
     const evaluation = makeEval({
       thetaAdjustedEV: 1000,
+      mid: 1.0,
       pillarScores: { DIRECTIONAL: 100, VOLATILITY: 100, STRUCTURE: 100 },
       gateMargin: 100,
       scannerConvergence: 4,
@@ -241,7 +291,8 @@ describe('calculateConvictionScore', () => {
 
     const result = calculateConvictionScore(evaluation)
 
-    // EV: 100 * 0.40 = 40
+    // EV: capped 100 * 0.25 = 25
+    // ReturnPct: capped 100 * 0.15 = 15
     // Pillar: 100 * 0.25 = 25
     // Margin: 100 * 0.15 = 15
     // Convergence: 100 * 0.10 = 10
@@ -291,6 +342,7 @@ describe('calculateConvictionScore', () => {
 
     const weights = {
       thetaAdjustedEv: 1.0,
+      returnPct: 0,
       compositePillar: 0,
       gateMargin: 0,
       scannerConvergence: 0,
@@ -307,8 +359,8 @@ describe('calculateConvictionScore', () => {
     const result100 = calculateConvictionScore(evaluation, DEFAULT_WEIGHTS, 100)
     const result1000 = calculateConvictionScore(evaluation, DEFAULT_WEIGHTS, 1000)
 
-    // With benchmark 100: normalizeEV(100, 100) = 100 → weighted = 40
-    // With benchmark 1000: normalizeEV(100, 1000) = 10 → weighted = 4
+    // With benchmark 100: normalizeEV(100, 100) = 100 → weighted = 25
+    // With benchmark 1000: normalizeEV(100, 1000) = 10 → weighted = 2.5
     expect(result100.components.thetaAdjustedEv.normalized).toBe(100)
     expect(result1000.components.thetaAdjustedEv.normalized).toBe(10)
   })
@@ -337,6 +389,7 @@ describe('calculateConvictionScore', () => {
 
     expect(result).toHaveProperty('total')
     expect(result.components).toHaveProperty('thetaAdjustedEv')
+    expect(result.components).toHaveProperty('returnPct')
     expect(result.components).toHaveProperty('compositePillar')
     expect(result.components).toHaveProperty('gateMargin')
     expect(result.components).toHaveProperty('scannerConvergence')
@@ -382,7 +435,7 @@ describe('enhanceWithConvictionScores', () => {
 
   it('passes custom weights and benchmark', () => {
     const evals = [makeEval({ thetaAdjustedEV: 100 })]
-    const weights = { ...DEFAULT_WEIGHTS, thetaAdjustedEv: 1.0, compositePillar: 0, gateMargin: 0, scannerConvergence: 0, timeSensitivity: 0 }
+    const weights = { ...DEFAULT_WEIGHTS, thetaAdjustedEv: 1.0, returnPct: 0, compositePillar: 0, gateMargin: 0, scannerConvergence: 0, timeSensitivity: 0 }
 
     const enhanced100 = enhanceWithConvictionScores(evals, weights, 100)
     const enhanced1000 = enhanceWithConvictionScores(evals, weights, 1000)
@@ -560,8 +613,17 @@ describe('determineUrgency', () => {
     expect(determineUrgency(['UNUSUAL_VOLUME', 'BREAKOUT'])).toBe('act_now')
   })
 
-  it('returns hours for UNUSUAL_VOLUME without breakout', () => {
+  it('returns hours for UNUSUAL_VOLUME without breakout (no mid)', () => {
     expect(determineUrgency(['UNUSUAL_VOLUME'])).toBe('hours')
+  })
+
+  it('returns act_now for cheap UNUSUAL_VOLUME (mid <= threshold)', () => {
+    expect(determineUrgency(['UNUSUAL_VOLUME'], 1.0)).toBe('act_now')
+    expect(determineUrgency(['UNUSUAL_VOLUME'], CHEAP_UV_PREMIUM_THRESHOLD)).toBe('act_now')
+  })
+
+  it('returns hours for expensive UNUSUAL_VOLUME', () => {
+    expect(determineUrgency(['UNUSUAL_VOLUME'], 5.0)).toBe('hours')
   })
 
   it('returns patient for COMPRESSION_EXPANSION', () => {
@@ -707,6 +769,7 @@ describe('sortByComposite', () => {
 describe('DEFAULT_WEIGHTS', () => {
   it('sum to 1.0', () => {
     const sum = DEFAULT_WEIGHTS.thetaAdjustedEv
+      + DEFAULT_WEIGHTS.returnPct
       + DEFAULT_WEIGHTS.compositePillar
       + DEFAULT_WEIGHTS.gateMargin
       + DEFAULT_WEIGHTS.scannerConvergence
@@ -714,8 +777,9 @@ describe('DEFAULT_WEIGHTS', () => {
     expect(sum).toBeCloseTo(1.0)
   })
 
-  it('has expected values per spec', () => {
-    expect(DEFAULT_WEIGHTS.thetaAdjustedEv).toBe(0.40)
+  it('has expected values', () => {
+    expect(DEFAULT_WEIGHTS.thetaAdjustedEv).toBe(0.25)
+    expect(DEFAULT_WEIGHTS.returnPct).toBe(0.15)
     expect(DEFAULT_WEIGHTS.compositePillar).toBe(0.25)
     expect(DEFAULT_WEIGHTS.gateMargin).toBe(0.15)
     expect(DEFAULT_WEIGHTS.scannerConvergence).toBe(0.10)

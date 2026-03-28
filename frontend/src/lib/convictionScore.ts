@@ -18,7 +18,8 @@ export type { ConvictionScoreWeights }
 
 // Default weights (Section 4.1)
 export const DEFAULT_WEIGHTS: ConvictionScoreWeights = {
-  thetaAdjustedEv: 0.40,
+  thetaAdjustedEv: 0.25,
+  returnPct: 0.15,
   compositePillar: 0.25,
   gateMargin: 0.15,
   scannerConvergence: 0.10,
@@ -29,6 +30,14 @@ export const DEFAULT_WEIGHTS: ConvictionScoreWeights = {
 // Theta-adjusted EV is per-contract in dollars over a 5-day hold.
 // Typical values range from -$5 to +$15, so $15 maps a strong EV to 100%.
 export const DEFAULT_EV_BENCHMARK = 15
+
+// Return% benchmark: 20% return on contract cost maps to a normalized score of 100.
+// Cheap options with high return% score comparably to expensive options with high absolute EV.
+export const DEFAULT_RETURN_PCT_BENCHMARK = 20
+
+// Premium threshold for UNUSUAL_VOLUME urgency escalation.
+// UV opportunities on cheap options (mid <= $1.50) are effectively "act now".
+export const CHEAP_UV_PREMIUM_THRESHOLD = 1.50
 
 // Scanner urgency mapping (Section 4.2.5)
 const URGENCY_BOOST: Record<UrgencyLevel, number> = {
@@ -91,73 +100,101 @@ export function getTimeSensitivityBoost(urgency: UrgencyLevel): number {
 }
 
 /**
+ * Normalize return% to 0-100 scale.
+ * Return% = (thetaAdjEV / (mid * 100)) * 100.
+ * Normalized: min(100, returnPct / benchmark * 100), clamped at 0 when negative or mid <= 0.
+ */
+export function normalizeReturnPct(
+  thetaAdjEV: number,
+  mid: number,
+  benchmark: number = DEFAULT_RETURN_PCT_BENCHMARK,
+): number {
+  if (mid <= 0 || thetaAdjEV <= 0) return 0
+  const returnPct = (thetaAdjEV / (mid * 100)) * 100
+  return Math.min(100, (returnPct / benchmark) * 100)
+}
+
+/**
  * Calculate the full conviction score with breakdown.
- * Per Section 4.3:
- * Score = (W_ev × EV_norm) + (W_pillar × Pillar) + (W_margin × Margin) + 
- *         (W_convergence × Convergence) + (W_time × TimeSensitivity)
+ * Score = (W_ev × EV_norm) + (W_ret × Ret_norm) + (W_pillar × Pillar) +
+ *         (W_margin × Margin) + (W_convergence × Convergence) + (W_time × TimeSensitivity)
  */
 export function calculateConvictionScore(
   evaluation: ApproveEvaluation,
   weights: ConvictionScoreWeights = DEFAULT_WEIGHTS,
   evBenchmark: number = DEFAULT_EV_BENCHMARK,
+  returnPctBenchmark: number = DEFAULT_RETURN_PCT_BENCHMARK,
 ): ConvictionScoreBreakdown {
+  const round1 = (v: number) => Math.round(v * 10) / 10
+
   // 1. Theta-Adjusted EV (normalized)
   const evRaw = evaluation.thetaAdjustedEV ?? 0
   const evNormalized = normalizeEV(evRaw, evBenchmark)
   const evWeighted = evNormalized * weights.thetaAdjustedEv
 
-  // 2. Composite Pillar Score
+  // 2. Return% (capital efficiency — cheap options with high return% score well)
+  const mid = evaluation.mid ?? 0
+  const retRaw = mid > 0 && evRaw > 0 ? (evRaw / (mid * 100)) * 100 : 0
+  const retNormalized = normalizeReturnPct(evRaw, mid, returnPctBenchmark)
+  const retWeighted = retNormalized * weights.returnPct
+
+  // 3. Composite Pillar Score
   const pillarRaw = calculateCompositePillar(evaluation.pillarScores ?? {})
   const pillarNormalized = pillarRaw // Already 0-100
   const pillarWeighted = pillarNormalized * weights.compositePillar
 
-  // 3. Gate Margin Score
+  // 4. Gate Margin Score
   const marginRaw = evaluation.gateMargin ?? 50
   const marginNormalized = Math.max(0, Math.min(100, marginRaw)) // Clamp to 0-100
   const marginWeighted = marginNormalized * weights.gateMargin
 
-  // 4. Scanner Convergence Bonus
+  // 5. Scanner Convergence Bonus
   const convergenceCount = evaluation.scannerConvergence ?? 1
   const convergenceRaw = getConvergenceBonus(convergenceCount)
   const convergenceNormalized = convergenceRaw // Already 0-100
   const convergenceWeighted = convergenceNormalized * weights.scannerConvergence
 
-  // 5. Time Sensitivity Boost
+  // 6. Time Sensitivity Boost
   const urgency = evaluation.urgency ?? 'patient'
   const timeRaw = getTimeSensitivityBoost(urgency)
   const timeNormalized = timeRaw // Already 0-100
   const timeWeighted = timeNormalized * weights.timeSensitivity
 
   // Calculate total
-  const total = evWeighted + pillarWeighted + marginWeighted + convergenceWeighted + timeWeighted
+  const total = evWeighted + retWeighted + pillarWeighted + marginWeighted + convergenceWeighted + timeWeighted
 
   return {
-    total: Math.round(total * 10) / 10, // Round to 1 decimal
+    total: round1(total),
     components: {
       thetaAdjustedEv: {
         raw: evRaw,
-        normalized: Math.round(evNormalized * 10) / 10,
-        weighted: Math.round(evWeighted * 10) / 10,
+        normalized: round1(evNormalized),
+        weighted: round1(evWeighted),
+      },
+      returnPct: {
+        raw: round1(retRaw),
+        normalized: round1(retNormalized),
+        weighted: round1(retWeighted),
       },
       compositePillar: {
         raw: pillarRaw,
-        normalized: Math.round(pillarNormalized * 10) / 10,
-        weighted: Math.round(pillarWeighted * 10) / 10,
+        normalized: round1(pillarNormalized),
+        weighted: round1(pillarWeighted),
       },
       gateMargin: {
         raw: marginRaw,
-        normalized: Math.round(marginNormalized * 10) / 10,
-        weighted: Math.round(marginWeighted * 10) / 10,
+        normalized: round1(marginNormalized),
+        weighted: round1(marginWeighted),
       },
       scannerConvergence: {
         raw: convergenceCount,
         normalized: convergenceNormalized,
-        weighted: Math.round(convergenceWeighted * 10) / 10,
+        weighted: round1(convergenceWeighted),
       },
       timeSensitivity: {
         raw: timeRaw,
         normalized: timeNormalized,
-        weighted: Math.round(timeWeighted * 10) / 10,
+        weighted: round1(timeWeighted),
       },
     },
   }
@@ -302,14 +339,17 @@ export function formatContractId(
  * Determine urgency from scanner types.
  * Per Section 4.2.5.
  */
-export function determineUrgency(scannerTypes: ScannerType[]): UrgencyLevel {
-  const hasBreakout = scannerTypes.some(s => 
+export function determineUrgency(scannerTypes: ScannerType[], mid?: number): UrgencyLevel {
+  const hasBreakout = scannerTypes.some(s =>
     s === 'BREAKOUT' || s === 'BREAKDOWN'
   )
   if (hasBreakout) return 'act_now'
 
   const hasUnusualVolume = scannerTypes.some(s => s === 'UNUSUAL_VOLUME')
-  if (hasUnusualVolume) return 'hours'
+  if (hasUnusualVolume) {
+    if (mid != null && mid <= CHEAP_UV_PREMIUM_THRESHOLD) return 'act_now'
+    return 'hours'
+  }
 
   return 'patient'
 }

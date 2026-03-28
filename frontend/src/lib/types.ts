@@ -960,6 +960,7 @@ export interface ConvictionScoreBreakdown {
   total: number
   components: {
     thetaAdjustedEv: ComponentScore
+    returnPct: ComponentScore
     compositePillar: ComponentScore
     gateMargin: ComponentScore
     scannerConvergence: ComponentScore
@@ -977,7 +978,8 @@ export interface ComponentScore {
  * Conviction scoring weights (spec section 4.1).
  */
 export interface ConvictionScoreWeights {
-  thetaAdjustedEv: number  // Default 40%
+  thetaAdjustedEv: number  // Default 25%
+  returnPct: number        // Default 15%
   compositePillar: number  // Default 25%
   gateMargin: number       // Default 15%
   scannerConvergence: number // Default 10%
@@ -1764,6 +1766,9 @@ export interface AlertConfig {
   webhook_channels: WebhookChannel[]
   setup_rule_filter_ids: string[]
   verdicts: Verdict[]
+  cheap_gem_enabled?: boolean
+  cheap_gem_threshold?: number
+  cheap_gem_max_premium?: number
   updated_at?: string
 }
 

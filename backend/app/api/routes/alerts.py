@@ -314,11 +314,13 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         scanner_types = e["scanner_types"]
         item = e["item"]
 
+        mid = item.get("mid") or 0
         result = calculate_conviction_score(
             theta_adj_ev=e["theta_ev"],
             pillar_scores=pillar_scores,
             gate_margin=e["gate_margin"],
             scanner_types=scanner_types,
+            mid=mid,
         )
 
         # Check score threshold
@@ -328,13 +330,12 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
 
         # Check max premium
         if max_premium is not None:
-            mid = item.get("mid") or 0
             if mid > max_premium:
                 breakdown["aboveMaxPremium"] += 1
                 continue
 
         # Check urgency/convergence
-        urgency = determine_urgency(scanner_types)
+        urgency = determine_urgency(scanner_types, mid=mid)
         convergence = len(scanner_types)
         if require_uc and urgency != "act_now" and convergence < 2:
             breakdown["failedUrgencyConvergence"] += 1

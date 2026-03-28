@@ -607,6 +607,93 @@ export default function AlertsConfig() {
             </div>
           </Section>
 
+          {/* Cheap Gem Alerts */}
+          <Section title="Cheap Gem Alerts" icon={<span className="text-base">💎</span>} defaultOpen={false}>
+            <div className="space-y-4">
+              <div className="text-xs text-oss-muted">
+                Alert on cheap premium options with strong setups, even if they don't
+                meet the main conviction threshold. These fleeting opportunities often
+                have the best return-on-capital.
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <div className="text-sm text-oss-text">Enable cheap gem alerts</div>
+                  <div className="text-xs text-oss-muted mt-0.5">
+                    Lower conviction bar for cheap options
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    updateDraft('cheap_gem_enabled', !draft.cheap_gem_enabled)
+                  }
+                  className={clsx(
+                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                    draft.cheap_gem_enabled ? 'bg-oss-accent' : 'bg-oss-border',
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                      draft.cheap_gem_enabled ? 'translate-x-6' : 'translate-x-1',
+                    )}
+                  />
+                </button>
+              </div>
+
+              {draft.cheap_gem_enabled && (
+                <>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-oss-muted">Conviction threshold</span>
+                      <span className="text-sm font-mono text-oss-text">
+                        {draft.cheap_gem_threshold ?? 60}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={40}
+                      max={75}
+                      value={draft.cheap_gem_threshold ?? 60}
+                      onChange={(e) =>
+                        updateDraft('cheap_gem_threshold', Number(e.target.value))
+                      }
+                      className="w-full accent-oss-accent"
+                    />
+                    <div className="flex justify-between text-xs text-oss-muted mt-1">
+                      <span>40 (permissive)</span>
+                      <span>75 (strict)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-oss-muted">Max premium</span>
+                      <span className="text-sm font-mono text-oss-text">
+                        ${(draft.cheap_gem_max_premium ?? 1.50).toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={25}
+                      max={500}
+                      step={25}
+                      value={(draft.cheap_gem_max_premium ?? 1.50) * 100}
+                      onChange={(e) =>
+                        updateDraft('cheap_gem_max_premium', Number(e.target.value) / 100)
+                      }
+                      className="w-full accent-oss-accent"
+                    />
+                    <div className="flex justify-between text-xs text-oss-muted mt-1">
+                      <span>$0.25</span>
+                      <span>$5.00</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </Section>
+
           {/* Rate Limiting */}
           <Section title="Rate Limiting" icon={<Clock className="h-4 w-4" />}>
             <div className="space-y-4">

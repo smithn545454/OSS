@@ -1936,14 +1936,16 @@ async def _fire_slack_alerts(
         )
 
         # Compute conviction score
+        premium = ev.mid or 0
         result = calculate_conviction_score(
             theta_adj_ev=theta_ev,
             pillar_scores=pillar_scores,
             gate_margin=gate_margin,
             scanner_types=scanner_types,
+            mid=premium,
         )
 
-        urgency = determine_urgency(scanner_types)
+        urgency = determine_urgency(scanner_types, mid=premium)
         convergence = len(scanner_types)
         contract_id = ev.option_ticker or ev.evaluation_id
 
@@ -1959,7 +1961,7 @@ async def _fire_slack_alerts(
             headline=None,
             theta_adj_ev=theta_ev,
             delta=ev.delta or 0,
-            premium=ev.mid or 0,
+            premium=premium,
             scanners=scanner_types,
             contract_id=contract_id,
             verdict=verdict_str,
