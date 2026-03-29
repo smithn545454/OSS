@@ -14,7 +14,8 @@ import {
   RotateCcw,
   GitCompare,
   History,
-  AlertCircle
+  AlertCircle,
+  Crosshair
 } from 'lucide-react'
 import { usePolicies, useActivePolicy, useActivatePolicy, useCreatePolicy, usePolicyDiff } from '@/hooks/useApi'
 import { formatDate, formatDateTime } from '@/lib/formatTime'
@@ -505,6 +506,173 @@ function EditablePolicyConfig({
         </div>
       </ConfigSection>
 
+      {/* Contract Selection Config */}
+      <ConfigSection title="Contract Selection" icon={<Crosshair className="h-4 w-4" />}>
+        <div className="space-y-4">
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Delta Targeting
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="Target Delta (Calls)"
+                value={displayConfig.contract_selection.target_delta_call}
+                fieldPath="contract_selection.target_delta_call"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={0.10}
+                max={0.60}
+                step={0.05}
+                error={errors['contract_selection.target_delta_call']}
+              />
+              <ConfigField
+                label="Target Delta (Puts)"
+                value={displayConfig.contract_selection.target_delta_put}
+                fieldPath="contract_selection.target_delta_put"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={-0.60}
+                max={-0.10}
+                step={0.05}
+                error={errors['contract_selection.target_delta_put']}
+              />
+              <ConfigField
+                label="Call Delta Min"
+                value={displayConfig.contract_selection.delta_bands.CALL.min_delta}
+                fieldPath="contract_selection.delta_bands.CALL.min_delta"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={0.05}
+                max={0.50}
+                step={0.05}
+                error={errors['contract_selection.delta_bands.CALL.min_delta']}
+              />
+              <ConfigField
+                label="Call Delta Max"
+                value={displayConfig.contract_selection.delta_bands.CALL.max_delta}
+                fieldPath="contract_selection.delta_bands.CALL.max_delta"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={0.30}
+                max={0.90}
+                step={0.05}
+                error={errors['contract_selection.delta_bands.CALL.max_delta']}
+              />
+              <ConfigField
+                label="Put Delta Min"
+                value={displayConfig.contract_selection.delta_bands.PUT.min_delta}
+                fieldPath="contract_selection.delta_bands.PUT.min_delta"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={-0.90}
+                max={-0.30}
+                step={0.05}
+                error={errors['contract_selection.delta_bands.PUT.min_delta']}
+              />
+              <ConfigField
+                label="Put Delta Max"
+                value={displayConfig.contract_selection.delta_bands.PUT.max_delta}
+                fieldPath="contract_selection.delta_bands.PUT.max_delta"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={-0.50}
+                max={-0.05}
+                step={0.05}
+                error={errors['contract_selection.delta_bands.PUT.max_delta']}
+              />
+            </div>
+          </div>
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Ranking Weights
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="Liquidity"
+                value={displayConfig.contract_selection.rank_weight_liquidity * 100}
+                unit="%"
+                fieldPath="contract_selection.rank_weight_liquidity"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['contract_selection.rank_weight_liquidity']}
+              />
+              <ConfigField
+                label="Delta Proximity"
+                value={displayConfig.contract_selection.rank_weight_delta * 100}
+                unit="%"
+                fieldPath="contract_selection.rank_weight_delta"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['contract_selection.rank_weight_delta']}
+              />
+              <ConfigField
+                label="Spread Tightness"
+                value={displayConfig.contract_selection.rank_weight_spread * 100}
+                unit="%"
+                fieldPath="contract_selection.rank_weight_spread"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['contract_selection.rank_weight_spread']}
+              />
+            </div>
+            {isEditing && (
+              <p className={clsx(
+                'text-xs mt-2',
+                Math.abs((displayConfig.contract_selection.rank_weight_liquidity +
+                  displayConfig.contract_selection.rank_weight_delta +
+                  displayConfig.contract_selection.rank_weight_spread) - 1) > 0.01
+                  ? 'text-oss-reject'
+                  : 'text-oss-muted'
+              )}>
+                Total: {((displayConfig.contract_selection.rank_weight_liquidity +
+                  displayConfig.contract_selection.rank_weight_delta +
+                  displayConfig.contract_selection.rank_weight_spread) * 100).toFixed(0)}%
+                (should equal 100%)
+              </p>
+            )}
+          </div>
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Selection Filters
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="Top K Contracts"
+                value={displayConfig.contract_selection.top_k}
+                fieldPath="contract_selection.top_k"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={1}
+                max={10}
+                step={1}
+                error={errors['contract_selection.top_k']}
+              />
+              <ConfigField
+                label="Min Mid Price"
+                value={displayConfig.contract_selection.min_mid_price}
+                unit="$"
+                fieldPath="contract_selection.min_mid_price"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={0.05}
+                max={1.00}
+                step={0.05}
+                error={errors['contract_selection.min_mid_price']}
+              />
+            </div>
+          </div>
+        </div>
+      </ConfigSection>
+
       {/* Gates Config */}
       <ConfigSection title="Hard Gates" icon={<Shield className="h-4 w-4" />}>
         <div className="rounded-lg bg-oss-bg p-3">
@@ -666,15 +834,259 @@ function EditablePolicyConfig({
             {isEditing && (
               <p className={clsx(
                 'text-xs mt-2',
-                Math.abs((displayConfig.pillar_weights.directional + 
-                  displayConfig.pillar_weights.volatility + 
+                Math.abs((displayConfig.pillar_weights.directional +
+                  displayConfig.pillar_weights.volatility +
                   displayConfig.pillar_weights.structure) - 1) > 0.01
                   ? 'text-oss-reject'
                   : 'text-oss-muted'
               )}>
-                Total: {((displayConfig.pillar_weights.directional + 
-                  displayConfig.pillar_weights.volatility + 
-                  displayConfig.pillar_weights.structure) * 100).toFixed(0)}% 
+                Total: {((displayConfig.pillar_weights.directional +
+                  displayConfig.pillar_weights.volatility +
+                  displayConfig.pillar_weights.structure) * 100).toFixed(0)}%
+                (should equal 100%)
+              </p>
+            )}
+          </div>
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Directional Subscores
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="Trend Alignment"
+                value={displayConfig.pillars.directional.trend_alignment_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.trend_alignment_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.trend_alignment_weight']}
+              />
+              <ConfigField
+                label="Momentum"
+                value={displayConfig.pillars.directional.momentum_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.momentum_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.momentum_weight']}
+              />
+              <ConfigField
+                label="Signal Confirmation"
+                value={displayConfig.pillars.directional.signal_confirmation_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.signal_confirmation_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.signal_confirmation_weight']}
+              />
+              <ConfigField
+                label="Relative Strength"
+                value={displayConfig.pillars.directional.relative_strength_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.relative_strength_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.relative_strength_weight']}
+              />
+              <ConfigField
+                label="Catalyst"
+                value={displayConfig.pillars.directional.catalyst_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.catalyst_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.catalyst_weight']}
+              />
+            </div>
+            {isEditing && (
+              <p className={clsx(
+                'text-xs mt-2',
+                Math.abs((displayConfig.pillars.directional.trend_alignment_weight +
+                  displayConfig.pillars.directional.momentum_weight +
+                  displayConfig.pillars.directional.signal_confirmation_weight +
+                  displayConfig.pillars.directional.relative_strength_weight +
+                  displayConfig.pillars.directional.catalyst_weight) - 1) > 0.01
+                  ? 'text-oss-reject'
+                  : 'text-oss-muted'
+              )}>
+                Total: {((displayConfig.pillars.directional.trend_alignment_weight +
+                  displayConfig.pillars.directional.momentum_weight +
+                  displayConfig.pillars.directional.signal_confirmation_weight +
+                  displayConfig.pillars.directional.relative_strength_weight +
+                  displayConfig.pillars.directional.catalyst_weight) * 100).toFixed(0)}%
+                (should equal 100%)
+              </p>
+            )}
+          </div>
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Volatility Subscores
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="IV vs RV"
+                value={displayConfig.pillars.volatility.iv_vs_rv_weight * 100}
+                unit="%"
+                fieldPath="pillars.volatility.iv_vs_rv_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.volatility.iv_vs_rv_weight']}
+              />
+              <ConfigField
+                label="IV Percentile"
+                value={displayConfig.pillars.volatility.iv_percentile_weight * 100}
+                unit="%"
+                fieldPath="pillars.volatility.iv_percentile_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.volatility.iv_percentile_weight']}
+              />
+              <ConfigField
+                label="IV Regime"
+                value={displayConfig.pillars.volatility.iv_regime_weight * 100}
+                unit="%"
+                fieldPath="pillars.volatility.iv_regime_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.volatility.iv_regime_weight']}
+              />
+              <ConfigField
+                label="Theta-Adjusted Edge"
+                value={displayConfig.pillars.volatility.theta_adjusted_edge_weight * 100}
+                unit="%"
+                fieldPath="pillars.volatility.theta_adjusted_edge_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.volatility.theta_adjusted_edge_weight']}
+              />
+            </div>
+            {isEditing && (
+              <p className={clsx(
+                'text-xs mt-2',
+                Math.abs((displayConfig.pillars.volatility.iv_vs_rv_weight +
+                  displayConfig.pillars.volatility.iv_percentile_weight +
+                  displayConfig.pillars.volatility.iv_regime_weight +
+                  displayConfig.pillars.volatility.theta_adjusted_edge_weight) - 1) > 0.01
+                  ? 'text-oss-reject'
+                  : 'text-oss-muted'
+              )}>
+                Total: {((displayConfig.pillars.volatility.iv_vs_rv_weight +
+                  displayConfig.pillars.volatility.iv_percentile_weight +
+                  displayConfig.pillars.volatility.iv_regime_weight +
+                  displayConfig.pillars.volatility.theta_adjusted_edge_weight) * 100).toFixed(0)}%
+                (should equal 100%)
+              </p>
+            )}
+          </div>
+          <div>
+            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+              Structure Subscores
+            </h4>
+            <div className="rounded-lg bg-oss-bg p-3">
+              <ConfigField
+                label="Spread Tightness"
+                value={displayConfig.pillars.structure.spread_weight * 100}
+                unit="%"
+                fieldPath="pillars.structure.spread_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.structure.spread_weight']}
+              />
+              <ConfigField
+                label="Open Interest"
+                value={displayConfig.pillars.structure.open_interest_weight * 100}
+                unit="%"
+                fieldPath="pillars.structure.open_interest_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.structure.open_interest_weight']}
+              />
+              <ConfigField
+                label="Volume"
+                value={displayConfig.pillars.structure.volume_weight * 100}
+                unit="%"
+                fieldPath="pillars.structure.volume_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.structure.volume_weight']}
+              />
+              <ConfigField
+                label="Theta Burden"
+                value={displayConfig.pillars.structure.theta_burden_weight * 100}
+                unit="%"
+                fieldPath="pillars.structure.theta_burden_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.structure.theta_burden_weight']}
+              />
+              <ConfigField
+                label="Liquidity Trend"
+                value={displayConfig.pillars.structure.liquidity_trend_weight * 100}
+                unit="%"
+                fieldPath="pillars.structure.liquidity_trend_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.structure.liquidity_trend_weight']}
+              />
+            </div>
+            {isEditing && (
+              <p className={clsx(
+                'text-xs mt-2',
+                Math.abs((displayConfig.pillars.structure.spread_weight +
+                  displayConfig.pillars.structure.open_interest_weight +
+                  displayConfig.pillars.structure.volume_weight +
+                  displayConfig.pillars.structure.theta_burden_weight +
+                  displayConfig.pillars.structure.liquidity_trend_weight) - 1) > 0.01
+                  ? 'text-oss-reject'
+                  : 'text-oss-muted'
+              )}>
+                Total: {((displayConfig.pillars.structure.spread_weight +
+                  displayConfig.pillars.structure.open_interest_weight +
+                  displayConfig.pillars.structure.volume_weight +
+                  displayConfig.pillars.structure.theta_burden_weight +
+                  displayConfig.pillars.structure.liquidity_trend_weight) * 100).toFixed(0)}%
                 (should equal 100%)
               </p>
             )}
@@ -868,25 +1280,72 @@ export default function PolicyConfig() {
   // Validate the config
   const validateConfig = useCallback((config: PolicyConfigType): Record<string, string> => {
     const errors: Record<string, string> = {}
-    
+
     // Validate pillar weights sum to 1
-    const weightsSum = config.pillar_weights.directional + 
-      config.pillar_weights.volatility + 
+    const weightsSum = config.pillar_weights.directional +
+      config.pillar_weights.volatility +
       config.pillar_weights.structure
     if (Math.abs(weightsSum - 1) > 0.01) {
       errors['pillar_weights.directional'] = 'Weights must sum to 100%'
     }
-    
+
+    // Validate ranking weights sum to 1
+    const rankSum = config.contract_selection.rank_weight_liquidity +
+      config.contract_selection.rank_weight_delta +
+      config.contract_selection.rank_weight_spread
+    if (Math.abs(rankSum - 1) > 0.01) {
+      errors['contract_selection.rank_weight_liquidity'] = 'Weights must sum to 100%'
+    }
+
+    // Validate directional subscore weights sum to 1
+    const dirSum = config.pillars.directional.trend_alignment_weight +
+      config.pillars.directional.momentum_weight +
+      config.pillars.directional.signal_confirmation_weight +
+      config.pillars.directional.relative_strength_weight +
+      config.pillars.directional.catalyst_weight
+    if (Math.abs(dirSum - 1) > 0.01) {
+      errors['pillars.directional.trend_alignment_weight'] = 'Weights must sum to 100%'
+    }
+
+    // Validate volatility subscore weights sum to 1
+    const volSum = config.pillars.volatility.iv_vs_rv_weight +
+      config.pillars.volatility.iv_percentile_weight +
+      config.pillars.volatility.iv_regime_weight +
+      config.pillars.volatility.theta_adjusted_edge_weight
+    if (Math.abs(volSum - 1) > 0.01) {
+      errors['pillars.volatility.iv_vs_rv_weight'] = 'Weights must sum to 100%'
+    }
+
+    // Validate structure subscore weights sum to 1
+    const strSum = config.pillars.structure.spread_weight +
+      config.pillars.structure.open_interest_weight +
+      config.pillars.structure.volume_weight +
+      config.pillars.structure.theta_burden_weight +
+      config.pillars.structure.liquidity_trend_weight
+    if (Math.abs(strSum - 1) > 0.01) {
+      errors['pillars.structure.spread_weight'] = 'Weights must sum to 100%'
+    }
+
+    // Validate call delta band
+    if (config.contract_selection.delta_bands.CALL.min_delta >= config.contract_selection.delta_bands.CALL.max_delta) {
+      errors['contract_selection.delta_bands.CALL.min_delta'] = 'Must be < max delta'
+    }
+
+    // Validate put delta band (both negative, min is more negative)
+    if (config.contract_selection.delta_bands.PUT.min_delta >= config.contract_selection.delta_bands.PUT.max_delta) {
+      errors['contract_selection.delta_bands.PUT.min_delta'] = 'Must be < max delta'
+    }
+
     // Validate approve > watch threshold
     if (config.decision.approve_threshold <= config.decision.watch_threshold) {
       errors['decision.approve_threshold'] = 'Must be > watch threshold'
     }
-    
+
     // Validate DTE range
     if (config.gates.dte_min >= config.gates.dte_max) {
       errors['gates.dte_min'] = 'Must be < DTE max'
     }
-    
+
     return errors
   }, [])
 

@@ -27,7 +27,10 @@ const defaultConfig: PolicyConfigType = {
   },
   contract_selection: {
     dte_buckets: {},
-    delta_bands: {},
+    delta_bands: {
+      CALL: { min_delta: 0.20, max_delta: 0.75 },
+      PUT: { min_delta: -0.75, max_delta: -0.20 },
+    },
     top_k: 3,
     target_delta_call: 0.45,
     target_delta_put: -0.45,
@@ -35,6 +38,9 @@ const defaultConfig: PolicyConfigType = {
     min_volume: 50,
     max_spread_pct: 10,
     min_mid_price: 0.5,
+    rank_weight_liquidity: 0.40,
+    rank_weight_delta: 0.35,
+    rank_weight_spread: 0.25,
   },
   gates: {
     min_open_interest: 300,
@@ -46,6 +52,29 @@ const defaultConfig: PolicyConfigType = {
     iv_percentile_max: 80,
     breakout_volume_min: 1.5,
     theta_burden_max: 3,
+  },
+  pillars: {
+    weights: { directional: 0.4, volatility: 0.35, structure: 0.25 },
+    directional: {
+      trend_alignment_weight: 0.30,
+      momentum_weight: 0.25,
+      signal_confirmation_weight: 0.20,
+      relative_strength_weight: 0.15,
+      catalyst_weight: 0.10,
+    },
+    volatility: {
+      iv_vs_rv_weight: 0.35,
+      iv_percentile_weight: 0.25,
+      iv_regime_weight: 0.20,
+      theta_adjusted_edge_weight: 0.20,
+    },
+    structure: {
+      spread_weight: 0.30,
+      open_interest_weight: 0.25,
+      volume_weight: 0.20,
+      theta_burden_weight: 0.15,
+      liquidity_trend_weight: 0.10,
+    },
   },
   pillar_weights: { directional: 0.4, volatility: 0.35, structure: 0.25 },
   decision: {

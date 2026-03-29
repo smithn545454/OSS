@@ -384,6 +384,9 @@ export interface ContractSelectionConfig {
   min_volume: number
   max_spread_pct: number
   min_mid_price: number
+  rank_weight_liquidity: number
+  rank_weight_delta: number
+  rank_weight_spread: number
 }
 
 export interface GateConfig {
@@ -402,6 +405,36 @@ export interface PillarWeights {
   directional: number
   volatility: number
   structure: number
+}
+
+export interface DirectionalPillarConfig {
+  trend_alignment_weight: number
+  momentum_weight: number
+  signal_confirmation_weight: number
+  relative_strength_weight: number
+  catalyst_weight: number
+}
+
+export interface VolatilityPillarConfig {
+  iv_vs_rv_weight: number
+  iv_percentile_weight: number
+  iv_regime_weight: number
+  theta_adjusted_edge_weight: number
+}
+
+export interface StructurePillarConfig {
+  spread_weight: number
+  open_interest_weight: number
+  volume_weight: number
+  theta_burden_weight: number
+  liquidity_trend_weight: number
+}
+
+export interface PillarConfig {
+  weights: PillarWeights
+  directional: DirectionalPillarConfig
+  volatility: VolatilityPillarConfig
+  structure: StructurePillarConfig
 }
 
 export interface DecisionConfig {
@@ -426,6 +459,7 @@ export interface PolicyConfig {
   underlying_filter: UnderlyingFilterConfig
   contract_selection: ContractSelectionConfig
   gates: GateConfig
+  pillars: PillarConfig
   pillar_weights: PillarWeights
   decision: DecisionConfig
   tracking: TrackingConfig
