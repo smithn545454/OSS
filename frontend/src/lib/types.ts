@@ -2009,6 +2009,8 @@ export interface FeaturePairStats {
   both_low_wr: number
   both_low_n: number
   interaction_lift: number
+  a_direction?: string
+  b_direction?: string
 }
 
 export interface WeightComparison {

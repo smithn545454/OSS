@@ -2043,10 +2043,123 @@ async def analyze_scanner_performance(
 # ============================================================================
 
 
+@router.post("/feature-importance/backfill")
+async def backfill_feature_enrichment(
+    batch_size: int = 50,
+) -> dict[str, Any]:
+    """Backfill missing enrichment fields on historical positions.
+
+    Call repeatedly until remaining=0. Enriches: iv_percentile, iv_rv_ratio,
+    theta_adjusted_edge, rs_20d, atr14_pct, feasibility_ratio, gate_margin,
+    theta_adj_ev.
+    """
+    from datetime import datetime, timezone
+
+    from app.api.routes.evaluations import (
+        calculate_gate_margin,
+        calculate_theta_adjusted_ev,
+    )
+    from app.db.tables import EvaluationTable, FeatureValueTable
+
+    # Load all closed + open positions
+    open_pos = await PaperPositionTable.list_open()
+    closed_pos = await PaperPositionTable.list_closed()
+    all_positions = open_pos + closed_pos
+
+    # Filter to positions missing enrichment
+    needs_backfill = [
+        p for p in all_positions
+        if (
+            p.gate_margin is None
+            or p.theta_adj_ev is None
+            or p.entry_iv_percentile is None
+        )
+    ]
+
+    updated = 0
+    skipped = 0
+    errors = 0
+    batch = needs_backfill[:batch_size]
+
+    for pos in batch:
+        try:
+            updates: dict[str, Any] = {}
+
+            # Enrich from FeatureValueTable
+            if pos.entry_iv_percentile is None:
+                feat_values = await FeatureValueTable.list_by_evaluation(
+                    pos.evaluation_id
+                )
+                feat_map = {fv.feature_name: fv.value for fv in feat_values}
+                field_mapping = {
+                    "iv_percentile": "entry_iv_percentile",
+                    "iv_rv_ratio": "entry_iv_rv_ratio",
+                    "theta_adjusted_edge": "entry_theta_adjusted_edge",
+                    "rs_20d": "entry_rs_20d",
+                    "atr14_pct": "entry_atr14_pct",
+                    "feasibility_ratio": "entry_feasibility_ratio",
+                    "days_to_earnings": "entry_days_to_earnings",
+                }
+                for feat_name, pos_field in field_mapping.items():
+                    val = feat_map.get(feat_name)
+                    if val is not None:
+                        if feat_name == "days_to_earnings":
+                            val = int(val)
+                        updates[pos_field] = val
+
+            # Compute theta_adj_ev from evaluation
+            if pos.theta_adj_ev is None:
+                updates["theta_adj_ev"] = calculate_theta_adjusted_ev(
+                    delta=pos.entry_delta or 0,
+                    theta=pos.entry_theta or 0,
+                    mid=pos.entry_price or 0,
+                    iv=pos.entry_iv or 0,
+                    underlying_price=pos.entry_underlying_price or 0,
+                    dte=pos.dte_at_entry or 0,
+                )
+
+            # Compute gate_margin from evaluation's gate results
+            if pos.gate_margin is None:
+                eval_data = await EvaluationTable.get_by_id(
+                    pos.underlying_ticker or "", pos.evaluation_id
+                )
+                if eval_data:
+                    decision = eval_data.get("decision", {})
+                    gate_results = decision.get("gate_results", [])
+                    if gate_results:
+                        updates["gate_margin"] = calculate_gate_margin(
+                            gate_results
+                        )
+
+            if updates:
+                await PaperPositionTable.update(pos, updates)
+                updated += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            logger.warning("Backfill error for %s: %s", pos.position_id, e)
+            errors += 1
+
+    remaining = len(needs_backfill) - len(batch)
+    logger.info(
+        "Feature backfill: updated=%d skipped=%d errors=%d remaining=%d",
+        updated, skipped, errors, remaining,
+    )
+
+    return {
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "remaining": max(0, remaining),
+        "total_needing_backfill": len(needs_backfill),
+    }
+
+
 @router.post("/feature-importance/analyze")
 async def run_feature_importance(
     period: str = "all",
     outcome: str = "pnl",
+    verdict: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run feature importance analysis on closed paper positions.
 
@@ -2070,16 +2183,32 @@ async def run_feature_importance(
         days_map = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
         days = days_map.get(period)
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-            closed = [p for p in closed if p.entry_date and p.entry_date >= cutoff]
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+                "%Y-%m-%d"
+            )
+            closed = [
+                p for p in closed if p.entry_date and p.entry_date >= cutoff
+            ]
+
+    # Apply verdict filter
+    if verdict and verdict.upper() != "ALL":
+        closed = [
+            p for p in closed
+            if str(getattr(p.verdict_at_entry, "value", p.verdict_at_entry))
+            == verdict.upper()
+        ]
 
     if len(closed) < 20:
         raise HTTPException(
             status_code=400,
-            detail=f"Not enough closed positions for analysis. Found {len(closed)}, need at least 20.",
+            detail=f"Not enough closed positions for analysis. "
+            f"Found {len(closed)}, need at least 20.",
         )
 
-    logger.info("Running feature importance analysis: %d closed positions, period=%s", len(closed), period)
+    logger.info(
+        "Running feature importance: %d positions, period=%s, verdict=%s",
+        len(closed), period, verdict,
+    )
 
     # Run the analysis (pure computation, no external calls)
     result = run_feature_importance_analysis(closed, period=period, outcome=outcome)

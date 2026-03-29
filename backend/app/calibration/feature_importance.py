@@ -67,6 +67,7 @@ FEATURE_REGISTRY: list[FeatureRegistryEntry] = [
     ("pillar_volatility", "Volatility Score", "volatility", None, None, True),
     ("pillar_structure", "Structure Score", "structure", None, None, True),
     ("entry_underlying_price", "Underlying Price", None, None, None, None),
+    ("theta_adj_ev", "Theta-Adj EV", None, None, None, True),
 ]
 
 # Min sample size for reliable statistics
@@ -307,12 +308,14 @@ def compute_interactions(
 
     results: list[FeaturePairStats] = []
     display_names = {f.feature_name: f.display_name for f in sig_features}
+    direction_map = {f.feature_name: f.direction for f in sig_features}
 
     checked = 0
     for i, feat_a in enumerate(sig_features):
         if feat_a.feature_name not in feature_data:
             continue
         med_a, vals_a = feature_data[feat_a.feature_name]
+        a_lower_better = direction_map.get(feat_a.feature_name) == "lower_is_better"
         for feat_b in sig_features[i + 1 :]:
             if feat_b.feature_name not in feature_data:
                 continue
@@ -321,12 +324,14 @@ def compute_interactions(
             checked += 1
 
             med_b, vals_b = feature_data[feat_b.feature_name]
+            b_lower_better = direction_map.get(feat_b.feature_name) == "lower_is_better"
 
-            # Split positions into 4 quadrants
-            both_high_pnls: list[float] = []
+            # Split into 4 quadrants: direction-aware
+            # "favorable" = above median for higher_is_better, below for lower_is_better
+            both_fav_pnls: list[float] = []
             a_only_pnls: list[float] = []
             b_only_pnls: list[float] = []
-            both_low_pnls: list[float] = []
+            both_unfav_pnls: list[float] = []
 
             for pos in positions:
                 pid = pos.position_id
@@ -335,34 +340,41 @@ def compute_interactions(
                     continue
 
                 pnl = float(out_val)
-                a_high = vals_a[pid] >= med_a
-                b_high = vals_b[pid] >= med_b
+                a_fav = (
+                    vals_a[pid] < med_a if a_lower_better
+                    else vals_a[pid] >= med_a
+                )
+                b_fav = (
+                    vals_b[pid] < med_b if b_lower_better
+                    else vals_b[pid] >= med_b
+                )
 
-                if a_high and b_high:
-                    both_high_pnls.append(pnl)
-                elif a_high:
+                if a_fav and b_fav:
+                    both_fav_pnls.append(pnl)
+                elif a_fav:
                     a_only_pnls.append(pnl)
-                elif b_high:
+                elif b_fav:
                     b_only_pnls.append(pnl)
                 else:
-                    both_low_pnls.append(pnl)
+                    both_unfav_pnls.append(pnl)
 
             # Need minimum samples in each quadrant
             if (
-                len(both_high_pnls) < 10
+                len(both_fav_pnls) < 10
                 or len(a_only_pnls) < 10
                 or len(b_only_pnls) < 10
             ):
                 continue
 
-            bh_wr = _win_rate(both_high_pnls)
+            bf_wr = _win_rate(both_fav_pnls)
             ao_wr = _win_rate(a_only_pnls)
             bo_wr = _win_rate(b_only_pnls)
-            bl_wr = _win_rate(both_low_pnls) if both_low_pnls else 0.0
+            bu_wr = _win_rate(both_unfav_pnls) if both_unfav_pnls else 0.0
 
-            # Adjust direction: for "lower_is_better" features, flip the label
-            # but keep the quadrant stats as computed
-            lift = bh_wr - max(ao_wr, bo_wr)
+            lift = bf_wr - max(ao_wr, bo_wr)
+
+            a_dir = "low" if a_lower_better else "high"
+            b_dir = "low" if b_lower_better else "high"
 
             results.append(
                 FeaturePairStats(
@@ -370,16 +382,18 @@ def compute_interactions(
                     feature_a_display=display_names[feat_a.feature_name],
                     feature_b=feat_b.feature_name,
                     feature_b_display=display_names[feat_b.feature_name],
-                    both_high_wr=bh_wr,
-                    both_high_avg_return=statistics.mean(both_high_pnls),
-                    both_high_n=len(both_high_pnls),
+                    both_high_wr=bf_wr,
+                    both_high_avg_return=statistics.mean(both_fav_pnls),
+                    both_high_n=len(both_fav_pnls),
                     a_only_high_wr=ao_wr,
                     a_only_high_n=len(a_only_pnls),
                     b_only_high_wr=bo_wr,
                     b_only_high_n=len(b_only_pnls),
-                    both_low_wr=bl_wr,
-                    both_low_n=len(both_low_pnls),
+                    both_low_wr=bu_wr,
+                    both_low_n=len(both_unfav_pnls),
                     interaction_lift=lift,
+                    a_direction=a_dir,
+                    b_direction=b_dir,
                 )
             )
 

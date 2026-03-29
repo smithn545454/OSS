@@ -151,6 +151,20 @@ async def create_position_from_evaluation(
         entry_volume=getattr(evaluation, "volume", None),
     )
 
+    # Compute theta_adj_ev from evaluation fields (always available)
+    try:
+        from app.api.routes.evaluations import calculate_theta_adjusted_ev
+        position.theta_adj_ev = calculate_theta_adjusted_ev(
+            delta=evaluation.delta or 0,
+            theta=evaluation.theta or 0,
+            mid=evaluation.mid or 0,
+            iv=evaluation.iv or 0,
+            underlying_price=evaluation.underlying_price or 0,
+            dte=evaluation.dte or 0,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to compute theta_adj_ev: {e}")
+
     # Load volatility features for position enrichment and rule matching
     vol_features: dict[str, float] = {}
     try:

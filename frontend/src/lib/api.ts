@@ -998,12 +998,12 @@ export async function analyzeScannerPerformance(
 
 export async function runFeatureImportance(
   period = 'all',
-  outcome = 'pnl'
+  outcome = 'pnl',
+  verdict?: string
 ): Promise<import('./types').FeatureImportanceResult> {
-  return fetchApi(
-    `/api/paper-trading/feature-importance/analyze?period=${period}&outcome=${outcome}`,
-    { method: 'POST' }
-  )
+  let url = `/api/paper-trading/feature-importance/analyze?period=${period}&outcome=${outcome}`
+  if (verdict) url += `&verdict=${verdict}`
+  return fetchApi(url, { method: 'POST' })
 }
 
 export async function getLatestFeatureImportance(): Promise<import('./types').FeatureImportanceResult> {

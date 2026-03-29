@@ -48,6 +48,8 @@ function ControlBar({
   setPeriod,
   outcome,
   setOutcome,
+  verdict,
+  setVerdict,
   onRun,
   isRunning,
 }: {
@@ -55,6 +57,8 @@ function ControlBar({
   setPeriod: (p: string) => void
   outcome: string
   setOutcome: (o: string) => void
+  verdict: string
+  setVerdict: (v: string) => void
   onRun: () => void
   isRunning: boolean
 }) {
@@ -63,6 +67,7 @@ function ControlBar({
     { value: 'pnl', label: 'P&L' },
     { value: 'mfe', label: 'MFE' },
   ]
+  const verdicts = ['all', 'APPROVE', 'WATCH']
 
   return (
     <div className="flex items-center gap-4 flex-wrap">
@@ -77,6 +82,21 @@ function ControlBar({
             )}
           >
             {p === 'all' ? 'All Time' : p}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-1 rounded-lg bg-oss-bg p-1">
+        {verdicts.map((v) => (
+          <button
+            key={v}
+            onClick={() => setVerdict(v)}
+            className={clsx(
+              'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+              verdict === v ? 'bg-oss-accent/15 text-oss-accent' : 'text-oss-muted hover:text-oss-text'
+            )}
+          >
+            {v === 'all' ? 'All' : v}
           </button>
         ))}
       </div>
@@ -278,10 +298,10 @@ function InteractionsPanel({ interactions }: { interactions: FeaturePairStats[] 
             </div>
             <div className="flex gap-4 text-xs text-oss-muted">
               <span>
-                Both high: <span className={wrColor(pair.both_high_wr)}>{fmt(pair.both_high_wr, 0)}% WR</span> (n={pair.both_high_n})
+                Both favorable{pair.a_direction ? ` (${pair.a_direction} + ${pair.b_direction})` : ''}: <span className={wrColor(pair.both_high_wr)}>{fmt(pair.both_high_wr, 0)}% WR</span> (n={pair.both_high_n})
               </span>
               <span>
-                Both low: <span className={wrColor(pair.both_low_wr)}>{fmt(pair.both_low_wr, 0)}% WR</span> (n={pair.both_low_n})
+                Both unfavorable: <span className={wrColor(pair.both_low_wr)}>{fmt(pair.both_low_wr, 0)}% WR</span> (n={pair.both_low_n})
               </span>
             </div>
           </div>
@@ -430,6 +450,7 @@ function NarrativePanel({
 export default function FeatureImportance() {
   const [period, setPeriod] = useState('all')
   const [outcome, setOutcome] = useState('pnl')
+  const [verdict, setVerdict] = useState('all')
 
   const { data: cachedResult, isLoading: isLoadingCached } = useFeatureImportance()
   const runMutation = useRunFeatureImportance()
@@ -438,7 +459,11 @@ export default function FeatureImportance() {
   const result: FeatureImportanceResult | undefined = runMutation.data ?? cachedResult
 
   const handleRun = () => {
-    runMutation.mutate({ period, outcome })
+    runMutation.mutate({
+      period,
+      outcome,
+      verdict: verdict === 'all' ? undefined : verdict,
+    })
   }
 
   return (
@@ -456,6 +481,8 @@ export default function FeatureImportance() {
           setPeriod={setPeriod}
           outcome={outcome}
           setOutcome={setOutcome}
+          verdict={verdict}
+          setVerdict={setVerdict}
           onRun={handleRun}
           isRunning={runMutation.isPending}
         />

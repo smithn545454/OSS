@@ -1136,8 +1136,8 @@ export function useFeatureImportance() {
 export function useRunFeatureImportance() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (params: { period?: string; outcome?: string }) =>
-      api.runFeatureImportance(params.period, params.outcome),
+    mutationFn: (params: { period?: string; outcome?: string; verdict?: string }) =>
+      api.runFeatureImportance(params.period, params.outcome, params.verdict),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['feature-importance'] })
     },

@@ -87,7 +87,9 @@ class FeaturePairStats:
     b_only_high_n: int
     both_low_wr: float
     both_low_n: int
-    interaction_lift: float  # both_high_wr - max(a_only, b_only)
+    interaction_lift: float  # both_favorable_wr - max(a_only, b_only)
+    a_direction: str = "high"  # "high" or "low" — what's favorable for feature A
+    b_direction: str = "high"  # "high" or "low" — what's favorable for feature B
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -104,6 +106,8 @@ class FeaturePairStats:
             "b_only_high_n": self.b_only_high_n,
             "both_low_wr": round(self.both_low_wr, 1),
             "both_low_n": self.both_low_n,
+            "a_direction": self.a_direction,
+            "b_direction": self.b_direction,
             "interaction_lift": round(self.interaction_lift, 1),
         }
 
