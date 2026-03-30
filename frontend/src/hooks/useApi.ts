@@ -1093,11 +1093,12 @@ export function useTriggerTradeAnalysis() {
   })
 }
 
-export function useLatestTradeAnalysis() {
+export function useLatestTradeAnalysis(polling = false) {
   return useQuery({
     queryKey: ['trades', 'analysis', 'latest'] as const,
     queryFn: api.getLatestTradeAnalysis,
-    staleTime: 30000,
+    staleTime: polling ? 0 : 30000,
+    refetchInterval: polling ? 3000 : false,
   })
 }
 

@@ -2,11 +2,16 @@ import { useState } from 'react'
 import { Brain, Loader2, AlertTriangle, Lightbulb, Shield, ArrowRight } from 'lucide-react'
 import clsx from 'clsx'
 import { useTriggerTradeAnalysis, useLatestTradeAnalysis, useTradeAnalysis } from '@/hooks/useApi'
+import { useQueryClient } from '@tanstack/react-query'
 
 export default function TradeAnalysisView() {
+  const queryClient = useQueryClient()
   const triggerAnalysis = useTriggerTradeAnalysis()
-  const { data: latest } = useLatestTradeAnalysis()
   const [pollingId, setPollingId] = useState<string | null>(null)
+  const [waitingForResult, setWaitingForResult] = useState(false)
+
+  // Poll latest when waiting for result (trigger may timeout but Lambda continues)
+  const { data: latest } = useLatestTradeAnalysis(waitingForResult)
 
   // Poll if we have a running analysis
   const latestId = (latest as Record<string, unknown>)?.analysis_id as string | undefined
@@ -23,13 +28,27 @@ export default function TradeAnalysisView() {
   if (pollingId && status === 'complete') {
     setPollingId(null)
   }
+  if (waitingForResult && status === 'complete') {
+    setWaitingForResult(false)
+  }
 
   const handleTrigger = () => {
+    setWaitingForResult(true)
     triggerAnalysis.mutate(undefined, {
       onSuccess: (data) => {
         if (data.analysis_id) {
           setPollingId(data.analysis_id)
         }
+        // If the response is already complete (sync mode), invalidate latest
+        if (data.status === 'complete') {
+          setWaitingForResult(false)
+          queryClient.invalidateQueries({ queryKey: ['trades', 'analysis', 'latest'] })
+        }
+      },
+      onError: () => {
+        // API Gateway may timeout (29s) but Lambda continues processing.
+        // Poll latest to pick up the result when it completes.
+        queryClient.invalidateQueries({ queryKey: ['trades', 'analysis', 'latest'] })
       },
     })
   }
@@ -53,7 +72,7 @@ export default function TradeAnalysisView() {
             <><Brain className="h-4 w-4" /> Run Analysis</>
           )}
         </button>
-        {triggerAnalysis.isError && (
+        {triggerAnalysis.isError && !waitingForResult && (
           <p className="text-sm text-oss-reject mt-3">
             {(triggerAnalysis.error as Error)?.message || 'Failed to start analysis'}
           </p>
@@ -62,7 +81,7 @@ export default function TradeAnalysisView() {
     )
   }
 
-  if (status === 'running') {
+  if (status === 'running' || waitingForResult) {
     return (
       <div className="rounded-xl border border-oss-border bg-oss-card p-8 text-center">
         <Loader2 className="h-10 w-10 text-oss-accent animate-spin mx-auto mb-4" />
