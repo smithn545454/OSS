@@ -38,12 +38,16 @@ export const DEFAULT_RETURN_PCT_BENCHMARK = 20
 // Premium threshold for UNUSUAL_VOLUME urgency escalation in alerts.
 export const CHEAP_UV_PREMIUM_THRESHOLD = 1.50
 
-// Freshness decay: hours until score reaches MIN_DECAY floor.
-// 24 market-hours means end-of-next-day evals hit the floor.
-export const FRESHNESS_DECAY_CONSTANT = 24
+// Freshness decay: grace period with no penalty, then linear decay.
+// First 8 hours: no decay (covers a full trading day).
+// After grace period: linear decay over 24 hours to floor.
+export const FRESHNESS_GRACE_HOURS = 8
 
-// Floor multiplier — stale evals retain at least 60% of base score.
-export const FRESHNESS_MIN_DECAY = 0.6
+// Hours of linear decay after grace period expires.
+export const FRESHNESS_DECAY_WINDOW = 24
+
+// Floor multiplier — stale evals retain at least 75% of base score.
+export const FRESHNESS_MIN_DECAY = 0.75
 
 /**
  * Normalize theta-adjusted EV to 0-100 scale.
@@ -135,9 +139,10 @@ export function calculateConvictionScore(
 
 /**
  * Calculate freshness decay multiplier based on evaluation age.
- * Linear decay from 1.0 to MIN_DECAY over DECAY_CONSTANT hours.
+ * Grace period (8h): no decay — today's opportunities compete on pure merit.
+ * After grace: linear decay over 24h to 75% floor.
  *
- * <1h: ~96-100%, 4h: ~83%, 8h: ~67%, 16h+: 60% floor.
+ * 0-8h: 100%, 12h: 83%, 20h: 50%, 32h+: 75% floor.
  */
 export function calculateFreshnessDecay(
   evaluatedAt: string,
@@ -145,9 +150,11 @@ export function calculateFreshnessDecay(
 ): number {
   const ageMs = now.getTime() - new Date(evaluatedAt).getTime()
   const ageHours = Math.max(0, ageMs / 3_600_000)
+  if (ageHours <= FRESHNESS_GRACE_HOURS) return 1.0
+  const decayAge = ageHours - FRESHNESS_GRACE_HOURS
   return Math.max(
     FRESHNESS_MIN_DECAY,
-    1.0 - ageHours / FRESHNESS_DECAY_CONSTANT,
+    1.0 - decayAge / FRESHNESS_DECAY_WINDOW,
   )
 }
 

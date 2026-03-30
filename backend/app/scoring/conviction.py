@@ -35,12 +35,16 @@ DEFAULT_RETURN_PCT_BENCHMARK = 20.0
 # UV opportunities on cheap options (mid <= $1.50) are effectively "act now".
 CHEAP_UV_PREMIUM_THRESHOLD = 1.50
 
-# Freshness decay: hours until score reaches MIN_DECAY floor.
-# 24 market-hours means end-of-next-day evals hit the floor.
-FRESHNESS_DECAY_CONSTANT = 24.0
+# Freshness decay: grace period with no penalty, then linear decay.
+# First 8 hours: no decay (covers a full trading day).
+# After grace period: linear decay over 24 hours to floor.
+FRESHNESS_GRACE_HOURS = 8.0
 
-# Floor multiplier — stale evals retain at least 60% of base score.
-FRESHNESS_MIN_DECAY = 0.6
+# Hours of linear decay after grace period expires.
+FRESHNESS_DECAY_WINDOW = 24.0
+
+# Floor multiplier — stale evals retain at least 75% of base score.
+FRESHNESS_MIN_DECAY = 0.75
 
 # Scanner urgency mapping — used by alert service for urgency display
 URGENCY_BOOST: dict[str, int] = {
@@ -121,10 +125,10 @@ def calculate_freshness_decay(
     *,
     now: datetime | None = None,
 ) -> float:
-    """Linear decay multiplier based on evaluation age.
+    """Grace-period decay multiplier based on evaluation age.
 
     Returns value in [FRESHNESS_MIN_DECAY, 1.0].
-    <1h: ~96-100%, 4h: ~83%, 8h: ~67%, 16h+: 60% floor.
+    0-8h: 100% (no decay), then linear decay over 24h to 75% floor.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -132,7 +136,10 @@ def calculate_freshness_decay(
     if evaluated.tzinfo is None:
         evaluated = evaluated.replace(tzinfo=timezone.utc)
     age_hours = max(0.0, (now - evaluated).total_seconds() / 3600.0)
-    return max(FRESHNESS_MIN_DECAY, 1.0 - age_hours / FRESHNESS_DECAY_CONSTANT)
+    if age_hours <= FRESHNESS_GRACE_HOURS:
+        return 1.0
+    decay_age = age_hours - FRESHNESS_GRACE_HOURS
+    return max(FRESHNESS_MIN_DECAY, 1.0 - decay_age / FRESHNESS_DECAY_WINDOW)
 
 
 def _round1(value: float) -> float:

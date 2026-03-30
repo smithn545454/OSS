@@ -222,10 +222,12 @@ describe('calculateConvictionScore', () => {
 // ===========================================================================
 describe('enhanceWithConvictionScores', () => {
   it('adds convictionScore and convictionBreakdown', () => {
-    const evals = [makeEval()]
-    const enhanced = enhanceWithConvictionScores(evals)
+    // Use a recent evaluated_at so decay doesn't alter the score
+    const recentEval = makeEval({ evaluated_at: new Date().toISOString() })
+    const enhanced = enhanceWithConvictionScores([recentEval])
     expect(enhanced[0].convictionScore).toBeDefined()
     expect(enhanced[0].convictionBreakdown).toBeDefined()
+    // Fresh eval (within grace period) has no decay
     expect(enhanced[0].convictionBreakdown!.total).toBe(enhanced[0].convictionScore)
   })
 
