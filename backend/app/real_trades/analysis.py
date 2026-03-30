@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
-from app.db import dynamodb as db
+from app.db.dynamodb import get_dynamodb
 from app.db.tables import RealTradeTable
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ async def create_analysis_stub() -> dict[str, Any]:
     The caller (API endpoint) should then invoke run_trade_analysis()
     in the background.
     """
+    db = get_dynamodb()
     # Gather trade counts for validation
     open_trades = await RealTradeTable.list_open(limit=500)
     closed_trades = await RealTradeTable.list_closed(limit=500)
@@ -77,6 +78,7 @@ async def run_trade_analysis(analysis_id: str) -> dict[str, Any]:
     Gathers all trades, calls the LLM, and stores results in DynamoDB.
     """
     try:
+        db = get_dynamodb()
         open_trades = await RealTradeTable.list_open(limit=500)
         closed_trades = await RealTradeTable.list_closed(limit=500)
         all_trades = open_trades + closed_trades
@@ -188,6 +190,7 @@ async def run_trade_analysis(analysis_id: str) -> dict[str, Any]:
 
 async def get_analysis(analysis_id: str) -> Optional[dict[str, Any]]:
     """Get an analysis by ID, including results if complete."""
+    db = get_dynamodb()
     items = await db.query(
         RealTradeTable.TABLE, f"ANALYSIS#{analysis_id}", limit=10
     )
@@ -221,6 +224,7 @@ async def get_analysis(analysis_id: str) -> Optional[dict[str, Any]]:
 
 async def get_latest_analysis() -> Optional[dict[str, Any]]:
     """Get the most recent analysis."""
+    db = get_dynamodb()
     index_items = await db.query(
         RealTradeTable.TABLE,
         "ANALYSIS_INDEX",
@@ -239,6 +243,7 @@ async def get_latest_analysis() -> Optional[dict[str, Any]]:
 
 async def list_analyses(limit: int = 10) -> list[dict[str, Any]]:
     """List recent analyses."""
+    db = get_dynamodb()
     index_items = await db.query(
         RealTradeTable.TABLE,
         "ANALYSIS_INDEX",
