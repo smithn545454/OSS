@@ -778,7 +778,7 @@ async def list_approve_evaluations(
     exclude_earnings: bool = True,
     earnings_days: int = 7,
     scanner: Optional[str] = None,
-    max_age_trading_days: int = 2,
+    max_age_trading_days: int = 1,
     limit: int = 100,
 ) -> dict[str, Any]:
     """Get APPROVE evaluations with enhanced data for Opportunities page.

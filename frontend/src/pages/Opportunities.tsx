@@ -5,7 +5,7 @@
  * Per Section 5 of OSS_Opportunities_Page_Specification.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useApproveEvaluations, useContractQuotes } from '@/hooks/useApi'
 import { filterByConvictionThreshold } from '@/lib/convictionScore'
 import {
@@ -21,6 +21,7 @@ const DEFAULT_CONVICTION_THRESHOLD = 75
 
 export default function Opportunities() {
   const convictionThreshold = DEFAULT_CONVICTION_THRESHOLD
+  const [maxAgeTradingDays, setMaxAgeTradingDays] = useState(1)
 
   // Fetch APPROVE evaluations with conviction scoring
   const {
@@ -32,7 +33,7 @@ export default function Opportunities() {
   } = useApproveEvaluations({
     excludeEarnings: true,
     earningsDays: 7,
-    maxAgeTradingDays: 2,
+    maxAgeTradingDays,
     limit: 100,
   })
 
@@ -190,6 +191,8 @@ export default function Opportunities() {
               evaluations={evaluations}
               threshold={convictionThreshold}
               liveQuotes={liveQuotes}
+              maxAgeTradingDays={maxAgeTradingDays}
+              onMaxAgeTradingDaysChange={setMaxAgeTradingDays}
             />
             
             {/* All APPROVEs Table */}

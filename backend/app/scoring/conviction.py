@@ -14,6 +14,7 @@ the time-sensitivity of cheap options is already captured by Return%.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 # Default weights — must match frontend DEFAULT_WEIGHTS exactly
 DEFAULT_WEIGHTS = {
@@ -33,6 +34,13 @@ DEFAULT_RETURN_PCT_BENCHMARK = 20.0
 # Premium threshold for UNUSUAL_VOLUME urgency escalation in alerts.
 # UV opportunities on cheap options (mid <= $1.50) are effectively "act now".
 CHEAP_UV_PREMIUM_THRESHOLD = 1.50
+
+# Freshness decay: hours until score reaches MIN_DECAY floor.
+# 24 market-hours means end-of-next-day evals hit the floor.
+FRESHNESS_DECAY_CONSTANT = 24.0
+
+# Floor multiplier — stale evals retain at least 60% of base score.
+FRESHNESS_MIN_DECAY = 0.6
 
 # Scanner urgency mapping — used by alert service for urgency display
 URGENCY_BOOST: dict[str, int] = {
@@ -106,6 +114,25 @@ def determine_urgency(scanner_types: list[str], *, mid: float | None = None) -> 
                 return "act_now"
             return "hours"
     return "patient"
+
+
+def calculate_freshness_decay(
+    evaluated_at: str,
+    *,
+    now: datetime | None = None,
+) -> float:
+    """Linear decay multiplier based on evaluation age.
+
+    Returns value in [FRESHNESS_MIN_DECAY, 1.0].
+    <1h: ~96-100%, 4h: ~83%, 8h: ~67%, 16h+: 60% floor.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    evaluated = datetime.fromisoformat(evaluated_at)
+    if evaluated.tzinfo is None:
+        evaluated = evaluated.replace(tzinfo=timezone.utc)
+    age_hours = max(0.0, (now - evaluated).total_seconds() / 3600.0)
+    return max(FRESHNESS_MIN_DECAY, 1.0 - age_hours / FRESHNESS_DECAY_CONSTANT)
 
 
 def _round1(value: float) -> float:

@@ -10,10 +10,18 @@ import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
 import { filterByConvictionThreshold, sortByConviction, sortByCheap } from '@/lib/convictionScore'
 import { CompactRowCard } from './CompactRowCard'
 
+const TIME_WINDOWS = [
+  { label: 'Today', value: 1 },
+  { label: '2 Days', value: 2 },
+  { label: 'This Week', value: 5 },
+] as const
+
 interface ConvictionQueueProps {
   evaluations: ApproveEvaluation[]
   threshold?: number
   liveQuotes?: Record<string, ContractQuote>
+  maxAgeTradingDays?: number
+  onMaxAgeTradingDaysChange?: (days: number) => void
   className?: string
 }
 
@@ -59,6 +67,8 @@ export function ConvictionQueue({
   evaluations,
   threshold = 70,
   liveQuotes = {},
+  maxAgeTradingDays = 1,
+  onMaxAgeTradingDaysChange,
   className = '',
 }: ConvictionQueueProps) {
   const [sortMode, setSortMode] = useState<'conviction' | 'cheap'>('conviction')
@@ -111,6 +121,23 @@ export function ConvictionQueue({
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <select
+            value={maxAgeTradingDays}
+            onChange={e => onMaxAgeTradingDaysChange?.(Number(e.target.value))}
+            style={{
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '4px',
+              padding: '2px 6px',
+              fontSize: '11px',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            {TIME_WINDOWS.map(w => (
+              <option key={w.value} value={w.value}>{w.label}</option>
+            ))}
+          </select>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             Ranked by {sortMode === 'cheap' ? 'Cheap' : 'Conviction'}
           </span>

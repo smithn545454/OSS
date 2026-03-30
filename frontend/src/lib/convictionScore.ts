@@ -38,6 +38,13 @@ export const DEFAULT_RETURN_PCT_BENCHMARK = 20
 // Premium threshold for UNUSUAL_VOLUME urgency escalation in alerts.
 export const CHEAP_UV_PREMIUM_THRESHOLD = 1.50
 
+// Freshness decay: hours until score reaches MIN_DECAY floor.
+// 24 market-hours means end-of-next-day evals hit the floor.
+export const FRESHNESS_DECAY_CONSTANT = 24
+
+// Floor multiplier — stale evals retain at least 60% of base score.
+export const FRESHNESS_MIN_DECAY = 0.6
+
 /**
  * Normalize theta-adjusted EV to 0-100 scale.
  * EV <= 0: Score = 0. EV > 0: Score = min(100, EV / benchmark × 100)
@@ -127,18 +134,40 @@ export function calculateConvictionScore(
 }
 
 /**
+ * Calculate freshness decay multiplier based on evaluation age.
+ * Linear decay from 1.0 to MIN_DECAY over DECAY_CONSTANT hours.
+ *
+ * <1h: ~96-100%, 4h: ~83%, 8h: ~67%, 16h+: 60% floor.
+ */
+export function calculateFreshnessDecay(
+  evaluatedAt: string,
+  now: Date = new Date(),
+): number {
+  const ageMs = now.getTime() - new Date(evaluatedAt).getTime()
+  const ageHours = Math.max(0, ageMs / 3_600_000)
+  return Math.max(
+    FRESHNESS_MIN_DECAY,
+    1.0 - ageHours / FRESHNESS_DECAY_CONSTANT,
+  )
+}
+
+/**
  * Enhance evaluations with conviction scores.
+ * Applies freshness decay so recent evaluations rank higher.
  */
 export function enhanceWithConvictionScores(
   evaluations: ApproveEvaluation[],
   weights: ConvictionScoreWeights = DEFAULT_WEIGHTS,
   evBenchmark: number = DEFAULT_EV_BENCHMARK,
 ): ApproveEvaluation[] {
+  const now = new Date()
   return evaluations.map(evaluation => {
     const breakdown = calculateConvictionScore(evaluation, weights, evBenchmark)
+    const decay = calculateFreshnessDecay(evaluation.evaluated_at, now)
+    const decayedScore = Math.round(breakdown.total * decay * 10) / 10
     return {
       ...evaluation,
-      convictionScore: breakdown.total,
+      convictionScore: decayedScore,
       convictionBreakdown: breakdown,
     }
   })
