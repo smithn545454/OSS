@@ -621,7 +621,11 @@ def run_feature_importance_analysis(
     now = datetime.now(timezone.utc).isoformat()
 
     # Overall stats
-    pnls = [pos.current_pnl_pct for pos in positions if pos.current_pnl_pct is not None]
+    pnls = [
+        getattr(pos, outcome_field)
+        for pos in positions
+        if getattr(pos, outcome_field) is not None
+    ]
     overall_wr = _win_rate(pnls) if pnls else 0.0
     overall_avg = statistics.mean(pnls) if pnls else 0.0
 

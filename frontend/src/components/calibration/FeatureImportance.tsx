@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useFeatureImportance, useRunFeatureImportance, useGenerateFeatureNarrative } from '@/hooks/useApi'
 import type { FeatureStats, FeaturePairStats, WeightComparison, FeatureImportanceResult } from '@/lib/types'
 import clsx from 'clsx'
@@ -465,6 +465,16 @@ export default function FeatureImportance() {
       verdict: verdict === 'all' ? undefined : verdict,
     })
   }
+
+  // Auto-run analysis when filters change
+  useEffect(() => {
+    runMutation.mutate({
+      period,
+      outcome,
+      verdict: verdict === 'all' ? undefined : verdict,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, outcome, verdict])
 
   return (
     <div className="space-y-6">
