@@ -316,12 +316,12 @@ async def trigger_analysis() -> dict[str, Any]:
     if stub.get("status") == "insufficient_data":
         raise HTTPException(status_code=400, detail=stub.get("message", "Not enough trades"))
 
-    # Run analysis in background (same Lambda invocation for now)
+    # Run analysis synchronously — asyncio.create_task doesn't work on Lambda
+    # because Mangum freezes the execution context after the response is sent.
     analysis_id = stub["analysis_id"]
-    import asyncio
-    asyncio.create_task(run_trade_analysis(analysis_id))
+    result = await run_trade_analysis(analysis_id)
 
-    return stub
+    return result
 
 
 @router.get("/analysis/latest")
