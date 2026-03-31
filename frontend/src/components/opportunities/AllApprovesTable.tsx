@@ -9,14 +9,13 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ApproveEvaluation, UrgencyLevel, ScannerType } from '@/lib/types'
 import { formatContractId } from '@/lib/convictionScore'
-import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import { formatRelativeTime } from '@/lib/formatTime'
 import { UrgencyBadge } from './UrgencyBadge'
 import { ScannerBadge } from './ScannerBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 
-type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'delta' | 'moneyness' | 'ev' | 'returnPct' | 'time'
+type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'delta' | 'moneyness' | 'time'
 type SortDirection = 'asc' | 'desc'
 
 interface AllApprovesTableProps {
@@ -166,10 +165,6 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
           aVal = a.convictionScore ?? 0
           bVal = b.convictionScore ?? 0
           break
-        case 'returnPct':
-          aVal = calculateReturnPct(a.thetaAdjustedEV, a.mid) ?? -Infinity
-          bVal = calculateReturnPct(b.thetaAdjustedEV, b.mid) ?? -Infinity
-          break
         case 'premium':
           aVal = a.mid ?? 0
           bVal = b.mid ?? 0
@@ -181,10 +176,6 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
         case 'moneyness':
           aVal = a.moneyness_pct ?? 0
           bVal = b.moneyness_pct ?? 0
-          break
-        case 'ev':
-          aVal = a.thetaAdjustedEV ?? 0
-          bVal = b.thetaAdjustedEV ?? 0
           break
         case 'time':
           aVal = new Date(a.evaluated_at).getTime()
@@ -371,22 +362,6 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 align="right"
               />
               <SortableHeader
-                label="θ-Adj EV"
-                field="ev"
-                currentSort={sortField}
-                currentDirection={sortDirection}
-                onSort={handleSort}
-                align="right"
-              />
-              <SortableHeader
-                label="Return %"
-                field="returnPct"
-                currentSort={sortField}
-                currentDirection={sortDirection}
-                onSort={handleSort}
-                align="right"
-              />
-              <SortableHeader
                 label="Time"
                 field="time"
                 currentSort={sortField}
@@ -517,33 +492,6 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                   ${(evaluation.mid ?? 0).toFixed(2)}
                 </td>
                 <td style={{
-                  padding: '12px 16px',
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-primary)',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: (evaluation.thetaAdjustedEV ?? 0) >= 0
-                    ? 'var(--color-success-text)'
-                    : 'var(--color-error-text)',
-                }}>
-                  ${(evaluation.thetaAdjustedEV ?? 0).toFixed(0)}
-                </td>
-                {(() => {
-                  const returnPct = calculateReturnPct(evaluation.thetaAdjustedEV, evaluation.mid)
-                  return (
-                    <td style={{
-                      padding: '12px 16px',
-                      textAlign: 'right',
-                      fontFamily: 'var(--font-primary)',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: getReturnColor(returnPct),
-                    }}>
-                      {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
-                    </td>
-                  )
-                })()}
-                <td style={{ 
                   padding: '12px 16px', 
                   textAlign: 'right',
                   fontSize: '12px',

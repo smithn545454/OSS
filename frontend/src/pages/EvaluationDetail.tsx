@@ -28,7 +28,6 @@ import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
 import TrackTradeModal from '@/components/TrackTradeModal'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
-import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
 
@@ -839,7 +838,6 @@ interface HeroSectionProps {
     underlying_price: number
     mid: number
   }
-  thetaAdjustedEV: number
   companyName?: string | null
   decision: {
     verdict: Verdict
@@ -848,9 +846,8 @@ interface HeroSectionProps {
   } | null
 }
 
-function HeroSection({ evaluation, thetaAdjustedEV, companyName, decision }: HeroSectionProps) {
+function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
   const isCall = evaluation.option_type === 'CALL'
-  const returnPct = calculateReturnPct(thetaAdjustedEV, evaluation.mid)
 
   return (
     <div className="detail-hero">
@@ -876,37 +873,6 @@ function HeroSection({ evaluation, thetaAdjustedEV, companyName, decision }: Her
           ${evaluation.strike} Strike · Exp {formatExpirationDate(evaluation.expiration_date)}
         </div>
 
-        {/* Decision Metrics Row */}
-        <div className="flex mt-6 pt-4 border-t border-oss-border"
-             style={{ justifyContent: 'center', alignItems: 'center', gap: '80px' }}>
-          {/* θ-Adj EV */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-            <span style={{
-              fontFamily: 'var(--font-primary)', fontSize: '13px',
-              color: 'rgba(255, 255, 255, 0.5)', fontWeight: 400,
-            }}>θ-Adj EV</span>
-            <span style={{
-              fontFamily: 'var(--font-primary)', fontSize: '22px',
-              color: thetaAdjustedEV != null ? '#00E5CC' : 'rgba(255, 255, 255, 0.3)',
-              fontWeight: 700,
-            }}>
-              {thetaAdjustedEV != null ? `$${Math.round(thetaAdjustedEV)}` : '—'}
-            </span>
-          </div>
-          {/* Return % */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-            <span style={{
-              fontFamily: 'var(--font-primary)', fontSize: '13px',
-              color: 'rgba(255, 255, 255, 0.5)', fontWeight: 400,
-            }}>Return</span>
-            <span style={{
-              fontFamily: 'var(--font-primary)', fontSize: '22px',
-              color: getReturnColor(returnPct), fontWeight: 700,
-            }}>
-              {returnPct != null ? `${returnPct.toFixed(1)}%` : '—'}
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* Price and Score */}
@@ -1063,7 +1029,6 @@ export default function EvaluationDetail() {
       {/* Hero Section */}
       <HeroSection
         evaluation={evaluation as HeroSectionProps['evaluation']}
-        thetaAdjustedEV={data.thetaAdjustedEV}
         companyName={data.company_name}
         decision={decision ? {
           verdict: decision.verdict as Verdict,

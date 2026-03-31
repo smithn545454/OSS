@@ -13,7 +13,6 @@ import { ScannerBadge } from './ScannerBadge'
 import { ConvergenceBadge } from './ConvergenceBadge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 import { ConvictionGauge } from './ConvictionGauge'
-import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import { formatRelativeTime, getAgeFreshness } from '@/lib/formatTime'
 
 interface OpportunityCardProps {
@@ -148,10 +147,6 @@ function ContractInfo({ evaluation, freshness }: { evaluation: ApproveEvaluation
 function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
   const premium = evaluation.mid ?? 0
   const contractCost = premium * 100
-  const thetaAdjEV = evaluation.thetaAdjustedEV
-
-  const returnPct = calculateReturnPct(thetaAdjEV, premium)
-  const returnColor = getReturnColor(returnPct)
 
   // Contract cost color by tier: LOW ≤$300 cyan, MED ≤$1000 amber, HIGH >$1000 red
   const costColor =
@@ -170,7 +165,7 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
     }}>
       {/* Key metrics */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
-        {/* Row 1: Premium with contract cost */}
+        {/* Premium with contract cost */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Premium</span>
           <span>
@@ -191,32 +186,6 @@ function MetricsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
             }}>
               (${contractCost.toLocaleString('en-US', { maximumFractionDigits: 0 })})
             </span>
-          </span>
-        </div>
-        {/* Row 2: θ-Adj EV */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>θ-Adj EV</span>
-          <span style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            fontFamily: 'var(--font-primary)',
-            color: thetaAdjEV >= 0
-              ? 'var(--color-success-text)'
-              : 'var(--color-error-text)',
-          }}>
-            ${thetaAdjEV.toFixed(0)}
-          </span>
-        </div>
-        {/* Row 3: Return % */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Return</span>
-          <span style={{
-            fontSize: '15px',
-            fontWeight: 800,
-            fontFamily: 'var(--font-primary)',
-            color: returnColor,
-          }}>
-            {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
           </span>
         </div>
       </div>

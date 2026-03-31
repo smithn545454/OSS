@@ -5,7 +5,6 @@ import { ScannerBadge } from '@/components/opportunities/ScannerBadge'
 import { ConvergenceBadge } from '@/components/opportunities/ConvergenceBadge'
 import { OptionTypeBadge } from '@/components/opportunities/OptionTypeBadge'
 import { ConvictionGauge } from '@/components/opportunities/ConvictionGauge'
-import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import clsx from 'clsx'
 
 interface OppCardProps {
@@ -31,9 +30,6 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
 
   const premium = evaluation.mid ?? 0
   const contractCost = premium * 100
-  const thetaAdjEV = evaluation.thetaAdjustedEV ?? 0
-  const returnPct = calculateReturnPct(thetaAdjEV, premium)
-  const returnColor = getReturnColor(returnPct)
   const score = evaluation.convictionScore ?? 0
 
   const handleClick = () => {
@@ -111,33 +107,7 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
           </span>
         </div>
 
-        {/* Row 3: Key metrics */}
-        <div className="flex items-center gap-4 text-sm lg:w-52">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[var(--text-muted)] text-xs">&theta;-Adj EV</span>
-            <span
-              className="font-semibold font-mono"
-              style={{
-                color: thetaAdjEV >= 0
-                  ? 'var(--color-success-text)'
-                  : 'var(--color-error-text)',
-              }}
-            >
-              ${thetaAdjEV.toFixed(0)}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[var(--text-muted)] text-xs">Return</span>
-            <span
-              className="font-bold font-mono"
-              style={{ color: returnColor }}
-            >
-              {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
-            </span>
-          </div>
-        </div>
-
-        {/* Row 4: Badges */}
+        {/* Row 3: Badges */}
         <div className="flex items-center gap-1.5 flex-wrap lg:flex-1">
           {evaluation.scannerSource.map((scanner) => (
             <ScannerBadge key={scanner} scanner={scanner} />

@@ -10,7 +10,6 @@
 import { useNavigate } from 'react-router-dom'
 import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
 import { ConvictionGauge } from './ConvictionGauge'
-import { calculateReturnPct, getReturnColor } from '@/lib/metrics'
 import { formatRelativeTime, formatExpirationDate, getAgeFreshness } from '@/lib/formatTime'
 
 interface CompactRowCardProps {
@@ -277,10 +276,6 @@ function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation;
   const stalePremium = evaluation.mid ?? 0
   const premium = hasLiveQuote ? liveQuote.mid : stalePremium
   const contractCost = premium * 100
-  const thetaAdjEV = evaluation.thetaAdjustedEV
-  const returnPct = calculateReturnPct(thetaAdjEV, premium)
-  const returnColor = getReturnColor(returnPct)
-
   // Price change from evaluation time
   const priceDelta = hasLiveQuote ? liveQuote.mid - stalePremium : 0
   // Red = more expensive (bad for entry), green = cheaper (good)
@@ -358,18 +353,6 @@ function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation;
         </span>
       </div>
 
-      {/* Return */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: '48px' }}>
-        <span style={labelStyle}>RETURN</span>
-        <span style={{
-          fontSize: '14px',
-          fontWeight: 700,
-          fontFamily: "'JetBrains Mono', monospace",
-          color: returnColor,
-        }}>
-          {returnPct !== null ? `${returnPct.toFixed(1)}%` : '—'}
-        </span>
-      </div>
     </div>
   )
 }

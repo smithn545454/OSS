@@ -718,12 +718,11 @@ class SlackAlertService:
 
                 # Calculate conviction score
                 premium = item.get("mid", 0) or 0
+                final_score = item.get("final_score") or 0
+                evaluated_at = item.get("evaluated_at", "")
                 result = calculate_conviction_score(
-                    theta_adj_ev=theta_ev,
-                    pillar_scores=pillar_scores,
-                    gate_margin=gate_margin,
-                    scanner_types=scanner_types,
-                    mid=premium,
+                    final_score=final_score,
+                    evaluated_at=evaluated_at,
                 )
 
                 if result.total > best_score:

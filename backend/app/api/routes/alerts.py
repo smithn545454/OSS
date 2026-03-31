@@ -315,12 +315,11 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         item = e["item"]
 
         mid = item.get("mid") or 0
+        final_score = item.get("final_score") or 0
+        evaluated_at = item.get("evaluated_at", "")
         result = calculate_conviction_score(
-            theta_adj_ev=e["theta_ev"],
-            pillar_scores=pillar_scores,
-            gate_margin=e["gate_margin"],
-            scanner_types=scanner_types,
-            mid=mid,
+            final_score=final_score,
+            evaluated_at=evaluated_at,
         )
 
         # Check score threshold

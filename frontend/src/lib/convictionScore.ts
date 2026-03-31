@@ -119,9 +119,6 @@ export function sortByCheap(evaluations: ApproveEvaluation[]): ApproveEvaluation
     const costA = (a.mid ?? 0) * 100
     const costB = (b.mid ?? 0) * 100
     if (costA !== costB) return costA - costB
-    const retA = calculateReturnPct(a.thetaAdjustedEV ?? null, a.mid ?? null) ?? 0
-    const retB = calculateReturnPct(b.thetaAdjustedEV ?? null, b.mid ?? null) ?? 0
-    if (retB !== retA) return retB - retA
     return (b.convictionScore ?? 0) - (a.convictionScore ?? 0)
   })
 }
@@ -190,5 +187,3 @@ export function determineUrgency(scannerTypes: ScannerType[], mid?: number): Urg
   return 'patient'
 }
 
-/** Calculate return% for sorting — imported from metrics.ts */
-import { calculateReturnPct } from './metrics'

@@ -1937,12 +1937,11 @@ async def _fire_slack_alerts(
 
         # Compute conviction score
         premium = ev.mid or 0
+        final_score = decision.final_score if decision else 0
+        evaluated_at = ev.evaluated_at or ""
         result = calculate_conviction_score(
-            theta_adj_ev=theta_ev,
-            pillar_scores=pillar_scores,
-            gate_margin=gate_margin,
-            scanner_types=scanner_types,
-            mid=premium,
+            final_score=final_score,
+            evaluated_at=evaluated_at,
         )
 
         urgency = determine_urgency(scanner_types, mid=premium)
