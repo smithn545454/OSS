@@ -589,8 +589,8 @@ class ContractSelectionConfig(OSSBaseModel):
     )
     delta_bands: dict[str, DeltaBand] = Field(
         default_factory=lambda: {
-            "CALL": DeltaBand(min_delta=0.20, max_delta=0.75),
-            "PUT": DeltaBand(min_delta=-0.75, max_delta=-0.20),
+            "CALL": DeltaBand(min_delta=0.05, max_delta=0.75),
+            "PUT": DeltaBand(min_delta=-0.75, max_delta=-0.05),
         }
     )
     top_k: int = 3
@@ -600,10 +600,20 @@ class ContractSelectionConfig(OSSBaseModel):
     min_volume: int = 50
     max_spread_pct: float = 10.0
     min_mid_price: float = 0.20
+    # Moneyness filter ranges (%)
+    moneyness_call_min: float = -5.0    # ITM limit for calls
+    moneyness_call_max: float = 15.0    # OTM limit for calls
+    moneyness_put_min: float = -15.0    # ITM limit for puts
+    moneyness_put_max: float = 15.0     # OTM limit for puts
     # Ranking weights (Section 12.3) - must sum to 1.0
-    rank_weight_liquidity: float = 0.40
-    rank_weight_delta: float = 0.35
-    rank_weight_spread: float = 0.25
+    rank_weight_liquidity: float = 0.60
+    rank_weight_delta: float = 0.00
+    rank_weight_spread: float = 0.40
+    # Delta diversity in top-K selection
+    diversity_mode: str = "delta_spread"  # "none" | "delta_spread"
+    diversity_reserved_slots: int = 1
+    diversity_delta_threshold_call: float = 0.30
+    diversity_delta_threshold_put: float = -0.30
 
 
 class GateConfig(OSSBaseModel):
@@ -701,10 +711,10 @@ class VolatilityPillarConfig(OSSBaseModel):
     """
 
     # Subscore weights
-    iv_vs_rv_weight: float = 0.35
-    iv_percentile_weight: float = 0.25
-    iv_regime_weight: float = 0.20
-    theta_adjusted_edge_weight: float = 0.20
+    iv_vs_rv_weight: float = 0.44
+    iv_percentile_weight: float = 0.31
+    iv_regime_weight: float = 0.25
+    theta_adjusted_edge_weight: float = 0.00
 
     @model_validator(mode="after")
     def _subscore_weights_must_sum_to_one(self) -> "VolatilityPillarConfig":

@@ -723,11 +723,7 @@ class ContractSelector:
         candidates: list[ContractCandidate],
         side: OptionType,
     ) -> list[ContractCandidate]:
-        """Apply moneyness filter.
-
-        Per Section 12.3:
-        CALL: -5% (5% ITM) to +15% OTM
-        PUT: -15% (15% ITM) to +5% (5% OTM)
+        """Apply moneyness filter using configurable ranges.
 
         Args:
             candidates: Contracts to filter
@@ -737,19 +733,11 @@ class ContractSelector:
             Filtered list of candidates
         """
         if side == OptionType.CALL:
-            # CALL: -5% to +15%
-            # moneyness_pct = (strike - underlying) / underlying * 100
-            # Negative = ITM (strike below underlying)
-            # Positive = OTM (strike above underlying)
-            min_moneyness = -5.0  # 5% ITM
-            max_moneyness = 15.0  # 15% OTM
+            min_moneyness = self._config.moneyness_call_min
+            max_moneyness = self._config.moneyness_call_max
         else:
-            # PUT: -15% to +5%
-            # moneyness_pct = (underlying - strike) / underlying * 100
-            # Negative = ITM (strike above underlying)
-            # Positive = OTM (strike below underlying)
-            min_moneyness = -15.0  # 15% ITM
-            max_moneyness = 5.0   # 5% OTM
+            min_moneyness = self._config.moneyness_put_min
+            max_moneyness = self._config.moneyness_put_max
 
         filtered = []
         for candidate in candidates:
@@ -763,14 +751,18 @@ class ContractSelector:
         candidates: list[ContractCandidate],
         side: OptionType,
     ) -> list[ContractCandidate]:
-        """Rank candidates and select top K.
+        """Rank candidates and select top K with optional delta diversity.
+
+        When diversity_mode is "delta_spread", reserves slots for OTM contracts
+        (abs(delta) below threshold) to ensure low-delta options get representation
+        even when ATM contracts dominate on liquidity/spread.
 
         Args:
             candidates: Contracts to rank and select from
             side: Option type
 
         Returns:
-            Top K candidates by rank score
+            Top K candidates by rank score, with diversity slots if configured
         """
         if not candidates:
             return []
@@ -788,7 +780,6 @@ class ContractSelector:
                 is_call=is_call,
             )
 
-            # Create new candidate with ranking scores
             scored_candidate = ContractCandidate(
                 **{**candidate.__dict__, "ranking_scores": scores}
             )
@@ -797,9 +788,48 @@ class ContractSelector:
         # Sort by rank score descending
         scored_candidates.sort(key=lambda c: c.rank_score, reverse=True)
 
-        # Select top K
         top_k = self._config.top_k
-        return scored_candidates[:top_k]
+        mode = self._config.diversity_mode
+        reserved = self._config.diversity_reserved_slots
+
+        # Original behavior when diversity is disabled
+        if mode != "delta_spread" or reserved <= 0 or top_k <= reserved:
+            return scored_candidates[:top_k]
+
+        # Delta diversity: reserve slots for OTM contracts
+        threshold = (
+            self._config.diversity_delta_threshold_call
+            if is_call
+            else self._config.diversity_delta_threshold_put
+        )
+
+        def is_otm(c: ContractCandidate) -> bool:
+            return abs(c.delta) < abs(threshold)
+
+        # Take top (K - reserved) from full ranked list
+        main_slots = top_k - reserved
+        main_picks = scored_candidates[:main_slots]
+        main_tickers = {c.option_ticker for c in main_picks}
+
+        # Take top 'reserved' OTM contracts not already picked
+        otm_pool = [
+            c for c in scored_candidates
+            if is_otm(c) and c.option_ticker not in main_tickers
+        ]
+        otm_picks = otm_pool[:reserved]
+
+        # If not enough OTM candidates, fill from remaining ranked list
+        if len(otm_picks) < reserved:
+            remaining = [
+                c for c in scored_candidates[main_slots:]
+                if c.option_ticker not in main_tickers
+                and c.option_ticker not in {p.option_ticker for p in otm_picks}
+            ]
+            otm_picks.extend(remaining[:reserved - len(otm_picks)])
+
+        result = main_picks + otm_picks
+        result.sort(key=lambda c: c.rank_score, reverse=True)
+        return result
 
     def get_telemetry(self) -> SelectionTelemetry:
         """Get the telemetry tracker.
