@@ -24,13 +24,13 @@ class TestNormalizeEV:
         assert normalize_ev(0.0) == 0.0
 
     def test_positive_ev(self):
-        assert normalize_ev(7.5) == 50.0
+        assert normalize_ev(15.0) == 50.0
 
     def test_full_benchmark(self):
-        assert normalize_ev(15.0) == 100.0
+        assert normalize_ev(30.0) == 100.0
 
     def test_above_benchmark_capped(self):
-        assert normalize_ev(30.0) == 100.0
+        assert normalize_ev(60.0) == 100.0
 
     def test_custom_benchmark(self):
         assert normalize_ev(10.0, benchmark=20.0) == 50.0
@@ -107,14 +107,14 @@ class TestCalculateConvictionScore:
             scanner_types=["UNUSUAL_VOLUME"],
             mid=1.06,
         )
-        # EV: capped 100 * 0.35 = 35
+        # EV: 20.85/30*100=69.5 * 0.35 = 24.3
         # ReturnPct: 19.67% / 20% * 100 = 98.35 * 0.30 = 29.5
         # Pillar: 78.33 * 0.35 = 27.4
-        # Total: ~91.9
-        assert result.total >= 90
+        # Total: ~81.2
+        assert result.total >= 78
 
     def test_good_cheap_uv(self):
-        """Good cheap UV setup scores in the 65-70 range."""
+        """Good cheap UV setup scores in the 50-60 range."""
         result = calculate_conviction_score(
             theta_adj_ev=10.0,
             pillar_scores={"DIRECTIONAL": 70.0, "VOLATILITY": 75.0, "STRUCTURE": 65.0},
@@ -122,7 +122,7 @@ class TestCalculateConvictionScore:
             scanner_types=["UNUSUAL_VOLUME"],
             mid=0.80,
         )
-        assert 60 <= result.total <= 75
+        assert 50 <= result.total <= 65
 
     def test_expensive_option_with_strong_signals(self):
         """Expensive option with strong EV and pillars still scores well."""

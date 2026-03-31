@@ -334,25 +334,24 @@ class TestEvaluationErrorPaths:
 
 class TestEvaluationHelpers:
 
-    def test_calculate_theta_adjusted_ev_zero_mid(self):
-        """EV returns 0 when mid <= 0."""
+    def test_calculate_theta_adjusted_ev_no_rv20(self):
+        """EV returns 0 when rv20 is None."""
         from app.api.routes.evaluations import calculate_theta_adjusted_ev
-        result = calculate_theta_adjusted_ev(0.5, -0.08, 0.0, 0.3, 100, 30)
+        result = calculate_theta_adjusted_ev(theta=-0.08, iv=0.3, rv20=None)
         assert result == 0.0
 
-    def test_calculate_theta_adjusted_ev_zero_dte(self):
-        """EV returns 0 when dte <= 0."""
+    def test_calculate_theta_adjusted_ev_zero_iv(self):
+        """EV returns 0 when iv <= 0."""
         from app.api.routes.evaluations import calculate_theta_adjusted_ev
-        result = calculate_theta_adjusted_ev(0.5, -0.08, 5.0, 0.3, 100, 0)
+        result = calculate_theta_adjusted_ev(theta=-0.08, iv=0.0, rv20=0.3)
         assert result == 0.0
 
     def test_calculate_theta_adjusted_ev_normal(self):
-        """EV computes a numeric value for valid inputs."""
+        """EV computes positive value when RV > IV (vol underpriced)."""
         from app.api.routes.evaluations import calculate_theta_adjusted_ev
-        result = calculate_theta_adjusted_ev(0.55, -0.08, 5.0, 0.32, 189.0, 30)
+        result = calculate_theta_adjusted_ev(theta=-0.08, iv=0.30, rv20=0.36)
         assert isinstance(result, float)
-        # With these inputs, EV should be positive
-        assert result != 0.0
+        assert result > 0.0
 
     def test_calculate_gate_margin_empty_results(self):
         """Gate margin returns 50 (neutral) for empty results."""

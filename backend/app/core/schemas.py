@@ -445,6 +445,16 @@ class PaperPosition(OSSBaseModel):
     thesis_sl_pct: Optional[float] = None
     thesis_time_exit_dte: Optional[int] = None
 
+    # Entry vol context
+    entry_rv20: Optional[float] = None
+
+    # Exit enrichment (populated at close from most recent daily snapshot)
+    exit_delta: Optional[float] = None
+    exit_iv: Optional[float] = None
+    exit_theta: Optional[float] = None
+    exit_underlying_price: Optional[float] = None
+    realized_vol_holding: Optional[float] = None  # Actual vol during hold period
+
     # Setup rule matching (populated at creation for performance tracking)
     matched_rule_ids: Optional[list[str]] = None
     matched_rules: Optional[list[dict[str, Any]]] = None  # Full rule snapshots at creation

@@ -26,33 +26,39 @@ from app.main import create_app
 
 class TestCalculateThetaAdjustedEV:
 
-    def test_basic_calculation(self):
-        ev = calculate_theta_adjusted_ev(
-            delta=0.50, theta=-0.08, mid=4.25, iv=0.30,
-            underlying_price=180.0, dte=30,
-        )
-        assert isinstance(ev, float)
+    def test_rv_greater_than_iv_positive_ev(self):
+        """RV > IV means vol is underpriced → positive EV."""
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.30, rv20=0.36)
+        # |0.15| * 5 * ((0.36/0.30)^2 - 1) * 100 = 0.15 * 5 * 0.44 * 100 = 33.0
+        assert ev == 33.0
 
-    def test_zero_mid(self):
-        ev = calculate_theta_adjusted_ev(
-            delta=0.50, theta=-0.08, mid=0.0, iv=0.30,
-            underlying_price=180.0, dte=30,
-        )
+    def test_rv_less_than_iv_negative_ev(self):
+        """IV > RV means vol is overpriced → negative EV."""
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.30, rv20=0.24)
+        # |0.15| * 5 * ((0.24/0.30)^2 - 1) * 100 = 0.15 * 5 * -0.36 * 100 = -27.0
+        assert ev == -27.0
+
+    def test_rv_equals_iv_zero_ev(self):
+        """RV == IV means fairly priced → zero EV."""
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.30, rv20=0.30)
         assert ev == 0.0
 
-    def test_zero_dte(self):
-        ev = calculate_theta_adjusted_ev(
-            delta=0.50, theta=-0.08, mid=4.25, iv=0.30,
-            underlying_price=180.0, dte=0,
-        )
+    def test_rv20_none_returns_zero(self):
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.30, rv20=None)
+        assert ev == 0.0
+
+    def test_zero_iv_returns_zero(self):
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.0, rv20=0.30)
+        assert ev == 0.0
+
+    def test_zero_theta_returns_zero(self):
+        ev = calculate_theta_adjusted_ev(theta=0.0, iv=0.30, rv20=0.36)
         assert ev == 0.0
 
     def test_custom_hold_days(self):
-        ev = calculate_theta_adjusted_ev(
-            delta=0.50, theta=-0.08, mid=4.25, iv=0.30,
-            underlying_price=180.0, dte=30, expected_hold_days=10,
-        )
-        assert isinstance(ev, float)
+        ev = calculate_theta_adjusted_ev(theta=-0.15, iv=0.30, rv20=0.36, expected_hold_days=10)
+        # |0.15| * 10 * 0.44 * 100 = 66.0
+        assert ev == 66.0
 
 
 class TestCalculateGateMargin:

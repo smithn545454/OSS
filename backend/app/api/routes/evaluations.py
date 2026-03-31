@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -98,37 +97,26 @@ URGENCY_BY_SCANNER = {
 
 
 def calculate_theta_adjusted_ev(
-    delta: float,
     theta: float,
-    mid: float,
     iv: float,
-    underlying_price: float,
-    dte: int,
+    rv20: float | None,
     expected_hold_days: int = 5,
 ) -> float:
-    """Calculate theta-adjusted expected value.
+    """Calculate theta-adjusted expected value using volatility-edge formula.
 
-    Per Section 4.2.1:
-    θ-Adjusted EV = (P_profit × E_gain) - (P_loss × E_loss) - (θ × T_hold)
+    θ-Adj EV = |θ| × T_hold × ((RV/IV)² − 1) × 100
 
-    Simplified calculation for display purposes.
+    Measures the structural edge from buying volatility cheap (RV > IV)
+    or expensive (IV > RV). Derived from the BSM identity that gamma P&L
+    offsets theta when realized vol equals implied vol.
+
+    Returns per-contract dollars over the holding period. Negative values
+    are valid (IV > RV means options are overpriced relative to actual movement).
     """
-    if mid <= 0 or dte <= 0:
+    if rv20 is None or iv <= 0 or theta == 0:
         return 0.0
 
-    # Daily expected move
-    daily_expected_move = underlying_price * (iv / math.sqrt(252))
-
-    # Expected gain from delta exposure over holding period
-    expected_price_move = daily_expected_move * math.sqrt(expected_hold_days)
-    expected_gain = abs(delta) * expected_price_move * 100  # Per contract
-
-    # Theta cost over holding period
-    theta_cost = abs(theta) * expected_hold_days * 100  # Per contract
-
-    # Simplified EV (assumes 50/50 probability for directional move)
-    ev = (0.6 * expected_gain) - (0.4 * mid * 0.5 * 100) - theta_cost
-
+    ev = abs(theta) * expected_hold_days * ((rv20 / iv) ** 2 - 1) * 100
     return round(ev, 2)
 
 
@@ -372,13 +360,13 @@ async def get_evaluation_detail_by_id(
     all_gates_passed = all(gr.passed for gr in gate_results if gr.enabled)
     failed_gates = [gr.gate_id for gr in gate_results if gr.enabled and not gr.passed]
 
+    rv20_feat = features_dict.get("rv20")
+    rv20_val = rv20_feat.get("value") if rv20_feat else None
+
     theta_adjusted_ev = calculate_theta_adjusted_ev(
-        delta=evaluation.get("delta", 0),
         theta=evaluation.get("theta", 0),
-        mid=evaluation.get("mid", 0),
         iv=evaluation.get("iv", 0),
-        underlying_price=evaluation.get("underlying_price", 0),
-        dte=evaluation.get("dte", 30),
+        rv20=rv20_val,
     )
 
     # Merge feature values into evaluation dict for rule matching
@@ -916,7 +904,10 @@ async def list_approve_evaluations(
         )
 
         # Merge volatility features into item for rule matching
+        rv20_value = None
         for fv in feature_values:
+            if fv.feature_name == "rv20" and fv.value is not None:
+                rv20_value = fv.value
             if fv.feature_name in (
                 "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
                 "days_to_earnings", "atr14_pct", "rs_20d",
@@ -955,12 +946,9 @@ async def list_approve_evaluations(
             "gateMargin": calculate_gate_margin(gate_list),
             "scannerSource": scanner_types,
             "thetaAdjustedEV": calculate_theta_adjusted_ev(
-                delta=item.get("delta", 0),
                 theta=item.get("theta", 0),
-                mid=item.get("mid", 0),
                 iv=item.get("iv", 0),
-                underlying_price=item.get("underlying_price", 0),
-                dte=item.get("dte", 30),
+                rv20=rv20_value,
             ),
             "urgency": determine_urgency(scanner_types),
             "headline": headline,

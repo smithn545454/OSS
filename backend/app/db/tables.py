@@ -758,6 +758,8 @@ class PaperPositionTable:
             "dte_at_entry", "dte_bucket", "entry_delta", "entry_iv",
             "entry_theta", "gate_margin", "theta_adj_ev",
             "thesis_tp1_pct", "thesis_sl_pct", "thesis_time_exit_dte",
+            "entry_rv20", "exit_delta", "exit_iv", "exit_theta",
+            "exit_underlying_price", "realized_vol_holding",
         ]
         for field in enrichment_fields:
             val = getattr(position, field, None)

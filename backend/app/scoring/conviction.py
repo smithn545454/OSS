@@ -24,8 +24,9 @@ DEFAULT_WEIGHTS = {
 }
 
 # Theta-adjusted EV is per-contract dollars over a 5-day hold.
-# $15 maps a strong EV to 100%.
-DEFAULT_EV_BENCHMARK = 15.0
+# Volatility-edge formula: |θ| × T × ((RV/IV)² − 1) × 100.
+# $30 maps a strong vol-edge EV to 100%.
+DEFAULT_EV_BENCHMARK = 30.0
 
 # Return% benchmark: 20% return on contract cost maps to a normalized score of 100.
 # Cheap options with high return% score comparably to expensive options with high absolute EV.

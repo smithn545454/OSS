@@ -35,6 +35,47 @@ from app.services.polygon import PolygonClient
 logger = logging.getLogger(__name__)
 
 
+async def _compute_exit_enrichment(position: PaperPosition) -> dict[str, Any]:
+    """Compute exit-time Greeks and realized vol from daily snapshots.
+
+    Pulls the most recent snapshot for exit Greeks and computes realized
+    volatility from underlying prices over the holding period. Returns a
+    dict of enrichment fields (only non-None values).
+    """
+    enrichment: dict[str, Any] = {}
+    try:
+        snapshots = await PaperSnapshotTable.list_by_position(position.position_id)
+        if not snapshots:
+            return enrichment
+
+        # Most recent snapshot has exit Greeks (list is most-recent-first)
+        latest = snapshots[0]
+        if latest.get("delta") is not None:
+            enrichment["exit_delta"] = latest["delta"]
+        if latest.get("iv") is not None:
+            enrichment["exit_iv"] = latest["iv"]
+        if latest.get("theta") is not None:
+            enrichment["exit_theta"] = latest["theta"]
+        if latest.get("underlying_price") is not None:
+            enrichment["exit_underlying_price"] = latest["underlying_price"]
+
+        # Compute realized vol from underlying prices during hold
+        underlying_prices = [
+            s["underlying_price"]
+            for s in reversed(snapshots)  # chronological order for RV calc
+            if s.get("underlying_price") is not None
+        ]
+        if len(underlying_prices) >= 3:
+            from app.scanners.utils import calculate_rv
+            enrichment["realized_vol_holding"] = calculate_rv(
+                underlying_prices, window=len(underlying_prices) - 1
+            )
+    except Exception as e:
+        logger.warning(f"Failed to compute exit enrichment: {e}")
+
+    return enrichment
+
+
 async def create_position_from_evaluation(
     evaluation: Evaluation,
     decision: Decision,
@@ -151,20 +192,6 @@ async def create_position_from_evaluation(
         entry_volume=getattr(evaluation, "volume", None),
     )
 
-    # Compute theta_adj_ev from evaluation fields (always available)
-    try:
-        from app.api.routes.evaluations import calculate_theta_adjusted_ev
-        position.theta_adj_ev = calculate_theta_adjusted_ev(
-            delta=evaluation.delta or 0,
-            theta=evaluation.theta or 0,
-            mid=evaluation.mid or 0,
-            iv=evaluation.iv or 0,
-            underlying_price=evaluation.underlying_price or 0,
-            dte=evaluation.dte or 0,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to compute theta_adj_ev: {e}")
-
     # Load volatility features for position enrichment and rule matching
     vol_features: dict[str, float] = {}
     try:
@@ -176,17 +203,29 @@ async def create_position_from_evaluation(
             if fv.feature_name in (
                 "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
                 "days_to_earnings", "atr14_pct", "rs_20d",
-                "feasibility_ratio",
+                "feasibility_ratio", "rv20",
             ):
                 if fv.value is not None:
                     vol_features[fv.feature_name] = fv.value
     except Exception as e:
         logger.warning(f"Failed to load features for position enrichment: {e}")
 
+    # Compute theta_adj_ev using volatility-edge formula
+    try:
+        from app.api.routes.evaluations import calculate_theta_adjusted_ev
+        position.theta_adj_ev = calculate_theta_adjusted_ev(
+            theta=evaluation.theta or 0,
+            iv=evaluation.iv or 0,
+            rv20=vol_features.get("rv20"),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to compute theta_adj_ev: {e}")
+
     # Enrich position with features (for Pattern Discovery AI)
     position.entry_iv_percentile = vol_features.get("iv_percentile")
     position.entry_iv_rv_ratio = vol_features.get("iv_rv_ratio")
     position.entry_theta_adjusted_edge = vol_features.get("theta_adjusted_edge")
+    position.entry_rv20 = vol_features.get("rv20")
     dte_val = vol_features.get("days_to_earnings")
     position.entry_days_to_earnings = (
         int(dte_val) if dte_val is not None else None
@@ -364,6 +403,11 @@ async def update_position(
         # Apply MFE/MAE updates to position before close so they're persisted
         position.max_favorable_excursion = new_mfe
         position.max_adverse_excursion = new_mae
+
+        # Enrich with exit-time Greeks and realized vol
+        exit_data = await _compute_exit_enrichment(position)
+        for key, val in exit_data.items():
+            setattr(position, key, val)
 
         # Close the position
         closed_position = await PaperPositionTable.close(
@@ -733,7 +777,12 @@ async def close_position_manually(
     
     # Use provided price or current price
     final_exit_price = exit_price if exit_price is not None else position.current_price
-    
+
+    # Enrich with exit-time Greeks and realized vol
+    exit_data = await _compute_exit_enrichment(position)
+    for key, val in exit_data.items():
+        setattr(position, key, val)
+
     closed = await PaperPositionTable.close(
         position=position,
         exit_price=final_exit_price,

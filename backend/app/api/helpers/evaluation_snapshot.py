@@ -245,13 +245,13 @@ async def build_evaluation_snapshot_data(
     # Compute theta-adjusted EV
     from app.api.routes.evaluations import calculate_theta_adjusted_ev
 
+    rv20_feat = features_dict.get("rv20")
+    rv20_val = rv20_feat.get("value") if rv20_feat else None
+
     theta_adjusted_ev = calculate_theta_adjusted_ev(
-        delta=evaluation.get("delta", 0),
         theta=evaluation.get("theta", 0),
-        mid=evaluation.get("mid", 0),
         iv=evaluation.get("iv", 0),
-        underlying_price=evaluation.get("underlying_price", 0),
-        dte=evaluation.get("dte", 30),
+        rv20=rv20_val,
     )
 
     return {
