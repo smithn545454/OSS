@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 import httpx
@@ -181,21 +181,7 @@ class FinnhubClient:
         today = date.today()
         # Look ahead 90 days to catch next earnings
         from_date = today
-        month_offset = today.month + 3 if today.month <= 9 else today.month - 9
-        to_date = date(today.year, month_offset, today.day)
-
-        try:
-            # Adjust for month overflow
-            if today.month > 9:
-                to_date = date(today.year + 1, today.month - 9, min(today.day, 28))
-            else:
-                to_date = date(today.year, today.month + 3, min(today.day, 28))
-        except ValueError:
-            # Handle edge cases with date math
-            if today.month > 9:
-                to_date = date(today.year, 12, 28)
-            else:
-                to_date = date(today.year, today.month + 3, 28)
+        to_date = today + timedelta(days=90)
 
         earnings = await self.get_earnings_calendar(symbol, from_date, to_date)
 
