@@ -16,7 +16,7 @@ import { ScannerBadge } from './ScannerBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { OptionTypeBadge } from './OptionTypeBadge'
 
-type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'ev' | 'returnPct' | 'time'
+type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'delta' | 'moneyness' | 'ev' | 'returnPct' | 'time'
 type SortDirection = 'asc' | 'desc'
 
 interface AllApprovesTableProps {
@@ -174,6 +174,14 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
           aVal = a.mid ?? 0
           bVal = b.mid ?? 0
           break
+        case 'delta':
+          aVal = Math.abs(a.delta ?? 0)
+          bVal = Math.abs(b.delta ?? 0)
+          break
+        case 'moneyness':
+          aVal = a.moneyness_pct ?? 0
+          bVal = b.moneyness_pct ?? 0
+          break
         case 'ev':
           aVal = a.thetaAdjustedEV ?? 0
           bVal = b.thetaAdjustedEV ?? 0
@@ -304,9 +312,25 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 currentDirection={sortDirection}
                 onSort={handleSort}
               />
-              <SortableHeader 
-                label="Conviction" 
+              <SortableHeader
+                label="Conviction"
                 field="conviction"
+                currentSort={sortField}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+                align="right"
+              />
+              <SortableHeader
+                label="Delta"
+                field="delta"
+                currentSort={sortField}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+                align="right"
+              />
+              <SortableHeader
+                label="OTM %"
+                field="moneyness"
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
@@ -447,6 +471,26 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <ConvictionGauge score={evaluation.convictionScore ?? 0} size="mini" />
                   </div>
+                </td>
+                <td style={{
+                  padding: '12px 16px',
+                  textAlign: 'right',
+                  fontFamily: 'var(--font-primary)',
+                  fontSize: '13px',
+                  color: 'var(--text-secondary)',
+                }}>
+                  {Math.abs(evaluation.delta ?? 0).toFixed(2)}
+                </td>
+                <td style={{
+                  padding: '12px 16px',
+                  textAlign: 'right',
+                  fontFamily: 'var(--font-primary)',
+                  fontSize: '13px',
+                  color: (evaluation.moneyness_pct ?? 0) > 0 ? 'var(--text-secondary)' : 'var(--color-warning-text)',
+                }}>
+                  {(evaluation.moneyness_pct ?? 0) > 0
+                    ? `${(evaluation.moneyness_pct ?? 0).toFixed(1)}%`
+                    : (evaluation.moneyness_pct ?? 0) === 0 ? 'ATM' : 'ITM'}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

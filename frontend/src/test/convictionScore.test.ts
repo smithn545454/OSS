@@ -1,22 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import {
-  normalizeEV,
-  normalizeReturnPct,
-  calculateCompositePillar,
-  calculateConvictionScore,
   enhanceWithConvictionScores,
+  filterByOpportunityFilters,
   sortByConviction,
   filterByConvictionThreshold,
   getConvictionColorClass,
   getConvictionColor,
   formatContractId,
   determineUrgency,
-  DEFAULT_WEIGHTS,
-  DEFAULT_EV_BENCHMARK,
-  DEFAULT_RETURN_PCT_BENCHMARK,
+  calculateFreshnessDecay,
   CHEAP_UV_PREMIUM_THRESHOLD,
+  FRESHNESS_GRACE_HOURS,
+  FRESHNESS_MIN_DECAY,
 } from '../lib/convictionScore'
-import type { ApproveEvaluation, ScannerType, UrgencyLevel } from '../lib/types'
+import type { ApproveEvaluation, OpportunityFilters, ScannerType, UrgencyLevel } from '../lib/types'
 
 // ---------------------------------------------------------------------------
 // Helper: builds a minimal ApproveEvaluation with overrides
@@ -87,154 +84,169 @@ function makeEval(overrides: Partial<ApproveEvaluation> = {}): ApproveEvaluation
 }
 
 // ===========================================================================
-// normalizeEV
-// ===========================================================================
-describe('normalizeEV', () => {
-  it('returns 0 for negative EV', () => {
-    expect(normalizeEV(-100)).toBe(0)
-  })
-
-  it('returns 0 for zero EV', () => {
-    expect(normalizeEV(0)).toBe(0)
-  })
-
-  it('linearly scales positive EV up to benchmark', () => {
-    expect(normalizeEV(7.5)).toBe(50) // 7.5/15 * 100
-  })
-
-  it('caps at 100 when EV exceeds benchmark', () => {
-    expect(normalizeEV(30)).toBe(100)
-  })
-})
-
-// ===========================================================================
-// normalizeReturnPct
-// ===========================================================================
-describe('normalizeReturnPct', () => {
-  it('returns 0 for zero mid', () => {
-    expect(normalizeReturnPct(10, 0)).toBe(0)
-  })
-
-  it('returns 0 for negative EV', () => {
-    expect(normalizeReturnPct(-5, 1)).toBe(0)
-  })
-
-  it('returns 100 for 20% return at default benchmark', () => {
-    expect(normalizeReturnPct(20, 1)).toBe(100)
-  })
-
-  it('caps at 100 for high return', () => {
-    expect(normalizeReturnPct(40, 1)).toBe(100)
-  })
-})
-
-// ===========================================================================
-// calculateCompositePillar
-// ===========================================================================
-describe('calculateCompositePillar', () => {
-  it('averages all three pillars', () => {
-    expect(calculateCompositePillar({
-      DIRECTIONAL: 60, VOLATILITY: 80, STRUCTURE: 100,
-    })).toBe(80)
-  })
-
-  it('returns 0 when all pillars missing', () => {
-    expect(calculateCompositePillar({})).toBe(0)
-  })
-})
-
-// ===========================================================================
-// calculateConvictionScore (3-component)
-// ===========================================================================
-describe('calculateConvictionScore', () => {
-  it('calculates with 3 components only', () => {
-    const evaluation = makeEval({
-      thetaAdjustedEV: 15, // normalized = 100
-      mid: 1.0,            // return% = 15% → normalized 75
-      pillarScores: { DIRECTIONAL: 80, VOLATILITY: 80, STRUCTURE: 80 }, // avg = 80
-    })
-    const result = calculateConvictionScore(evaluation)
-
-    // EV: 100 * 0.35 = 35
-    // Return%: 75 * 0.30 = 22.5
-    // Pillar: 80 * 0.35 = 28
-    // Total: 85.5
-    expect(result.total).toBe(85.5)
-  })
-
-  it('only has 3 components in breakdown', () => {
-    const result = calculateConvictionScore(makeEval())
-    expect(Object.keys(result.components)).toEqual([
-      'thetaAdjustedEv', 'returnPct', 'compositePillar'
-    ])
-  })
-
-  it('gate margin does not affect score', () => {
-    const evalA = makeEval({ gateMargin: 10 })
-    const evalB = makeEval({ gateMargin: 90 })
-    const a = calculateConvictionScore(evalA)
-    const b = calculateConvictionScore(evalB)
-    expect(a.total).toBe(b.total)
-  })
-
-  it('scanner convergence does not affect score', () => {
-    const evalA = makeEval({ scannerConvergence: 1 })
-    const evalB = makeEval({ scannerConvergence: 4 })
-    const a = calculateConvictionScore(evalA)
-    const b = calculateConvictionScore(evalB)
-    expect(a.total).toBe(b.total)
-  })
-
-  it('handles null inputs safely', () => {
-    const evaluation = makeEval({
-      thetaAdjustedEV: undefined as unknown as number,
-      pillarScores: undefined as unknown as Record<string, number>,
-      mid: undefined as unknown as number,
-    })
-    const result = calculateConvictionScore(evaluation)
-    expect(result.total).toBe(0)
-  })
-
-  it('max score is 100 with all components maxed', () => {
-    const evaluation = makeEval({
-      thetaAdjustedEV: 100, // EV capped at 100
-      mid: 0.01,            // Huge return% capped at 100
-      pillarScores: { DIRECTIONAL: 100, VOLATILITY: 100, STRUCTURE: 100 },
-    })
-    const result = calculateConvictionScore(evaluation)
-    expect(result.total).toBe(100)
-  })
-
-  it('supports custom weights', () => {
-    const evaluation = makeEval({
-      thetaAdjustedEV: 15,
-      pillarScores: { DIRECTIONAL: 0, VOLATILITY: 0, STRUCTURE: 0 },
-      mid: 0,
-    })
-    const weights = { thetaAdjustedEv: 1.0, returnPct: 0, compositePillar: 0 }
-    const result = calculateConvictionScore(evaluation, weights)
-    expect(result.total).toBe(100)
-  })
-})
-
-// ===========================================================================
-// enhanceWithConvictionScores
+// enhanceWithConvictionScores — uses pipeline final_score + decay
 // ===========================================================================
 describe('enhanceWithConvictionScores', () => {
-  it('adds convictionScore and convictionBreakdown', () => {
-    // Use a recent evaluated_at so decay doesn't alter the score
-    const recentEval = makeEval({ evaluated_at: new Date().toISOString() })
+  it('uses decision.final_score as the base score', () => {
+    const recentEval = makeEval({
+      evaluated_at: new Date().toISOString(),
+      decision: { ...makeEval().decision, final_score: 82 },
+    })
     const enhanced = enhanceWithConvictionScores([recentEval])
-    expect(enhanced[0].convictionScore).toBeDefined()
-    expect(enhanced[0].convictionBreakdown).toBeDefined()
-    // Fresh eval (within grace period) has no decay
-    expect(enhanced[0].convictionBreakdown!.total).toBe(enhanced[0].convictionScore)
+    // Fresh eval (within grace period) should equal final_score
+    expect(enhanced[0].convictionScore).toBe(82)
+  })
+
+  it('applies freshness decay to final_score', () => {
+    const staleDate = new Date(Date.now() - 20 * 3600 * 1000).toISOString() // 20h old
+    const staleEval = makeEval({
+      evaluated_at: staleDate,
+      decision: { ...makeEval().decision, final_score: 80 },
+    })
+    const enhanced = enhanceWithConvictionScores([staleEval])
+    // 20h old = 12h past grace period = 50% decay → 80 * 0.5 = 40
+    expect(enhanced[0].convictionScore).toBeLessThan(80)
+    expect(enhanced[0].convictionScore).toBeGreaterThan(0)
   })
 
   it('does not mutate original evaluations', () => {
     const original = makeEval()
     enhanceWithConvictionScores([original])
     expect(original.convictionScore).toBeUndefined()
+  })
+
+  it('handles missing decision gracefully', () => {
+    const noDecision = makeEval({
+      evaluated_at: new Date().toISOString(),
+      decision: undefined as unknown as ApproveEvaluation['decision'],
+    })
+    const enhanced = enhanceWithConvictionScores([noDecision])
+    expect(enhanced[0].convictionScore).toBe(0)
+  })
+})
+
+// ===========================================================================
+// calculateFreshnessDecay
+// ===========================================================================
+describe('calculateFreshnessDecay', () => {
+  it('returns 1.0 within grace period', () => {
+    const now = new Date()
+    const recent = new Date(now.getTime() - 4 * 3600 * 1000).toISOString() // 4h ago
+    expect(calculateFreshnessDecay(recent, now)).toBe(1.0)
+  })
+
+  it('decays after grace period', () => {
+    const now = new Date()
+    const old = new Date(now.getTime() - 12 * 3600 * 1000).toISOString() // 12h ago = 4h past grace
+    const decay = calculateFreshnessDecay(old, now)
+    expect(decay).toBeLessThan(1.0)
+    expect(decay).toBeGreaterThan(FRESHNESS_MIN_DECAY)
+  })
+
+  it('floors at minimum decay', () => {
+    const now = new Date()
+    const veryOld = new Date(now.getTime() - 48 * 3600 * 1000).toISOString()
+    expect(calculateFreshnessDecay(veryOld, now)).toBe(FRESHNESS_MIN_DECAY)
+  })
+})
+
+// ===========================================================================
+// filterByOpportunityFilters
+// ===========================================================================
+describe('filterByOpportunityFilters', () => {
+  const noFilters: OpportunityFilters = {
+    premiumMax: null, premiumMin: null,
+    deltaMax: null, deltaMin: null,
+    moneyness: 'all',
+  }
+
+  it('returns all evaluations with no filters', () => {
+    const evals = [makeEval(), makeEval()]
+    expect(filterByOpportunityFilters(evals, noFilters)).toHaveLength(2)
+  })
+
+  it('filters by premium max', () => {
+    const evals = [
+      makeEval({ mid: 0.50 }),
+      makeEval({ mid: 5.25 }),
+      makeEval({ mid: 1.00 }),
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, premiumMax: 2.0 })
+    expect(result).toHaveLength(2)
+    expect(result.map(e => e.mid)).toEqual([0.50, 1.00])
+  })
+
+  it('filters by premium min', () => {
+    const evals = [
+      makeEval({ mid: 0.50 }),
+      makeEval({ mid: 5.25 }),
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, premiumMin: 1.0 })
+    expect(result).toHaveLength(1)
+  })
+
+  it('filters by delta max (uses absolute value)', () => {
+    const evals = [
+      makeEval({ delta: 0.15 }),
+      makeEval({ delta: -0.45 }),
+      makeEval({ delta: 0.25 }),
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, deltaMax: 0.30 })
+    expect(result).toHaveLength(2)
+  })
+
+  it('filters by delta min', () => {
+    const evals = [
+      makeEval({ delta: 0.10 }),
+      makeEval({ delta: 0.45 }),
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, deltaMin: 0.20 })
+    expect(result).toHaveLength(1)
+  })
+
+  it('filters by OTM moneyness', () => {
+    const evals = [
+      makeEval({ moneyness_pct: 5.0 }),   // OTM
+      makeEval({ moneyness_pct: -3.0 }),  // ITM
+      makeEval({ moneyness_pct: 1.0 }),   // OTM
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, moneyness: 'otm' })
+    expect(result).toHaveLength(2)
+  })
+
+  it('filters by ATM moneyness (within 3%)', () => {
+    const evals = [
+      makeEval({ moneyness_pct: 1.0 }),
+      makeEval({ moneyness_pct: 5.0 }),
+      makeEval({ moneyness_pct: -1.5 }),
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, moneyness: 'atm' })
+    expect(result).toHaveLength(2) // 1.0 and -1.5 are within 3%
+  })
+
+  it('filters by ITM moneyness', () => {
+    const evals = [
+      makeEval({ moneyness_pct: 5.0 }),   // OTM
+      makeEval({ moneyness_pct: -3.0 }),  // ITM
+    ]
+    const result = filterByOpportunityFilters(evals, { ...noFilters, moneyness: 'itm' })
+    expect(result).toHaveLength(1)
+  })
+
+  it('combines multiple filters', () => {
+    const evals = [
+      makeEval({ mid: 0.50, delta: 0.15, moneyness_pct: 8.0 }),  // cheap OTM low delta
+      makeEval({ mid: 5.25, delta: 0.45, moneyness_pct: -1.0 }), // expensive ITM high delta
+      makeEval({ mid: 1.00, delta: 0.20, moneyness_pct: 3.5 }),  // cheap OTM low delta
+    ]
+    const result = filterByOpportunityFilters(evals, {
+      premiumMax: 2.0,
+      premiumMin: null,
+      deltaMax: 0.30,
+      deltaMin: null,
+      moneyness: 'otm',
+    })
+    expect(result).toHaveLength(2) // first and third
   })
 })
 
@@ -258,20 +270,20 @@ describe('sortByConviction', () => {
 // filterByConvictionThreshold
 // ===========================================================================
 describe('filterByConvictionThreshold', () => {
-  it('filters by default threshold (70)', () => {
+  it('filters by default threshold (65)', () => {
     const evals = [
       makeEval({ convictionScore: 80 }),
+      makeEval({ convictionScore: 60 }),
       makeEval({ convictionScore: 65 }),
-      makeEval({ convictionScore: 70 }),
     ]
     const filtered = filterByConvictionThreshold(evals)
     expect(filtered).toHaveLength(2)
-    expect(filtered.map(e => e.convictionScore)).toEqual([80, 70])
+    expect(filtered.map(e => e.convictionScore)).toEqual([80, 65])
   })
 })
 
 // ===========================================================================
-// getConvictionColorClass — thresholds adjusted to 70/85
+// getConvictionColorClass
 // ===========================================================================
 describe('getConvictionColorClass', () => {
   it('returns conviction-high for >= 85', () => {
@@ -312,24 +324,6 @@ describe('determineUrgency', () => {
   it('returns patient for other scanners', () => {
     expect(determineUrgency(['COMPRESSION_EXPANSION'])).toBe('patient')
     expect(determineUrgency([])).toBe('patient')
-  })
-})
-
-// ===========================================================================
-// DEFAULT_WEIGHTS contract
-// ===========================================================================
-describe('DEFAULT_WEIGHTS', () => {
-  it('sum to 1.0', () => {
-    const sum = DEFAULT_WEIGHTS.thetaAdjustedEv
-      + DEFAULT_WEIGHTS.returnPct
-      + DEFAULT_WEIGHTS.compositePillar
-    expect(sum).toBeCloseTo(1.0)
-  })
-
-  it('has expected values', () => {
-    expect(DEFAULT_WEIGHTS.thetaAdjustedEv).toBe(0.35)
-    expect(DEFAULT_WEIGHTS.returnPct).toBe(0.30)
-    expect(DEFAULT_WEIGHTS.compositePillar).toBe(0.35)
   })
 })
 

@@ -287,6 +287,9 @@ function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation;
   const deltaColor = priceDelta >= 0 ? '#FF4D6A' : '#00E676'
   const deltaSign = priceDelta >= 0 ? '+' : ''
 
+  const absDelta = Math.abs(evaluation.delta ?? 0)
+  const moneynessPct = evaluation.moneyness_pct ?? 0
+
   const labelStyle: React.CSSProperties = {
     fontSize: '9px',
     color: '#4A5168',
@@ -338,10 +341,21 @@ function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation;
         )}
       </div>
 
-      {/* θ-Adj EV */}
+      {/* Delta */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-        <span style={labelStyle}>θ-ADJ EV</span>
-        <span style={valueStyle}>${thetaAdjEV.toFixed(0)}</span>
+        <span style={labelStyle}>DELTA</span>
+        <span style={valueStyle}>{absDelta.toFixed(2)}</span>
+      </div>
+
+      {/* OTM % */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <span style={labelStyle}>OTM %</span>
+        <span style={{
+          ...valueStyle,
+          color: moneynessPct > 0 ? '#8892A5' : '#FFB800',
+        }}>
+          {moneynessPct > 0 ? `${moneynessPct.toFixed(1)}%` : moneynessPct === 0 ? 'ATM' : 'ITM'}
+        </span>
       </div>
 
       {/* Return */}

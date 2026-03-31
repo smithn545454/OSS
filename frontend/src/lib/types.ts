@@ -988,30 +988,14 @@ export interface MarketContext {
 }
 
 /**
- * Conviction score breakdown (spec section 4).
+ * Opportunity filters for premium, delta, and moneyness.
  */
-export interface ConvictionScoreBreakdown {
-  total: number
-  components: {
-    thetaAdjustedEv: ComponentScore
-    returnPct: ComponentScore
-    compositePillar: ComponentScore
-  }
-}
-
-export interface ComponentScore {
-  raw: number
-  normalized: number
-  weighted: number
-}
-
-/**
- * Conviction scoring weights (spec section 4.1).
- */
-export interface ConvictionScoreWeights {
-  thetaAdjustedEv: number  // Default 35%
-  returnPct: number        // Default 30%
-  compositePillar: number  // Default 35%
+export interface OpportunityFilters {
+  premiumMax: number | null
+  premiumMin: number | null
+  deltaMax: number | null
+  deltaMin: number | null
+  moneyness: 'all' | 'otm' | 'atm' | 'itm'
 }
 
 /**
@@ -1030,7 +1014,6 @@ export interface ApproveEvaluation extends Evaluation {
   approvalCount?: number
   // Computed client-side
   convictionScore?: number
-  convictionBreakdown?: ConvictionScoreBreakdown
   alertedAt?: string
   // Setup rule matches (from backend)
   matchedRules?: MatchedRule[]
@@ -1131,8 +1114,6 @@ export interface WatchInsightsResponse {
  */
 export interface OpportunitiesConfig {
   scoring: {
-    weights: ConvictionScoreWeights
-    evBenchmark: number
     holdingPeriodMomentum: number
     holdingPeriodStructural: number
   }
