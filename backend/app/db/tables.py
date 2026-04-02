@@ -279,6 +279,28 @@ class EvaluationTable:
         return items
 
     @staticmethod
+    async def list_by_ticker_since(
+        ticker: str, since_iso: str, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """List all evaluations for a ticker since a given timestamp (any verdict).
+
+        Queries by PK=EVAL#{ticker} with SK >= since_iso. Returns evaluations
+        sorted newest-first across all verdicts, used to detect superseded APPROVEs.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            EvaluationTable.TABLE,
+            f"EVAL#{ticker}",
+            sk_condition={"gte": since_iso},
+            limit=limit,
+            scan_forward=False,
+        )
+        for item in items:
+            for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+                item.pop(key, None)
+        return items
+
+    @staticmethod
     async def expire_stale_pending(cutoff_iso: str) -> int:
         """Mark PENDING evaluations older than cutoff as EXPIRED.
 

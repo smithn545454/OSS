@@ -141,14 +141,63 @@ class ContractSelector:
         if as_of_date is not None:
             self._as_of_date = as_of_date
 
+    def _dte_bucket_for(self, dte: int) -> Optional[DTEBucket]:
+        """Determine the DTE bucket for a given DTE value."""
+        for bucket in DTEBucket:
+            bucket_range = self._get_bucket_range(bucket)
+            if bucket_range and bucket_range[0] <= dte <= bucket_range[1]:
+                return bucket
+        return None
+
+    def _force_include_from_chain(
+        self,
+        ticker: str,
+        underlying_price: float,
+        chain: list[dict[str, Any]],
+        force_tickers: set[str],
+        already_selected: set[str],
+    ) -> list[ContractCandidate]:
+        """Find force-include contracts in the chain and build candidates.
+
+        These are contracts with existing APPROVE evaluations that must be
+        re-evaluated with fresh prices even if they wouldn't normally be
+        selected by the ranking pipeline.
+        """
+        today = datetime.now(timezone.utc)
+        forced: list[ContractCandidate] = []
+        for contract_data in chain:
+            option_ticker = contract_data.get("details", {}).get("ticker", "")
+            if option_ticker not in force_tickers or option_ticker in already_selected:
+                continue
+            candidate = self._parse_contract(
+                contract_data, ticker, underlying_price, today
+            )
+            if candidate is None:
+                continue
+            bucket = self._dte_bucket_for(candidate.dte)
+            if bucket is None:
+                continue
+            candidate = ContractCandidate(**{**candidate.__dict__, "dte_bucket": bucket})
+            forced.append(candidate)
+            logger.info(
+                f"[SELECT] {ticker}: force-included {option_ticker} "
+                f"(mid=${candidate.mid:.2f}, dte={candidate.dte})"
+            )
+        return forced
+
     async def select_contracts(
         self,
         opportunities: list[Opportunity],
+        force_include_contracts: Optional[set[str]] = None,
     ) -> SelectionResult:
         """Select contracts for all opportunities.
 
         Args:
             opportunities: List of filtered opportunities from Stage 2
+            force_include_contracts: Optional set of option_ticker symbols to
+                force-include in the output (for re-evaluating existing APPROVEs
+                with fresh prices). These are looked up in the already-fetched
+                options chain — no extra API calls.
 
         Returns:
             SelectionResult with selected candidates and telemetry
@@ -242,6 +291,20 @@ class ContractSelector:
                 )
 
                 ticker_candidates.extend(candidates)
+
+                # Force-include existing APPROVE contracts not already selected
+                if force_include_contracts:
+                    selected_tickers = {c.option_ticker for c in ticker_candidates}
+                    force_for_ticker = {
+                        ot for ot in force_include_contracts
+                        if ot.startswith(f"O:{ticker}") and ot not in selected_tickers
+                    }
+                    if force_for_ticker:
+                        forced = self._force_include_from_chain(
+                            ticker, underlying_price, chain,
+                            force_for_ticker, selected_tickers,
+                        )
+                        ticker_candidates.extend(forced)
 
             except Exception as e:
                 error_msg = f"Error selecting contracts for {ticker}: {e}"

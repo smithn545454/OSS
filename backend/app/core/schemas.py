@@ -32,6 +32,7 @@ class ScannerType(str, Enum):
     BREAKDOWN = "BREAKDOWN"
     COMPRESSION_EXPANSION = "COMPRESSION_EXPANSION"
     CHEAP_OPTIONS = "CHEAP_OPTIONS"
+    REVALIDATION = "REVALIDATION"
 
 
 class DirectionHint(str, Enum):

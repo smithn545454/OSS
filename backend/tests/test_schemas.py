@@ -80,6 +80,7 @@ class TestEnumStability:
             ScannerType.BREAKDOWN,
             ScannerType.COMPRESSION_EXPANSION,
             ScannerType.CHEAP_OPTIONS,
+            ScannerType.REVALIDATION,
         }
 
     def test_direction_hint_members(self):

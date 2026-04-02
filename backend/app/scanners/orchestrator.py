@@ -35,12 +35,14 @@ from typing import TYPE_CHECKING, Any, Optional, Sequence
 from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
     Decision,
+    DirectionHint,
     Evaluation,
     Opportunity,
     PipelineStage,
     Policy,
     PolicyConfig,
     ScannerTrigger,
+    ScannerType,
     TradeThesis,
 )
 from app.core.watchlist import WatchlistManager
@@ -393,6 +395,66 @@ class ScannerOrchestrator:
             self._merger.set_timestamp(timestamp)
             opportunities = self._merger.merge(all_results)
 
+            # ----------------------------------------------------------
+            # Re-inject tickers with recent APPROVEs that scanners missed
+            # ----------------------------------------------------------
+            force_include_contracts: set[str] = set()
+            if run_full_pipeline:
+                try:
+                    cutoff = (
+                        datetime.now(timezone.utc) - timedelta(hours=8)
+                    ).isoformat()
+                    recent_approves = await EvaluationTable.list_by_verdict_since(
+                        "APPROVE", cutoff, limit=200
+                    )
+                    scanner_tickers = {o.underlying_ticker for o in opportunities}
+
+                    # Collect force-include option_tickers
+                    for item in recent_approves:
+                        ot = item.get("option_ticker", "")
+                        if ot:
+                            force_include_contracts.add(ot)
+
+                    # Create synthetic opportunities for missing tickers
+                    approve_tickers: dict[str, str] = {}
+                    for item in recent_approves:
+                        t = item.get("underlying_ticker", "")
+                        if t and t not in scanner_tickers and t not in approve_tickers:
+                            approve_tickers[t] = item.get("option_type", "NONE")
+
+                    revalidation_count = 0
+                    for ticker, opt_type in approve_tickers.items():
+                        direction = DirectionHint.NONE
+                        if opt_type == "CALL":
+                            direction = DirectionHint.CALL
+                        elif opt_type == "PUT":
+                            direction = DirectionHint.PUT
+
+                        opp = Opportunity(
+                            underlying_ticker=ticker,
+                            timestamp_utc=timestamp,
+                            scanner_triggers=[
+                                ScannerTrigger(
+                                    scanner_type=ScannerType.REVALIDATION,
+                                    reason_codes=["APPROVE_REVALIDATION"],
+                                    metrics={},
+                                    triggered_at=timestamp,
+                                )
+                            ],
+                            direction_hint=direction,
+                            priority_score=50,
+                        )
+                        opportunities.append(opp)
+                        revalidation_count += 1
+
+                    if revalidation_count > 0:
+                        logger.info(
+                            f"Re-injected {revalidation_count} APPROVE tickers for revalidation, "
+                            f"{len(force_include_contracts)} contracts force-included"
+                        )
+                except Exception as e:
+                    logger.warning(f"APPROVE revalidation lookup failed (non-fatal): {e}")
+
             # Get merge stats
             merge_stats = self._merger.get_merge_stats(all_results, opportunities)
 
@@ -508,7 +570,8 @@ class ScannerOrchestrator:
                             contract_selector.set_polygon_client(polygon)
 
                         selection_result = await contract_selector.select_contracts(
-                            filtered_opportunities
+                            filtered_opportunities,
+                            force_include_contracts=force_include_contracts or None,
                         )
 
                         # Build evaluations from selected candidates
