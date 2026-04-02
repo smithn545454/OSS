@@ -810,48 +810,18 @@ async def list_approve_evaluations(
     items = unique_items
 
     # ------------------------------------------------------------------
-    # 2. Pre-fetch opportunities + all evaluations for supersede check
+    # 2. Pre-fetch opportunities for all unique tickers (parallel)
     # ------------------------------------------------------------------
     unique_tickers = list({
         item.get("underlying_ticker", "")
         for item in items
     } - {""})
 
-    # Fetch opportunities AND all recent evaluations (any verdict) in parallel
-    opp_futures = [
+    opp_results = await asyncio.gather(*[
         _limited(OpportunityTable.list_by_ticker(t, limit=50))
         for t in unique_tickers
-    ]
-    eval_futures = [
-        _limited(EvaluationTable.list_by_ticker_since(t, cutoff_iso))
-        for t in unique_tickers
-    ]
-    all_results = await asyncio.gather(*opp_futures, *eval_futures)
-    opp_results = all_results[:len(unique_tickers)]
-    eval_results = all_results[len(unique_tickers):]
-
+    ])
     opp_by_ticker: dict[str, list[Any]] = dict(zip(unique_tickers, opp_results))
-
-    # Build map: option_ticker -> latest evaluated_at (any verdict)
-    latest_eval_time: dict[str, str] = {}
-    for ticker_evals in eval_results:
-        for ev in ticker_evals:
-            ot = ev.get("option_ticker", "")
-            et = ev.get("evaluated_at", "")
-            if ot and et > latest_eval_time.get(ot, ""):
-                latest_eval_time[ot] = et
-
-    # Suppress APPROVEs that have been superseded by a newer evaluation
-    pre_suppress = len(items)
-    items = [
-        item for item in items
-        if item.get("evaluated_at", "") >= latest_eval_time.get(
-            item.get("option_ticker", ""), ""
-        )
-    ]
-    suppressed = pre_suppress - len(items)
-    if suppressed > 0:
-        logger.info(f"Suppressed {suppressed} superseded APPROVE evaluations")
 
     def _scanner_types_for(item: dict[str, Any]) -> list[str]:
         """Resolve scanner types from pre-fetched opportunities or eval field."""

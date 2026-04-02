@@ -247,47 +247,18 @@ class TestSupersededApproves:
         }
 
     @pytest.mark.asyncio
-    async def test_superseded_approve_suppressed(self, client):
-        """An APPROVE whose contract has a newer WATCH evaluation is suppressed."""
+    async def test_approve_persists_even_with_newer_watch(self, client):
+        """An APPROVE remains visible even if a newer WATCH evaluation exists.
+
+        The revalidation pipeline re-evaluates APPROVE contracts every run.
+        If a contract oscillates between APPROVE/WATCH at gate thresholds,
+        the most recent APPROVE should persist (via dedup) rather than being
+        suppressed — otherwise the Opportunities page oscillates empty.
+        """
         old_approve = self._make_eval_item(
             evaluated_at="2026-04-02T09:00:00+00:00",
             verdict="APPROVE",
             evaluation_id="eval-old",
-        )
-        newer_watch = self._make_eval_item(
-            evaluated_at="2026-04-02T10:00:00+00:00",
-            verdict="WATCH",
-            evaluation_id="eval-new",
-        )
-
-        with (
-            patch(f"{_ROUTE}.EvaluationTable") as mock_eval,
-            patch(f"{_ROUTE}.OpportunityTable") as mock_opp,
-            patch(f"{_ROUTE}._create_catalyst_service") as mock_cat,
-            patch(f"{_ROUTE}._trading_days_cutoff", return_value="2026-04-02T00:00:00"),
-        ):
-            mock_eval.list_by_verdict_since = AsyncMock(return_value=[old_approve])
-            mock_eval.list_by_ticker_since = AsyncMock(
-                return_value=[newer_watch, old_approve]
-            )
-            mock_opp.list_by_ticker = AsyncMock(return_value=[])
-            mock_cat.return_value = None
-
-            response = await client.get("/api/evaluations/approve?exclude_earnings=false")
-
-        assert response.status_code == 200
-        data = response.json()
-        # The old APPROVE should be suppressed because a newer eval exists
-        evals = data.get("evaluations", [])
-        assert len(evals) == 0
-
-    @pytest.mark.asyncio
-    async def test_fresh_approve_not_suppressed(self, client):
-        """An APPROVE that is the latest evaluation for its contract is NOT suppressed."""
-        fresh_approve = self._make_eval_item(
-            evaluated_at="2026-04-02T10:00:00+00:00",
-            verdict="APPROVE",
-            evaluation_id="eval-fresh",
         )
 
         with (
@@ -301,8 +272,7 @@ class TestSupersededApproves:
             patch(f"{_ROUTE}._create_catalyst_service") as mock_cat,
             patch(f"{_ROUTE}._trading_days_cutoff", return_value="2026-04-02T00:00:00"),
         ):
-            mock_eval.list_by_verdict_since = AsyncMock(return_value=[fresh_approve])
-            mock_eval.list_by_ticker_since = AsyncMock(return_value=[fresh_approve])
+            mock_eval.list_by_verdict_since = AsyncMock(return_value=[old_approve])
             mock_opp.list_by_ticker = AsyncMock(return_value=[])
             mock_pillar.list_by_evaluation = AsyncMock(return_value=[])
             mock_gate.list_by_evaluation = AsyncMock(return_value=[])
@@ -316,5 +286,7 @@ class TestSupersededApproves:
         assert response.status_code == 200
         data = response.json()
         evals = data.get("evaluations", [])
+        # APPROVE should NOT be suppressed — revalidation ensures fresh
+        # prices, and suppression causes oscillation at gate thresholds
         assert len(evals) == 1
-        assert evals[0]["evaluation_id"] == "eval-fresh"
+        assert evals[0]["evaluation_id"] == "eval-old"
