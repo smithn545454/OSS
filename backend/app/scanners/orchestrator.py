@@ -1879,7 +1879,7 @@ async def _fire_slack_alerts(
                         r.get("name", "") for r in matched
                     ]
     except Exception as e:
-        logger.debug(f"Rule matching for alerts skipped: {e}")
+        logger.warning(f"Rule matching for alerts skipped: {e}")
 
     sent_count = 0
     checked_count = 0
@@ -1976,5 +1976,7 @@ async def _fire_slack_alerts(
         if success:
             sent_count += 1
 
-    if sent_count > 0:
-        logger.info(f"Sent {sent_count}/{checked_count} Slack alerts")
+    logger.info(
+        f"Slack alerts: {sent_count} sent, {checked_count} APPROVE evals checked, "
+        f"{len(evaluations)} total evals"
+    )

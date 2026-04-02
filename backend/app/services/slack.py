@@ -295,7 +295,7 @@ class SlackAlertService:
 
         # Check setup rule filter
         filter_ids = config.get("setup_rule_filter_ids", [])
-        if filter_ids and matched_rule_ids is not None:
+        if filter_ids and matched_rule_ids:
             if not any(rid in filter_ids for rid in matched_rule_ids):
                 return False, "No matching setup rules in filter"
 
@@ -518,7 +518,7 @@ class SlackAlertService:
         )
 
         if not should_send:
-            logger.debug(f"Skipping alert for {contract_id}: {reason}")
+            logger.info(f"Skipping alert for {contract_id}: {reason}")
             return False, reason
 
         is_cheap_gem = reason == "cheap_gem"
