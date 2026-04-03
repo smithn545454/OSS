@@ -1224,10 +1224,21 @@ async def rescore_evaluations(
     from app.pillars.models import ScoringContext
     from app.decision.calculator import DecisionCalculator
 
-    # Fetch evaluations evaluated before the cutoff (pre-deploy)
-    items = await EvaluationTable.list_by_verdict_since(
-        verdict, since_iso="2025-01-01T00:00:00", limit=batch_size
+    # Fetch oldest evaluations first (scan_forward=True) so stale records
+    # come before already-rescored ones. SK upper bound limits to pre-deploy.
+    from app.db.dynamodb import get_dynamodb
+    db = get_dynamodb()
+    items = await db.query(
+        EvaluationTable.TABLE,
+        f"VERDICT#{verdict}",
+        sk_condition={"between": ["2025-01-01T00:00:00", before]},
+        limit=batch_size,
+        scan_forward=True,
+        index_name="GSI1",
     )
+    for item in items:
+        for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+            item.pop(key, None)
 
     calculator = DecisionCalculator()
     rescored = 0
