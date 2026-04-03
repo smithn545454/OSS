@@ -1198,3 +1198,130 @@ async def get_watch_insights(
         "watchCount": total_watch,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.post("/rescore")
+async def rescore_evaluations(
+    verdict: str = "APPROVE",
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Re-score evaluations using current pillar logic.
+
+    Re-computes the Entry Quality (Structure) pillar and final score
+    for existing evaluations. Keeps Directional and Volatility scores
+    unchanged. Updates both PillarScore records and embedded Decisions.
+    """
+    from app.core.schemas import (
+        Decision,
+        Evaluation,
+        PillarWeights,
+    )
+    from app.pillars.structure import compute_structure_pillar
+    from app.pillars.models import ScoringContext
+    from app.decision.calculator import DecisionCalculator
+
+    # Fetch evaluations with embedded decisions
+    items = await EvaluationTable.list_by_verdict(verdict, limit=limit)
+
+    calculator = DecisionCalculator()
+    rescored = 0
+    errors = 0
+    verdict_changes: list[dict[str, Any]] = []
+
+    for item in items:
+        try:
+            decision_data = item.pop("decision", None)
+            if not decision_data:
+                continue
+
+            evaluation = Evaluation(**item)
+            old_decision = Decision(**decision_data)
+
+            # Build minimal ScoringContext for Entry Quality pillar
+            ctx = ScoringContext(
+                evaluation_id=evaluation.evaluation_id,
+                underlying_ticker=evaluation.underlying_ticker,
+                option_type=str(evaluation.option_type),
+                dte_bucket=str(evaluation.dte_bucket),
+                delta=evaluation.delta,
+                iv=evaluation.iv,
+                dte=evaluation.dte,
+            )
+
+            # Re-compute only the Structure/Entry Quality pillar
+            new_structure_result = compute_structure_pillar(ctx)
+
+            # Persist new pillar score
+            new_pillar_score = new_structure_result.to_pillar_score()
+            await PillarScoreTable.put(new_pillar_score)
+
+            # Recompute final score using existing D, V + new S
+            new_final_score = calculator.compute_final_score(
+                old_decision.directional_score,
+                old_decision.volatility_score,
+                new_structure_result.score,
+            )
+
+            # Determine new verdict
+            new_verdict, new_reason = calculator.determine_verdict(
+                new_final_score,
+                len(old_decision.failed_gates) == 0,
+            )
+
+            # Assign quality tier
+            new_tier = None
+            if str(new_verdict) == "APPROVE" or new_verdict.value == "APPROVE":
+                new_tier = calculator.assign_quality_tier(
+                    new_final_score,
+                    old_decision.directional_score,
+                    old_decision.volatility_score,
+                    new_structure_result.score,
+                    evaluation.spread_pct,
+                )
+
+            # Build new decision
+            new_decision = Decision(
+                evaluation_id=evaluation.evaluation_id,
+                verdict=new_verdict,
+                quality_tier=new_tier,
+                final_score=round(new_final_score, 2),
+                directional_score=old_decision.directional_score,
+                volatility_score=old_decision.volatility_score,
+                structure_score=round(new_structure_result.score, 2),
+                primary_reason_code=new_reason,
+                supporting_reason_codes=old_decision.supporting_reason_codes,
+                failed_gates=old_decision.failed_gates,
+                concentration_warnings=old_decision.concentration_warnings,
+                policy_version=old_decision.policy_version,
+                decided_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            # Persist updated evaluation with new decision
+            await EvaluationTable.put(evaluation, new_decision)
+            rescored += 1
+
+            # Track verdict changes
+            old_v = str(old_decision.verdict)
+            new_v = str(new_verdict.value) if hasattr(new_verdict, 'value') else str(new_verdict)
+            if old_v != new_v or abs(old_decision.final_score - new_final_score) > 0.5:
+                verdict_changes.append({
+                    "ticker": evaluation.underlying_ticker,
+                    "eval_id": evaluation.evaluation_id[:8],
+                    "old_score": old_decision.final_score,
+                    "new_score": round(new_final_score, 2),
+                    "old_structure": old_decision.structure_score,
+                    "new_structure": round(new_structure_result.score, 2),
+                    "old_verdict": old_v,
+                    "new_verdict": new_v,
+                })
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Error rescoring {item.get('evaluation_id', '?')}: {e}")
+
+    return {
+        "rescored": rescored,
+        "errors": errors,
+        "verdict_changes": len(verdict_changes),
+        "changes": verdict_changes[:50],
+    }
