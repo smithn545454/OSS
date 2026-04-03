@@ -1,13 +1,17 @@
-"""Structure Pillar Scoring (Section 14.4).
+"""Entry Quality Pillar (stored as STRUCTURE for backward compatibility).
 
-Assesses tradability, liquidity, and execution quality of the contract.
+Assesses whether the contract is positioned for asymmetric upside based on
+entry characteristics that predict trade outcomes.
 
 Subscores:
-1. Spread (30%) - Bid-ask spread tightness
-2. Open Interest (25%) - Contract liquidity depth
-3. Volume (20%) - Daily trading activity
-4. Theta Burden (15%) - Daily decay cost
-5. Liquidity Trend (10%) - OI change direction
+1. Delta/Moneyness (50%) - Far OTM = better risk/reward asymmetry
+2. Raw IV Level (25%) - Lower IV = cheaper premium = better entry
+3. DTE Appropriateness (25%) - Enough time for thesis to play out
+
+Note: This pillar replaced the original Structure & Quality pillar which
+scored liquidity metrics (spread, OI, volume). Those liquidity checks now
+exist solely as hard gates (Stage 6) where they belong — as tradability
+filters, not quality signals.
 """
 
 from __future__ import annotations
@@ -21,229 +25,128 @@ from app.core.schemas import (
 from app.pillars.models import PillarResult, ScoringContext, Subscore
 from app.pillars.utils import (
     clamp_score,
-    map_spread_score,
-    map_open_interest_score,
-    map_volume_score,
-    map_theta_burden_score,
-    map_liquidity_trend_score,
+    map_delta_moneyness_score,
+    map_raw_iv_score,
+    map_dte_appropriateness_score,
 )
 
 
-def compute_spread_subscore(ctx: ScoringContext) -> Subscore:
-    """Compute spread subscore (0-100).
-    
-    Per Section 14.4:
-    Tighter spread = better (lower execution cost).
-    
-    Mapping:
-    - <= 2%: 95
-    - 2-4%: Linear 80-95
-    - 4-6%: Linear 65-80
-    - 6-8%: Linear 50-65
-    - 8-10%: Linear 35-50
-    - > 10%: 20
-    
+def compute_delta_moneyness_subscore(ctx: ScoringContext) -> Subscore:
+    """Compute delta/moneyness subscore (0-100).
+
+    Far OTM options (low abs delta) have better risk/reward asymmetry.
+    Data shows 31pp win rate spread between best and worst quintiles:
+    - Q1 (lowest delta): 61% WR
+    - Q5 (highest delta): 30% WR
+
     Args:
-        ctx: ScoringContext with spread data
-        
+        ctx: ScoringContext with delta data
+
     Returns:
-        Spread Subscore
+        Delta/Moneyness Subscore
     """
-    spread_pct = ctx.spread_pct
-    
-    score = map_spread_score(spread_pct)
-    
+    abs_delta = abs(ctx.delta)
+
+    score = map_delta_moneyness_score(abs_delta)
+
     return Subscore(
-        name="spread",
+        name="delta_moneyness",
         raw_value={
-            "spread_pct": spread_pct,
-            "mid": ctx.mid,
+            "delta": ctx.delta,
+            "abs_delta": abs_delta,
         },
         score=clamp_score(score),
-        weight=0.30,
+        weight=0.50,
     )
 
 
-def compute_open_interest_subscore(ctx: ScoringContext) -> Subscore:
-    """Compute open interest subscore (0-100).
-    
-    Per Section 14.4:
-    Higher OI = better liquidity and easier position management.
-    
-    Mapping:
-    - >= 2000: 95
-    - 1000-2000: Linear 80-95
-    - 500-1000: Linear 65-80
-    - 300-500: Linear 50-65
-    - 200-300: Linear 35-50
-    - < 200: 20
-    
+def compute_raw_iv_subscore(ctx: ScoringContext) -> Subscore:
+    """Compute raw IV level subscore (0-100).
+
+    Lower IV = cheaper premium = better asymmetric upside.
+    Data shows correlation r=-0.062 with outcomes.
+    Combined with low delta, achieves 62% WR (n=2,518).
+
     Args:
-        ctx: ScoringContext with OI data
-        
+        ctx: ScoringContext with IV data
+
     Returns:
-        Open Interest Subscore
+        Raw IV Subscore
     """
-    open_interest = ctx.open_interest
-    
-    score = map_open_interest_score(open_interest)
-    
+    iv = ctx.iv
+
+    score = map_raw_iv_score(iv)
+
     return Subscore(
-        name="open_interest",
+        name="raw_iv",
         raw_value={
-            "open_interest": open_interest,
+            "iv": iv,
         },
         score=clamp_score(score),
         weight=0.25,
     )
 
 
-def compute_volume_subscore(ctx: ScoringContext) -> Subscore:
-    """Compute volume subscore (0-100).
-    
-    Per Section 14.4:
-    Higher daily volume = more active trading and better fills.
-    
-    Mapping:
-    - >= 500: 90
-    - 300-500: Linear 75-90
-    - 150-300: Linear 60-75
-    - 75-150: Linear 45-60
-    - 50-75: Linear 35-45
-    - < 50: 25
-    
+def compute_dte_appropriateness_subscore(ctx: ScoringContext) -> Subscore:
+    """Compute DTE appropriateness subscore (0-100).
+
+    Moderate-long DTE gives time for thesis to play out while managing
+    theta decay. Data shows low delta + high DTE = 56.4% WR.
+
     Args:
-        ctx: ScoringContext with volume data
-        
+        ctx: ScoringContext with DTE data
+
     Returns:
-        Volume Subscore
+        DTE Appropriateness Subscore
     """
-    volume = ctx.volume
-    
-    score = map_volume_score(volume)
-    
+    dte = ctx.dte
+
+    score = map_dte_appropriateness_score(dte)
+
     return Subscore(
-        name="volume",
+        name="dte_appropriateness",
         raw_value={
-            "volume": volume,
+            "dte": dte,
+            "dte_bucket": ctx.dte_bucket,
         },
         score=clamp_score(score),
-        weight=0.20,
-    )
-
-
-def compute_theta_burden_subscore(ctx: ScoringContext) -> Subscore:
-    """Compute theta burden subscore (0-100).
-    
-    Per Section 14.4:
-    Lower theta % per day = better (less daily decay cost).
-    
-    Mapping:
-    - <= 0.5%: 90
-    - 0.5-1.0%: Linear 75-90
-    - 1.0-1.5%: Linear 60-75
-    - 1.5-2.0%: Linear 45-60
-    - 2.0-3.0%: Linear 30-45
-    - > 3.0%: 20
-    
-    Args:
-        ctx: ScoringContext with theta data
-        
-    Returns:
-        Theta Burden Subscore
-    """
-    theta_pct = ctx.theta_pct
-    
-    score = map_theta_burden_score(theta_pct)
-    
-    return Subscore(
-        name="theta_burden",
-        raw_value={
-            "theta_pct": theta_pct,
-        },
-        score=clamp_score(score),
-        weight=0.15,
-    )
-
-
-def compute_liquidity_trend_subscore(ctx: ScoringContext) -> Subscore:
-    """Compute liquidity trend subscore (0-100).
-    
-    Per Section 14.4:
-    Growing OI = positive signal (more interest in contract).
-    
-    Mapping:
-    - >= +10%: 85 (growing interest)
-    - 0% to +10%: Linear 65-85
-    - -10% to 0%: Linear 50-65
-    - -20% to -10%: Linear 35-50
-    - < -20%: 25 (liquidity deteriorating)
-    
-    Args:
-        ctx: ScoringContext with OI change data
-        
-    Returns:
-        Liquidity Trend Subscore
-    """
-    oi_5d_change_pct = ctx.oi_5d_change_pct
-    
-    score = map_liquidity_trend_score(oi_5d_change_pct)
-    
-    return Subscore(
-        name="liquidity_trend",
-        raw_value={
-            "oi_5d_change_pct": oi_5d_change_pct,
-        },
-        score=clamp_score(score),
-        weight=0.10,
+        weight=0.25,
     )
 
 
 def generate_structure_tags(subscores: list[Subscore], ctx: ScoringContext) -> list[str]:
-    """Generate descriptive tags for structure pillar.
-    
-    Tags indicate notable structural conditions.
-    
+    """Generate descriptive tags for entry quality pillar.
+
+    Tags indicate notable entry quality conditions.
+
     Args:
         subscores: List of computed subscores
         ctx: ScoringContext
-        
+
     Returns:
         List of tag strings
     """
     tags = []
-    
+
     for subscore in subscores:
-        if subscore.name == "spread":
-            if subscore.score >= 85:
-                tags.append("TIGHT_SPREAD")
+        if subscore.name == "delta_moneyness":
+            if subscore.score >= 90:
+                tags.append("SWEET_SPOT_DELTA")
             elif subscore.score <= 30:
-                tags.append("WIDE_SPREAD")
-        
-        if subscore.name == "open_interest":
-            if subscore.score >= 85:
-                tags.append("HIGH_LIQUIDITY")
-            elif subscore.score <= 30:
-                tags.append("LOW_LIQUIDITY")
-        
-        if subscore.name == "volume":
+                tags.append("HIGH_DELTA")
+
+        if subscore.name == "raw_iv":
             if subscore.score >= 80:
-                tags.append("HIGH_VOLUME")
-            elif subscore.score <= 30:
-                tags.append("LOW_VOLUME")
-        
-        if subscore.name == "theta_burden":
-            if subscore.score >= 80:
-                tags.append("LOW_THETA_BURDEN")
-            elif subscore.score <= 30:
-                tags.append("HIGH_THETA_BURDEN")
-        
-        if subscore.name == "liquidity_trend":
-            if subscore.score >= 75:
-                tags.append("OI_GROWING")
+                tags.append("LOW_IV_ENTRY")
             elif subscore.score <= 35:
-                tags.append("OI_DECLINING")
-    
+                tags.append("HIGH_IV_ENTRY")
+
+        if subscore.name == "dte_appropriateness":
+            if subscore.score >= 80:
+                tags.append("GOOD_DTE")
+            elif subscore.score <= 30:
+                tags.append("SHORT_DTE")
+
     return tags
 
 
@@ -251,49 +154,43 @@ def compute_structure_pillar(
     ctx: ScoringContext,
     config: Optional[StructurePillarConfig] = None,
 ) -> PillarResult:
-    """Compute the complete Structure Pillar score.
-    
-    Combines all 5 subscores with configurable weights to produce
+    """Compute the Entry Quality Pillar score (stored as STRUCTURE).
+
+    Combines 3 subscores with configurable weights to produce
     a final score from 0-100.
-    
+
     Args:
         ctx: ScoringContext with all features
         config: Optional StructurePillarConfig (uses defaults if None)
-        
+
     Returns:
         PillarResult with score, subscores, and tags
     """
     if config is None:
         config = StructurePillarConfig()
-    
+
     # Compute all subscores
     subscores = [
-        compute_spread_subscore(ctx),
-        compute_open_interest_subscore(ctx),
-        compute_volume_subscore(ctx),
-        compute_theta_burden_subscore(ctx),
-        compute_liquidity_trend_subscore(ctx),
+        compute_delta_moneyness_subscore(ctx),
+        compute_raw_iv_subscore(ctx),
+        compute_dte_appropriateness_subscore(ctx),
     ]
-    
+
     # Update weights from config
     for subscore in subscores:
-        if subscore.name == "spread":
-            subscore.weight = config.spread_weight
-        elif subscore.name == "open_interest":
-            subscore.weight = config.open_interest_weight
-        elif subscore.name == "volume":
-            subscore.weight = config.volume_weight
-        elif subscore.name == "theta_burden":
-            subscore.weight = config.theta_burden_weight
-        elif subscore.name == "liquidity_trend":
-            subscore.weight = config.liquidity_trend_weight
-    
+        if subscore.name == "delta_moneyness":
+            subscore.weight = config.delta_moneyness_weight
+        elif subscore.name == "raw_iv":
+            subscore.weight = config.raw_iv_weight
+        elif subscore.name == "dte_appropriateness":
+            subscore.weight = config.dte_appropriateness_weight
+
     # Calculate final weighted score
     final_score = sum(s.weighted_contribution for s in subscores)
-    
+
     # Generate tags
     tags = generate_structure_tags(subscores, ctx)
-    
+
     return PillarResult(
         pillar_id=PillarId.STRUCTURE,
         evaluation_id=ctx.evaluation_id,

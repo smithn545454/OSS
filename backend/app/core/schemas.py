@@ -731,28 +731,47 @@ class VolatilityPillarConfig(OSSBaseModel):
 
 
 class StructurePillarConfig(OSSBaseModel):
-    """Structure pillar subscore weights (Section 14.4).
-    
+    """Entry Quality pillar subscore weights (stored as 'structure' for backward compat).
+
+    Scores entry characteristics that predict trade outcomes:
+    - Delta/Moneyness: far OTM = better asymmetry (strongest predictor)
+    - Raw IV Level: lower IV = cheaper premium
+    - DTE Appropriateness: enough time for thesis
+
     Weights must sum to 1.0.
     """
 
-    # Subscore weights
-    spread_weight: float = 0.30
-    open_interest_weight: float = 0.25
-    volume_weight: float = 0.20
-    theta_burden_weight: float = 0.15
-    liquidity_trend_weight: float = 0.10
+    # Entry Quality subscore weights
+    delta_moneyness_weight: float = 0.50
+    raw_iv_weight: float = 0.25
+    dte_appropriateness_weight: float = 0.25
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_old_fields(cls, data: Any) -> Any:
+        """Migrate old structure pillar fields to new entry quality fields."""
+        if isinstance(data, dict):
+            old_fields = {
+                "spread_weight", "open_interest_weight", "volume_weight",
+                "theta_burden_weight", "liquidity_trend_weight",
+            }
+            if any(f in data for f in old_fields):
+                for f in old_fields:
+                    data.pop(f, None)
+                data.setdefault("delta_moneyness_weight", 0.50)
+                data.setdefault("raw_iv_weight", 0.25)
+                data.setdefault("dte_appropriateness_weight", 0.25)
+        return data
 
     @model_validator(mode="after")
     def _subscore_weights_must_sum_to_one(self) -> "StructurePillarConfig":
         total = (
-            self.spread_weight + self.open_interest_weight
-            + self.volume_weight + self.theta_burden_weight
-            + self.liquidity_trend_weight
+            self.delta_moneyness_weight + self.raw_iv_weight
+            + self.dte_appropriateness_weight
         )
         if abs(total - 1.0) > 1e-4:
             raise ValueError(
-                f"Structure subscore weights must sum to 1.0, got {total:.6f}"
+                f"Entry Quality subscore weights must sum to 1.0, got {total:.6f}"
             )
         return self
 

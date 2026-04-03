@@ -3,9 +3,12 @@
 This module computes three pillar scores (0-100) for each evaluation:
 1. Directional Pillar - Measures likelihood of underlying moving in option's direction
 2. Volatility Pillar - Measures if option is fairly priced relative to volatility
-3. Structure Pillar - Measures tradability, liquidity, and execution quality
+3. Entry Quality Pillar - Scores entry characteristics (delta, IV, DTE) that predict outcomes
 
 Pillars never reject - they only score. Rejection is handled by hard gates (Stage 6).
+
+Note: Entry Quality is stored under PillarId.STRUCTURE for backward compatibility
+with existing DB records and serialized configs.
 """
 
 from app.pillars.models import PillarResult, ScoringContext, Subscore

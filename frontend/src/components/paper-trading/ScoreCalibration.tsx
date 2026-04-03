@@ -76,7 +76,7 @@ export default function ScoreCalibration({ positions }: ScoreCalibrationProps) {
       losers: avg(losers, (p) => p.pillar_directional),
     },
     {
-      axis: 'Structure',
+      axis: 'Entry Quality',
       winners: avg(winners, (p) => p.pillar_structure),
       losers: avg(losers, (p) => p.pillar_structure),
     },

@@ -124,6 +124,8 @@ class ScoringContext:
     spread_pct: float = 0.0
     theta_pct: float = 0.0
     theta_adjusted_edge: Optional[float] = None
+    delta: float = 0.0
+    dte: int = 0
     
     # Category E: Liquidity Features
     open_interest: int = 0
@@ -194,6 +196,8 @@ class ScoringContext:
             spread_pct=feature_set.spread_pct if feature_set else evaluation.spread_pct,
             theta_pct=feature_set.theta_pct if feature_set else 0.0,
             theta_adjusted_edge=feature_set.theta_adjusted_edge if feature_set else None,
+            delta=evaluation.delta,
+            dte=evaluation.dte,
             # Category E
             open_interest=feature_set.open_interest if feature_set else evaluation.open_interest,
             volume=feature_set.volume if feature_set else evaluation.volume,

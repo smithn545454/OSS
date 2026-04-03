@@ -61,11 +61,9 @@ from app.pillars.volatility import (
 )
 from app.pillars.structure import (
     compute_structure_pillar,
-    compute_spread_subscore,
-    compute_open_interest_subscore,
-    compute_volume_subscore,
-    compute_theta_burden_subscore,
-    compute_liquidity_trend_subscore,
+    compute_delta_moneyness_subscore,
+    compute_raw_iv_subscore,
+    compute_dte_appropriateness_subscore,
 )
 from app.pillars.calculator import (
     PillarCalculator,
@@ -107,6 +105,8 @@ def bullish_call_context():
         spread_pct=3.0,
         theta_pct=0.8,
         theta_adjusted_edge=1.8,
+        delta=0.15,
+        dte=30,
         open_interest=1500,
         volume=350,
         oi_5d_change_pct=5.0,
@@ -143,6 +143,8 @@ def bearish_put_context():
         spread_pct=2.5,
         theta_pct=1.2,
         theta_adjusted_edge=2.2,
+        delta=-0.20,
+        dte=14,
         open_interest=2500,
         volume=600,
         oi_5d_change_pct=15.0,
@@ -681,132 +683,140 @@ class TestThetaAdjustedEdgeSubscore:
 
 
 # ============================================================================
-# Test Structure Pillar Subscores
+# Test Entry Quality Pillar Subscores (stored as STRUCTURE)
 # ============================================================================
 
 
-class TestSpreadSubscore:
-    """Tests for spread subscore."""
-    
-    def test_tight_spread(self, bearish_put_context):
-        """Test tight spread scores high."""
-        subscore = compute_spread_subscore(bearish_put_context)
-        assert subscore.score >= 85
-    
-    def test_wide_spread(self):
-        """Test wide spread scores low."""
+class TestDeltaMoneyness:
+    """Tests for delta/moneyness subscore."""
+
+    def test_sweet_spot_delta(self):
+        """Test OTM delta (0.10-0.15) scores highest."""
         ctx = ScoringContext(
             evaluation_id="test",
             underlying_ticker="TEST",
             option_type="CALL",
             dte_bucket="B",
-            spread_pct=12.0,
+            delta=0.10,
         )
-        subscore = compute_spread_subscore(ctx)
+        subscore = compute_delta_moneyness_subscore(ctx)
+        assert subscore.score >= 90
+
+    def test_put_delta_uses_absolute(self):
+        """Test PUT delta (negative) uses abs value."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="PUT",
+            dte_bucket="B",
+            delta=-0.10,
+        )
+        subscore = compute_delta_moneyness_subscore(ctx)
+        assert subscore.score >= 90
+
+    def test_high_delta_scores_low(self):
+        """Test near-ATM/ITM delta scores low."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.70,
+        )
+        subscore = compute_delta_moneyness_subscore(ctx)
+        assert subscore.score <= 25
+
+    def test_moderate_delta(self):
+        """Test moderate OTM delta scores in middle."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.35,
+        )
+        subscore = compute_delta_moneyness_subscore(ctx)
+        assert 40 <= subscore.score <= 70
+
+
+class TestRawIV:
+    """Tests for raw IV level subscore."""
+
+    def test_low_iv_scores_high(self):
+        """Test low IV scores high (cheaper premium)."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            iv=0.15,
+        )
+        subscore = compute_raw_iv_subscore(ctx)
+        assert subscore.score >= 90
+
+    def test_high_iv_scores_low(self):
+        """Test high IV scores low (expensive premium)."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            iv=0.90,
+        )
+        subscore = compute_raw_iv_subscore(ctx)
         assert subscore.score <= 30
 
-
-class TestOpenInterestSubscore:
-    """Tests for open interest subscore."""
-    
-    def test_high_oi(self, bearish_put_context):
-        """Test high OI scores high."""
-        subscore = compute_open_interest_subscore(bearish_put_context)
-        assert subscore.score >= 85
-    
-    def test_low_oi(self):
-        """Test low OI scores low."""
+    def test_missing_iv_neutral(self):
+        """Test missing IV defaults to neutral."""
         ctx = ScoringContext(
             evaluation_id="test",
             underlying_ticker="TEST",
             option_type="CALL",
             dte_bucket="B",
-            open_interest=100,
+            iv=0.0,
         )
-        subscore = compute_open_interest_subscore(ctx)
-        assert subscore.score <= 30
-
-
-class TestVolumeSubscore:
-    """Tests for volume subscore."""
-    
-    def test_high_volume(self, bearish_put_context):
-        """Test high volume scores high."""
-        subscore = compute_volume_subscore(bearish_put_context)
-        assert subscore.score >= 85
-    
-    def test_low_volume(self):
-        """Test low volume scores low."""
-        ctx = ScoringContext(
-            evaluation_id="test",
-            underlying_ticker="TEST",
-            option_type="CALL",
-            dte_bucket="B",
-            volume=20,  # Very low volume
-        )
-        subscore = compute_volume_subscore(ctx)
-        assert subscore.score <= 30
-
-
-class TestThetaBurdenSubscore:
-    """Tests for theta burden subscore."""
-    
-    def test_low_theta_burden(self):
-        """Test low theta burden scores high."""
-        ctx = ScoringContext(
-            evaluation_id="test",
-            underlying_ticker="TEST",
-            option_type="CALL",
-            dte_bucket="B",
-            theta_pct=0.3,
-        )
-        subscore = compute_theta_burden_subscore(ctx)
-        assert subscore.score >= 85
-    
-    def test_high_theta_burden(self):
-        """Test high theta burden scores low."""
-        ctx = ScoringContext(
-            evaluation_id="test",
-            underlying_ticker="TEST",
-            option_type="CALL",
-            dte_bucket="B",
-            theta_pct=4.0,
-        )
-        subscore = compute_theta_burden_subscore(ctx)
-        assert subscore.score <= 30
-
-
-class TestLiquidityTrendSubscore:
-    """Tests for liquidity trend subscore."""
-    
-    def test_growing_oi(self, bearish_put_context):
-        """Test growing OI scores high."""
-        subscore = compute_liquidity_trend_subscore(bearish_put_context)
-        assert subscore.score >= 80
-    
-    def test_declining_oi(self):
-        """Test declining OI scores low."""
-        ctx = ScoringContext(
-            evaluation_id="test",
-            underlying_ticker="TEST",
-            option_type="CALL",
-            dte_bucket="B",
-            oi_5d_change_pct=-25.0,
-        )
-        subscore = compute_liquidity_trend_subscore(ctx)
-        assert subscore.score <= 35
-    
-    def test_missing_data(self):
-        """Test missing OI change data."""
-        ctx = ScoringContext(
-            evaluation_id="test",
-            underlying_ticker="TEST",
-            option_type="CALL",
-            dte_bucket="B",
-            oi_5d_change_pct=None,
-        )
-        subscore = compute_liquidity_trend_subscore(ctx)
+        subscore = compute_raw_iv_subscore(ctx)
         assert subscore.score == 50
+
+
+class TestDTEAppropriateness:
+    """Tests for DTE appropriateness subscore."""
+
+    def test_sweet_spot_dte(self):
+        """Test 45-60 DTE scores highest."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="C",
+            dte=50,
+        )
+        subscore = compute_dte_appropriateness_subscore(ctx)
+        assert subscore.score >= 85
+
+    def test_short_dte_scores_low(self):
+        """Test very short DTE scores low (theta decay)."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="A",
+            dte=7,
+        )
+        subscore = compute_dte_appropriateness_subscore(ctx)
+        assert subscore.score <= 30
+
+    def test_moderate_dte(self):
+        """Test moderate DTE scores in middle."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="A",
+            dte=21,
+        )
+        subscore = compute_dte_appropriateness_subscore(ctx)
+        assert 55 <= subscore.score <= 65
 
 
 # ============================================================================
@@ -864,30 +874,52 @@ class TestVolatilityPillar:
 
 
 class TestStructurePillar:
-    """Tests for complete structure pillar."""
-    
-    def test_liquid_contract_high_score(self, bearish_put_context):
-        """Test liquid contract scores high."""
-        result = compute_structure_pillar(bearish_put_context)
+    """Tests for Entry Quality pillar (stored as STRUCTURE)."""
+
+    def test_good_entry_high_score(self):
+        """Test far OTM, low IV, good DTE scores high."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="PUT",
+            dte_bucket="C",
+            delta=-0.12,
+            iv=0.18,
+            dte=45,
+        )
+        result = compute_structure_pillar(ctx)
         assert result.pillar_id == PillarId.STRUCTURE
-        assert result.score >= 75
-        assert len(result.subscores) == 5
-    
-    def test_illiquid_contract_low_score(self):
-        """Test illiquid contract scores low."""
+        assert result.score >= 85
+        assert len(result.subscores) == 3
+
+    def test_poor_entry_low_score(self):
+        """Test near-ATM, high IV, short DTE scores low."""
         ctx = ScoringContext(
             evaluation_id="test",
             underlying_ticker="TEST",
             option_type="CALL",
-            dte_bucket="B",
-            spread_pct=12.0,
-            open_interest=100,
-            volume=20,
-            theta_pct=4.0,
-            oi_5d_change_pct=-25.0,
+            dte_bucket="A",
+            delta=0.65,
+            iv=0.85,
+            dte=8,
         )
         result = compute_structure_pillar(ctx)
         assert result.score <= 35
+
+    def test_generates_tags(self):
+        """Test tag generation for entry quality."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="PUT",
+            dte_bucket="C",
+            delta=-0.10,
+            iv=0.15,
+            dte=50,
+        )
+        result = compute_structure_pillar(ctx)
+        assert "SWEET_SPOT_DELTA" in result.tags
+        assert "LOW_IV_ENTRY" in result.tags
 
 
 # ============================================================================
@@ -912,7 +944,9 @@ class TestPillarCalculator:
         eval_mock.spread_pct = bullish_call_context.spread_pct
         eval_mock.open_interest = bullish_call_context.open_interest
         eval_mock.volume = bullish_call_context.volume
-        
+        eval_mock.delta = bullish_call_context.delta
+        eval_mock.dte = bullish_call_context.dte
+
         # Create mock feature set
         fs_mock = MagicMock()
         fs_mock.evaluation_id = bullish_call_context.evaluation_id

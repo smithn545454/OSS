@@ -123,22 +123,19 @@ class TestScoreInvariants:
             )
 
     def test_structure_subscore_weights_sum_to_one(self):
-        """INV-8: Structure subscore weights must sum to 1.0."""
+        """INV-8: Entry Quality subscore weights must sum to 1.0."""
         cfg = StructurePillarConfig()
         total = (
-            cfg.spread_weight + cfg.open_interest_weight
-            + cfg.volume_weight + cfg.theta_burden_weight
-            + cfg.liquidity_trend_weight
+            cfg.delta_moneyness_weight + cfg.raw_iv_weight
+            + cfg.dte_appropriateness_weight
         )
         assert abs(total - 1.0) < 1e-9
 
         with pytest.raises(ValueError, match="must sum to 1.0"):
             StructurePillarConfig(
-                spread_weight=0.10,
-                open_interest_weight=0.10,
-                volume_weight=0.10,
-                theta_burden_weight=0.10,
-                liquidity_trend_weight=0.10,
+                delta_moneyness_weight=0.10,
+                raw_iv_weight=0.10,
+                dte_appropriateness_weight=0.10,
             )
 
     def test_ranking_weights_sum_to_one(self):

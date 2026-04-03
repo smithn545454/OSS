@@ -186,49 +186,42 @@ class TestVolatilityPillarSubscores:
 # ---------------------------------------------------------------------------
 
 
-class TestStructurePillarSubscores:
+class TestEntryQualityPillarSubscores:
+    """Tests for Entry Quality pillar subscores (stored as STRUCTURE)."""
+
     def _ctx(self, **kwargs) -> ScoringContext:
         defaults = dict(
             evaluation_id="e1",
             underlying_ticker="AAPL",
             option_type="CALL",
             dte_bucket="B",
-            mid=5.0,
-            spread_pct=3.0,
-            open_interest=1500,
-            volume=200,
-            theta_pct=1.0,
-            oi_5d_change_pct=5.0,
+            delta=0.15,
+            iv=0.25,
+            dte=30,
         )
         defaults.update(kwargs)
         return ScoringContext(**defaults)
 
-    def test_spread_tight(self):
-        from app.pillars.structure import compute_spread_subscore
-        ctx = self._ctx(spread_pct=1.0)
-        sub = compute_spread_subscore(ctx)
-        assert sub.score == 95.0
+    def test_delta_sweet_spot(self):
+        from app.pillars.structure import compute_delta_moneyness_subscore
+        ctx = self._ctx(delta=0.10)
+        sub = compute_delta_moneyness_subscore(ctx)
+        assert sub.score >= 90.0
 
-    def test_open_interest_high(self):
-        from app.pillars.structure import compute_open_interest_subscore
-        ctx = self._ctx(open_interest=5000)
-        sub = compute_open_interest_subscore(ctx)
-        assert sub.score == 95.0
+    def test_delta_high(self):
+        from app.pillars.structure import compute_delta_moneyness_subscore
+        ctx = self._ctx(delta=0.65)
+        sub = compute_delta_moneyness_subscore(ctx)
+        assert sub.score <= 25.0
 
-    def test_volume_moderate(self):
-        from app.pillars.structure import compute_volume_subscore
-        ctx = self._ctx(volume=200)
-        sub = compute_volume_subscore(ctx)
-        assert 55.0 <= sub.score <= 75.0
+    def test_raw_iv_low(self):
+        from app.pillars.structure import compute_raw_iv_subscore
+        ctx = self._ctx(iv=0.12)
+        sub = compute_raw_iv_subscore(ctx)
+        assert sub.score >= 90.0
 
-    def test_theta_burden(self):
-        from app.pillars.structure import compute_theta_burden_subscore
-        ctx = self._ctx(theta_pct=0.3)
-        sub = compute_theta_burden_subscore(ctx)
-        assert sub.score == 90.0
-
-    def test_liquidity_trend(self):
-        from app.pillars.structure import compute_liquidity_trend_subscore
-        ctx = self._ctx(oi_5d_change_pct=15.0)
-        sub = compute_liquidity_trend_subscore(ctx)
+    def test_dte_good(self):
+        from app.pillars.structure import compute_dte_appropriateness_subscore
+        ctx = self._ctx(dte=45)
+        sub = compute_dte_appropriateness_subscore(ctx)
         assert sub.score >= 80.0

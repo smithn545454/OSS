@@ -349,7 +349,7 @@ function PillarCard({ pillar }: PillarCardProps) {
   const pillarConfig = {
     DIRECTIONAL: { icon: TrendingUp, color: 'text-sky-400', label: 'Directional Edge' },
     VOLATILITY: { icon: Activity, color: 'text-purple-400', label: 'Volatility Edge' },
-    STRUCTURE: { icon: BarChart3, color: 'text-amber-400', label: 'Structure & Quality' },
+    STRUCTURE: { icon: BarChart3, color: 'text-amber-400', label: 'Entry Quality' },
   }[pillar.pillar_id] || { icon: Zap, color: 'text-oss-accent', label: pillar.pillar_id }
 
   const Icon = pillarConfig.icon

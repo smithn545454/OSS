@@ -74,7 +74,7 @@ const CRITERIA_GROUPS: CriteriaGroup[] = [
       { key: 'conviction_score_min', label: 'Conviction Min', type: 'number', placeholder: '0', step: '5' },
       { key: 'pillar_directional_min', label: 'Directional Pillar Min', type: 'number', placeholder: '0', step: '5' },
       { key: 'pillar_volatility_min', label: 'Volatility Pillar Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_structure_min', label: 'Structure Pillar Min', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_structure_min', label: 'Entry Quality Pillar Min', type: 'number', placeholder: '0', step: '5' },
       { key: 'gate_margin_min', label: 'Gate Margin Min', type: 'number', placeholder: '0', step: '0.1' },
     ],
   },

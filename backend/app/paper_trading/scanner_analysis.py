@@ -185,7 +185,7 @@ def _compute_feature_divergences(
         ("conviction_score", "Conviction Score", lambda p: p.conviction_score),
         ("pillar_directional", "Directional Pillar", lambda p: p.pillar_directional),
         ("pillar_volatility", "Volatility Pillar", lambda p: p.pillar_volatility),
-        ("pillar_structure", "Structure Pillar", lambda p: p.pillar_structure),
+        ("pillar_structure", "Entry Quality Pillar", lambda p: p.pillar_structure),
     ]
 
     result = []
@@ -333,7 +333,7 @@ def build_scanner_analysis_prompt(
         ("Avg DTE at Entry", "avg_dte_at_entry"),
         ("Avg Directional Pillar", "avg_pillar_directional"),
         ("Avg Volatility Pillar", "avg_pillar_volatility"),
-        ("Avg Structure Pillar", "avg_pillar_structure"),
+        ("Avg Entry Quality Pillar", "avg_pillar_structure"),
     ]
     sections.append(f"{'Metric':<28} {'Winners':<14} {'Losers':<14}")
     sections.append("-" * 56)

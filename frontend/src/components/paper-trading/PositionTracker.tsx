@@ -260,7 +260,7 @@ function ExpandedPanel({ position: pos }: { position: EnrichedPosition }) {
           Pillar Scores
         </h4>
         {pillarBar('Directional', pos.pillar_directional)}
-        {pillarBar('Structure', pos.pillar_structure)}
+        {pillarBar('Entry Quality', pos.pillar_structure)}
         {pillarBar('Volatility', pos.pillar_volatility)}
         <div className="flex items-center gap-1 mt-2">
           <span className="text-xs text-oss-muted">Convergence:</span>

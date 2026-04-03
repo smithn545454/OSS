@@ -423,11 +423,9 @@ export interface VolatilityPillarConfig {
 }
 
 export interface StructurePillarConfig {
-  spread_weight: number
-  open_interest_weight: number
-  volume_weight: number
-  theta_burden_weight: number
-  liquidity_trend_weight: number
+  delta_moneyness_weight: number
+  raw_iv_weight: number
+  dte_appropriateness_weight: number
 }
 
 export interface PillarConfig {

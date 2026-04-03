@@ -460,7 +460,7 @@ export default function TradeDetail() {
             <MetricItem label="Final Score" value={Number(finalScore).toFixed(0)} />
             <MetricItem label="Directional" value={snapshot?.directional_score != null ? Number(snapshot.directional_score).toFixed(0) : '—'} />
             <MetricItem label="Volatility" value={snapshot?.volatility_score != null ? Number(snapshot.volatility_score).toFixed(0) : '—'} />
-            <MetricItem label="Structure" value={snapshot?.structure_score != null ? Number(snapshot.structure_score).toFixed(0) : '—'} />
+            <MetricItem label="Entry Quality" value={snapshot?.structure_score != null ? Number(snapshot.structure_score).toFixed(0) : '—'} />
             {decidedAt && <MetricItem label="Decided At" value={formatDateTime(decidedAt)} />}
             {snapshot?.theta_adjusted_ev != null && (
               <MetricItem label="θ-Adj EV" value={`$${Number(snapshot.theta_adjusted_ev).toFixed(2)}`} />

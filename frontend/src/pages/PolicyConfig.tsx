@@ -819,7 +819,7 @@ function EditablePolicyConfig({
                 error={errors['pillar_weights.volatility']}
               />
               <ConfigField
-                label="Structure"
+                label="Entry Quality"
                 value={displayConfig.pillar_weights.structure * 100}
                 unit="%"
                 fieldPath="pillar_weights.structure"
@@ -1007,86 +1007,58 @@ function EditablePolicyConfig({
           </div>
           <div>
             <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Structure Subscores
+              Entry Quality Subscores
             </h4>
             <div className="rounded-lg bg-oss-bg p-3">
               <ConfigField
-                label="Spread Tightness"
-                value={displayConfig.pillars.structure.spread_weight * 100}
+                label="Delta / Moneyness"
+                value={displayConfig.pillars.structure.delta_moneyness_weight * 100}
                 unit="%"
-                fieldPath="pillars.structure.spread_weight"
+                fieldPath="pillars.structure.delta_moneyness_weight"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
                 step={5}
-                error={errors['pillars.structure.spread_weight']}
+                error={errors['pillars.structure.delta_moneyness_weight']}
               />
               <ConfigField
-                label="Open Interest"
-                value={displayConfig.pillars.structure.open_interest_weight * 100}
+                label="Raw IV Level"
+                value={displayConfig.pillars.structure.raw_iv_weight * 100}
                 unit="%"
-                fieldPath="pillars.structure.open_interest_weight"
+                fieldPath="pillars.structure.raw_iv_weight"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
                 step={5}
-                error={errors['pillars.structure.open_interest_weight']}
+                error={errors['pillars.structure.raw_iv_weight']}
               />
               <ConfigField
-                label="Volume"
-                value={displayConfig.pillars.structure.volume_weight * 100}
+                label="DTE Appropriateness"
+                value={displayConfig.pillars.structure.dte_appropriateness_weight * 100}
                 unit="%"
-                fieldPath="pillars.structure.volume_weight"
+                fieldPath="pillars.structure.dte_appropriateness_weight"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
                 step={5}
-                error={errors['pillars.structure.volume_weight']}
-              />
-              <ConfigField
-                label="Theta Burden"
-                value={displayConfig.pillars.structure.theta_burden_weight * 100}
-                unit="%"
-                fieldPath="pillars.structure.theta_burden_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.structure.theta_burden_weight']}
-              />
-              <ConfigField
-                label="Liquidity Trend"
-                value={displayConfig.pillars.structure.liquidity_trend_weight * 100}
-                unit="%"
-                fieldPath="pillars.structure.liquidity_trend_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.structure.liquidity_trend_weight']}
+                error={errors['pillars.structure.dte_appropriateness_weight']}
               />
             </div>
             {isEditing && (
               <p className={clsx(
                 'text-xs mt-2',
-                Math.abs((displayConfig.pillars.structure.spread_weight +
-                  displayConfig.pillars.structure.open_interest_weight +
-                  displayConfig.pillars.structure.volume_weight +
-                  displayConfig.pillars.structure.theta_burden_weight +
-                  displayConfig.pillars.structure.liquidity_trend_weight) - 1) > 0.01
+                Math.abs((displayConfig.pillars.structure.delta_moneyness_weight +
+                  displayConfig.pillars.structure.raw_iv_weight +
+                  displayConfig.pillars.structure.dte_appropriateness_weight) - 1) > 0.01
                   ? 'text-oss-reject'
                   : 'text-oss-muted'
               )}>
-                Total: {((displayConfig.pillars.structure.spread_weight +
-                  displayConfig.pillars.structure.open_interest_weight +
-                  displayConfig.pillars.structure.volume_weight +
-                  displayConfig.pillars.structure.theta_burden_weight +
-                  displayConfig.pillars.structure.liquidity_trend_weight) * 100).toFixed(0)}%
+                Total: {((displayConfig.pillars.structure.delta_moneyness_weight +
+                  displayConfig.pillars.structure.raw_iv_weight +
+                  displayConfig.pillars.structure.dte_appropriateness_weight) * 100).toFixed(0)}%
                 (should equal 100%)
               </p>
             )}
@@ -1316,14 +1288,12 @@ export default function PolicyConfig() {
       errors['pillars.volatility.iv_vs_rv_weight'] = 'Weights must sum to 100%'
     }
 
-    // Validate structure subscore weights sum to 1
-    const strSum = config.pillars.structure.spread_weight +
-      config.pillars.structure.open_interest_weight +
-      config.pillars.structure.volume_weight +
-      config.pillars.structure.theta_burden_weight +
-      config.pillars.structure.liquidity_trend_weight
+    // Validate entry quality subscore weights sum to 1
+    const strSum = config.pillars.structure.delta_moneyness_weight +
+      config.pillars.structure.raw_iv_weight +
+      config.pillars.structure.dte_appropriateness_weight
     if (Math.abs(strSum - 1) > 0.01) {
-      errors['pillars.structure.spread_weight'] = 'Weights must sum to 100%'
+      errors['pillars.structure.delta_moneyness_weight'] = 'Weights must sum to 100%'
     }
 
     // Validate call delta band

@@ -342,6 +342,90 @@ def map_theta_adjusted_edge_score(theta_adjusted_edge: float) -> float:
     return linear_interpolate(theta_adjusted_edge, breakpoints)
 
 
+def map_delta_moneyness_score(abs_delta: float) -> float:
+    """Map absolute delta to entry quality subscore (0-100).
+
+    Lower abs delta (farther OTM) = higher score. Data shows:
+    - Q1 (lowest delta): 61% WR
+    - Q5 (highest delta): 30% WR
+    - Sweet spot: abs(delta) 0.05-0.30
+
+    Args:
+        abs_delta: Absolute value of contract delta
+
+    Returns:
+        Delta/moneyness subscore (0-100)
+    """
+    breakpoints = [
+        (0.0, 80.0),      # Extremely far OTM — good but less certain
+        (0.05, 95.0),      # Sweet spot starts
+        (0.15, 92.0),      # Peak zone
+        (0.30, 70.0),      # Still decent OTM
+        (0.45, 45.0),      # Near ATM — neutral
+        (0.60, 25.0),      # ITM — poor asymmetry
+        (0.80, 15.0),      # Deep ITM — worst for long options
+    ]
+
+    return linear_interpolate(abs_delta, breakpoints)
+
+
+def map_raw_iv_score(iv: Optional[float]) -> float:
+    """Map implied volatility level to entry quality subscore (0-100).
+
+    Lower IV = cheaper premium = better asymmetry. Data shows:
+    - Q1 (lowest IV): 40% WR
+    - Q5 (highest IV): 32% WR
+    - Correlation r=-0.062 with outcomes
+
+    Args:
+        iv: Implied volatility as decimal (e.g. 0.25 = 25%)
+
+    Returns:
+        Raw IV subscore (0-100)
+    """
+    if iv is None or iv <= 0:
+        return 50.0  # Neutral if no data
+
+    breakpoints = [
+        (0.0, 95.0),       # Very low IV — excellent
+        (0.15, 92.0),      # Low IV
+        (0.25, 80.0),      # Moderate-low
+        (0.40, 65.0),      # Moderate
+        (0.60, 45.0),      # High
+        (0.80, 30.0),      # Very high
+        (1.20, 20.0),      # Extreme IV
+    ]
+
+    return linear_interpolate(iv, breakpoints)
+
+
+def map_dte_appropriateness_score(dte: int) -> float:
+    """Map days to expiration to entry quality subscore (0-100).
+
+    Moderate-long DTE is best (time for thesis to play out).
+    Very short DTE = heavy theta decay. Very long = diminishing returns.
+    Data: Low Delta + High DTE = 56.4% WR.
+
+    Args:
+        dte: Days to expiration
+
+    Returns:
+        DTE appropriateness subscore (0-100)
+    """
+    breakpoints = [
+        (7.0, 25.0),       # Very short — heavy theta decay
+        (14.0, 45.0),      # Short
+        (21.0, 60.0),      # Bucket A end — decent
+        (30.0, 75.0),      # Bucket B start — good
+        (45.0, 85.0),      # Sweet spot
+        (60.0, 90.0),      # Bucket C — excellent
+        (90.0, 85.0),      # Long — good but some time value premium
+        (120.0, 75.0),     # Very long — diminishing returns
+    ]
+
+    return linear_interpolate(float(dte), breakpoints)
+
+
 def map_spread_score(spread_pct: float) -> float:
     """Map spread percentage to structure subscore (0-100).
     
