@@ -1203,13 +1203,14 @@ async def get_watch_insights(
 @router.post("/rescore")
 async def rescore_evaluations(
     verdict: str = "APPROVE",
-    limit: int = 500,
 ) -> dict[str, Any]:
     """Re-score evaluations using current pillar logic.
 
     Re-computes the Entry Quality (Structure) pillar and final score
     for existing evaluations. Keeps Directional and Volatility scores
     unchanged. Updates both PillarScore records and embedded Decisions.
+
+    Paginates through ALL records in the verdict GSI.
     """
     from app.core.schemas import (
         Decision,
@@ -1219,12 +1220,24 @@ async def rescore_evaluations(
     from app.pillars.structure import compute_structure_pillar
     from app.pillars.models import ScoringContext
     from app.decision.calculator import DecisionCalculator
+    from app.db.dynamodb import get_dynamodb
 
-    # Fetch evaluations with embedded decisions
-    items = await EvaluationTable.list_by_verdict(verdict, limit=limit)
+    # Fetch ALL evaluations with full pagination (limit=None)
+    db = get_dynamodb()
+    items = await db.query(
+        EvaluationTable.TABLE,
+        f"VERDICT#{verdict}",
+        limit=None,
+        scan_forward=False,
+        index_name="GSI1",
+    )
+    for item in items:
+        for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
+            item.pop(key, None)
 
     calculator = DecisionCalculator()
     rescored = 0
+    skipped = 0
     errors = 0
     verdict_changes: list[dict[str, Any]] = []
 
@@ -1232,6 +1245,12 @@ async def rescore_evaluations(
         try:
             decision_data = item.pop("decision", None)
             if not decision_data:
+                continue
+
+            # Skip already-rescored items
+            decided = decision_data.get("decided_at", "")
+            if decided >= "2026-04-03T21:49:00":
+                skipped += 1
                 continue
 
             evaluation = Evaluation(**item)
@@ -1320,7 +1339,9 @@ async def rescore_evaluations(
             logger.error(f"Error rescoring {item.get('evaluation_id', '?')}: {e}")
 
     return {
+        "total_fetched": len(items),
         "rescored": rescored,
+        "skipped": skipped,
         "errors": errors,
         "verdict_changes": len(verdict_changes),
         "changes": verdict_changes[:50],
