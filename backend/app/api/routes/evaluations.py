@@ -1203,14 +1203,17 @@ async def get_watch_insights(
 @router.post("/rescore")
 async def rescore_evaluations(
     verdict: str = "APPROVE",
+    before: str = "2026-04-03T21:49:00",
+    batch_size: int = 200,
 ) -> dict[str, Any]:
     """Re-score evaluations using current pillar logic.
 
     Re-computes the Entry Quality (Structure) pillar and final score
-    for existing evaluations. Keeps Directional and Volatility scores
-    unchanged. Updates both PillarScore records and embedded Decisions.
+    for existing evaluations scored before the given cutoff timestamp.
+    Keeps Directional and Volatility scores unchanged.
+    Updates both PillarScore records and embedded Decisions.
 
-    Paginates through ALL records in the verdict GSI.
+    Uses batched pagination to stay within API Gateway timeout.
     """
     from app.core.schemas import (
         Decision,
@@ -1220,20 +1223,11 @@ async def rescore_evaluations(
     from app.pillars.structure import compute_structure_pillar
     from app.pillars.models import ScoringContext
     from app.decision.calculator import DecisionCalculator
-    from app.db.dynamodb import get_dynamodb
 
-    # Fetch ALL evaluations with full pagination (limit=None)
-    db = get_dynamodb()
-    items = await db.query(
-        EvaluationTable.TABLE,
-        f"VERDICT#{verdict}",
-        limit=None,
-        scan_forward=False,
-        index_name="GSI1",
+    # Fetch evaluations evaluated before the cutoff (pre-deploy)
+    items = await EvaluationTable.list_by_verdict_since(
+        verdict, since_iso="2025-01-01T00:00:00", limit=batch_size
     )
-    for item in items:
-        for key in ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK"]:
-            item.pop(key, None)
 
     calculator = DecisionCalculator()
     rescored = 0
@@ -1249,7 +1243,7 @@ async def rescore_evaluations(
 
             # Skip already-rescored items
             decided = decision_data.get("decided_at", "")
-            if decided >= "2026-04-03T21:49:00":
+            if decided >= before:
                 skipped += 1
                 continue
 
@@ -1341,8 +1335,10 @@ async def rescore_evaluations(
     return {
         "total_fetched": len(items),
         "rescored": rescored,
-        "skipped": skipped,
+        "skipped_already_done": skipped,
         "errors": errors,
         "verdict_changes": len(verdict_changes),
+        "stale_remaining": len(items) - rescored - skipped - errors,
+        "hint": "Run again if stale_remaining > 0" if rescored > 0 else None,
         "changes": verdict_changes[:50],
     }
