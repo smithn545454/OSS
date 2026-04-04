@@ -833,7 +833,7 @@ class TestDirectionalPillar:
         assert result.pillar_id == PillarId.DIRECTIONAL
         assert result.score >= 65
         assert len(result.subscores) == 6
-        assert len(result.top_contributors) <= 3
+        assert len(result.top_contributors) == 6
 
     def test_bearish_put_high_score(self, bearish_put_context):
         """Test bearish setup with PUT scores high."""
@@ -1088,7 +1088,7 @@ class TestEdgeCases:
         assert score.evaluation_id == bullish_call_context.evaluation_id
         assert score.pillar_id == PillarId.DIRECTIONAL
         assert 0 <= score.score <= 100
-        assert len(score.contributors) <= 3
+        assert len(score.contributors) == 6
         assert isinstance(score.tags, list)
 
 
