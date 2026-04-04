@@ -1596,6 +1596,7 @@ class SetupRuleRequest(BaseModel):
     source_analysis_id: Optional[str] = None
     performance_at_creation: Optional[dict[str, Any]] = None
     mode: Optional[str] = "production"  # "production" | "test"
+    regime: Optional[str] = None  # Scoring regime; defaults to CURRENT_SCORING_REGIME
 
 
 class SetupRuleUpdateRequest(BaseModel):
@@ -1620,14 +1621,17 @@ async def create_setup_rule_endpoint(request: SetupRuleRequest) -> dict[str, Any
     """Create a new setup rule (from archetype or manual)."""
     from app.paper_trading.pattern_discovery import create_setup_rule
 
-    rule = await create_setup_rule({
+    rule_data: dict[str, Any] = {
         "name": request.name,
         "criteria": request.criteria,
         "source": request.source or "ai",
         "source_analysis_id": request.source_analysis_id,
         "performance_at_creation": request.performance_at_creation,
         "mode": request.mode or "production",
-    })
+    }
+    if request.regime:
+        rule_data["regime"] = request.regime
+    rule = await create_setup_rule(rule_data)
     return {"rule": rule, "message": "Setup rule created"}
 
 
@@ -1862,6 +1866,29 @@ async def backfill_setup_rule_matches(
         "skipped": skipped,
         "errors": errors,
         "remaining": remaining,
+    }
+
+
+@router.post("/setup-rules/migrate-regime")
+async def migrate_setup_rules_regime() -> dict[str, Any]:
+    """Tag existing setup rules that lack a regime field as 'v1'.
+
+    Idempotent — rules that already have a regime field are skipped.
+    """
+    from app.paper_trading.pattern_discovery import list_setup_rules, update_setup_rule
+
+    rules = await list_setup_rules()
+    migrated = 0
+    for rule in rules:
+        if not rule.get("regime"):
+            await update_setup_rule(rule["rule_id"], {"regime": "v1"})
+            migrated += 1
+
+    return {
+        "message": f"Migrated {migrated} rules to regime v1",
+        "total_rules": len(rules),
+        "migrated": migrated,
+        "already_tagged": len(rules) - migrated,
     }
 
 

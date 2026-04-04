@@ -1682,6 +1682,7 @@ export interface SetupRule {
   is_active: boolean
   mode: 'production' | 'test'
   source: 'ai' | 'manual'
+  regime?: string
   created_at: string
   source_analysis_id: string | null
   performance_at_creation: ArchetypePerformance | null
@@ -1692,6 +1693,7 @@ export interface MatchedRule {
   name: string
   mode: 'production' | 'test'
   source?: 'ai' | 'manual'
+  regime?: string
   criteria?: Record<string, unknown>
   performance_at_creation?: ArchetypePerformance | null
 }

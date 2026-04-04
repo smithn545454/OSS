@@ -273,6 +273,7 @@ def format_matched_rules(
             "name": rule["name"],
             "mode": rule.get("mode", "production"),
             "source": rule.get("source", "ai"),
+            "regime": rule.get("regime", "v1"),
             "performance_at_creation": rule.get("performance_at_creation"),
         }
         if include_criteria:

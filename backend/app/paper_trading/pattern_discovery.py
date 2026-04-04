@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 ANALYSIS_PK_PREFIX = "ANALYSIS#"
 SETUP_RULE_PK = "SETUP_RULE"
 
+# Scoring regime version. Bumped when pillar/gate/conviction logic changes materially.
+# Existing rules missing this field are treated as "v1" (pre-Entry Quality pillar).
+CURRENT_SCORING_REGIME = "v2"
+
 # Abbreviations for token-efficient CSV encoding
 SCANNER_ABBREV = {
     "BREAKOUT_SCANNER": "BRK",
@@ -559,6 +563,7 @@ async def create_setup_rule(rule_data: dict[str, Any]) -> dict[str, Any]:
         "source": rule_data.get("source", "ai"),
         "source_analysis_id": rule_data.get("source_analysis_id"),
         "performance_at_creation": rule_data.get("performance_at_creation"),
+        "regime": rule_data.get("regime", CURRENT_SCORING_REGIME),
     }
 
     await db.put_item(PaperPositionTable.TABLE, item)

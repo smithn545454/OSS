@@ -322,6 +322,14 @@ function SetupRuleRow({ rule, livePerformance }: { rule: SetupRule; livePerforma
               </span>
             )}
             <ModeBadge mode={mode} />
+            {(!rule.regime || rule.regime === 'v1') && (
+              <span
+                className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                title="Created under previous scoring regime"
+              >
+                V1
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 ml-5 text-xs text-oss-muted">
             {(() => {
