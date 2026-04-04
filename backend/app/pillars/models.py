@@ -63,13 +63,13 @@ class PillarResult:
     
     @property
     def top_contributors(self) -> list[PillarContributor]:
-        """Get top 3 contributors by distance from neutral."""
+        """Get all contributors sorted by distance from neutral (most impactful first)."""
         sorted_subscores = sorted(
             self.subscores,
             key=lambda s: s.distance_from_neutral,
             reverse=True,
         )
-        return [s.to_contributor() for s in sorted_subscores[:3]]
+        return [s.to_contributor() for s in sorted_subscores]
     
     def to_pillar_score(self) -> PillarScore:
         """Convert to PillarScore schema for storage."""

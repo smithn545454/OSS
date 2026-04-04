@@ -51,7 +51,7 @@ class TestPillarResult:
             ],
         )
         top = result.top_contributors
-        assert len(top) == 3
+        assert len(top) == 4  # All contributors returned, sorted by distance from neutral
         # Trend (90 - 50 = 40) should be first
         assert top[0].feature_name == "trend"
 

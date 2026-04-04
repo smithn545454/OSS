@@ -390,32 +390,61 @@ function PillarCard({ pillar }: PillarCardProps) {
       )}
 
       <div className="mt-4 pt-4 border-t border-oss-border">
-        <p className="text-xs text-oss-muted mb-2">Top Contributors</p>
+        <p className="text-xs text-oss-muted mb-2">
+          {pillar.pillar_id === 'DIRECTIONAL' ? 'Subscore Breakdown' : 'Top Contributors'}
+        </p>
         <div className="space-y-2">
-          {pillar.contributors.slice(0, 3).map((c) => (
+          {(pillar.pillar_id === 'DIRECTIONAL'
+            ? pillar.contributors
+            : pillar.contributors.slice(0, 3)
+          ).map((c) => (
             <div key={c.feature_name} className="flex items-center justify-between">
               <span className="text-xs text-oss-text truncate">
                 {c.feature_name.replace(/_/g, ' ')}
               </span>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-xs text-oss-muted">
-                  {typeof c.raw_value === 'number'
-                    ? c.raw_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                    : typeof c.raw_value === 'object' && c.raw_value !== null
-                      ? (() => {
-                          const vals = Object.values(c.raw_value as Record<string, unknown>)
-                          const num = vals.find((v): v is number => typeof v === 'number')
-                          return num !== undefined ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
-                        })()
-                      : String(c.raw_value ?? '—')}
-                </span>
-                <span className={clsx(
-                  'font-mono text-xs',
-                  c.subscore >= 70 ? 'text-oss-approve' : 
-                  c.subscore >= 50 ? 'text-oss-watch' : 'text-oss-reject'
-                )}>
-                  +{c.weighted_contribution.toFixed(1)}
-                </span>
+                {pillar.pillar_id === 'DIRECTIONAL' ? (
+                  <>
+                    <span className={clsx(
+                      'font-mono text-xs',
+                      c.subscore >= 70 ? 'text-oss-approve' :
+                      c.subscore >= 50 ? 'text-oss-watch' : 'text-oss-reject'
+                    )}>
+                      {c.subscore.toFixed(0)}
+                    </span>
+                    <span className="font-mono text-xs text-oss-muted">
+                      ×{(c.weight * 100).toFixed(0)}%
+                    </span>
+                    <span className={clsx(
+                      'font-mono text-xs',
+                      c.subscore >= 70 ? 'text-oss-approve' :
+                      c.subscore >= 50 ? 'text-oss-watch' : 'text-oss-reject'
+                    )}>
+                      +{c.weighted_contribution.toFixed(1)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-mono text-xs text-oss-muted">
+                      {typeof c.raw_value === 'number'
+                        ? c.raw_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : typeof c.raw_value === 'object' && c.raw_value !== null
+                          ? (() => {
+                              const vals = Object.values(c.raw_value as Record<string, unknown>)
+                              const num = vals.find((v): v is number => typeof v === 'number')
+                              return num !== undefined ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+                            })()
+                          : String(c.raw_value ?? '—')}
+                    </span>
+                    <span className={clsx(
+                      'font-mono text-xs',
+                      c.subscore >= 70 ? 'text-oss-approve' :
+                      c.subscore >= 50 ? 'text-oss-watch' : 'text-oss-reject'
+                    )}>
+                      +{c.weighted_contribution.toFixed(1)}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           ))}
