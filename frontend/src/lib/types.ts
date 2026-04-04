@@ -410,9 +410,15 @@ export interface PillarWeights {
 export interface DirectionalPillarConfig {
   trend_alignment_weight: number
   momentum_weight: number
+  trend_strength_weight: number
   signal_confirmation_weight: number
   relative_strength_weight: number
   catalyst_weight: number
+  momentum_rsi_blend: number
+  momentum_macd_blend: number
+  momentum_returns_blend: number
+  rs_performance_blend: number
+  rs_obv_blend: number
 }
 
 export interface VolatilityPillarConfig {

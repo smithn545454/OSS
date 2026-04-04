@@ -106,12 +106,12 @@ class FeatureComputer:
             if underlying_bars is None:
                 if self._data_provider:
                     underlying_bars = await self._data_provider.get_daily_bars(
-                        ticker, end_date=effective_date, lookback_days=60,
+                        ticker, end_date=effective_date, lookback_days=252,
                     )
                 elif self._polygon:
                     underlying_bars = await self._polygon.get_daily_bars_parsed(
                         ticker=ticker,
-                        from_date=self._get_lookback_date(60),
+                        from_date=self._get_lookback_date(252),
                         to_date=self._get_today(),
                     )
                 else:
@@ -124,12 +124,12 @@ class FeatureComputer:
                 if self._data_provider:
                     self._spy_bars = await self._data_provider.get_daily_bars(
                         self._config.rs_benchmark_ticker,
-                        end_date=effective_date, lookback_days=60,
+                        end_date=effective_date, lookback_days=252,
                     )
                 elif self._polygon:
                     self._spy_bars = await self._polygon.get_daily_bars_parsed(
                         ticker=self._config.rs_benchmark_ticker,
-                        from_date=self._get_lookback_date(60),
+                        from_date=self._get_lookback_date(252),
                         to_date=self._get_today(),
                     )
                 else:
@@ -222,6 +222,17 @@ class FeatureComputer:
             trend_aligned_bearish=underlying_features.trend_aligned_bearish,
             atr14=underlying_features.atr14,
             atr14_pct=underlying_features.atr14_pct,
+            ema_9=underlying_features.ema_9,
+            ema_21=underlying_features.ema_21,
+            ema_50=underlying_features.ema_50,
+            ema_200=underlying_features.ema_200,
+            ema_alignment=underlying_features.ema_alignment,
+            rsi_14=underlying_features.rsi_14,
+            macd_histogram=underlying_features.macd_histogram,
+            adx_14=underlying_features.adx_14,
+            plus_di=underlying_features.plus_di,
+            minus_di=underlying_features.minus_di,
+            obv_trend=underlying_features.obv_trend,
             # Category B
             spy_return_5d=rs_features.spy_return_5d,
             spy_return_20d=rs_features.spy_return_20d,
@@ -289,10 +300,10 @@ class FeatureComputer:
         logger.info(f"Fetching daily bars for {len(tickers)} tickers")
         if self._data_provider:
             bars_by_ticker = await self._data_provider.get_daily_bars_batch(
-                tickers, end_date=effective_date, lookback_days=60,
+                tickers, end_date=effective_date, lookback_days=252,
             )
         elif self._polygon:
-            bars_by_ticker = await self._polygon.get_daily_bars_batch(tickers, days=60)
+            bars_by_ticker = await self._polygon.get_daily_bars_batch(tickers, days=252)
         else:
             bars_by_ticker = {}
 

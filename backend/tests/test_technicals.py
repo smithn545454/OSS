@@ -14,7 +14,7 @@ from app.services.technicals import (
     calculate_obv_trend,
     calculate_rsi,
     compute_stock_technicals,
-    _classify_ema_alignment,
+    classify_ema_alignment,
     _compute_tape_read,
 )
 
@@ -247,38 +247,38 @@ class TestOBV:
 
 class TestEMAAlignment:
     def test_bullish_stack(self):
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=110, ema9=108, ema21=105, ema50=100, ema200=90
         )
         assert result == "BULLISH_STACK"
 
     def test_bearish_stack(self):
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=80, ema9=82, ema21=85, ema50=90, ema200=100
         )
         assert result == "BEARISH_STACK"
 
     def test_above_all_no_stack(self):
         # Price above all but EMAs not in descending order
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=110, ema9=105, ema21=108, ema50=100, ema200=90
         )
         assert result == "ABOVE_ALL"
 
     def test_below_all(self):
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=80, ema9=90, ema21=85, ema50=95, ema200=100
         )
         assert result == "BELOW_ALL"
 
     def test_mixed(self):
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=100, ema9=95, ema21=105, ema50=90, ema200=110
         )
         assert result == "MIXED"
 
     def test_partial_emas(self):
-        result = _classify_ema_alignment(
+        result = classify_ema_alignment(
             price=110, ema9=108, ema21=105, ema50=100, ema200=None
         )
         assert result == "BULLISH_STACK"

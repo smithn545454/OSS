@@ -135,6 +135,19 @@ class ScoringContext:
     # Category F: Catalyst Features
     days_to_earnings: Optional[int] = None
     recent_sec_filing: bool = False
+
+    # Category G: Technical Indicators
+    ema_9: Optional[float] = None
+    ema_21: Optional[float] = None
+    ema_50: Optional[float] = None
+    ema_200: Optional[float] = None
+    ema_alignment: Optional[str] = None
+    rsi_14: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    adx_14: Optional[float] = None
+    plus_di: Optional[float] = None
+    minus_di: Optional[float] = None
+    obv_trend: Optional[str] = None
     
     @property
     def is_call(self) -> bool:
@@ -205,4 +218,16 @@ class ScoringContext:
             # Category F
             days_to_earnings=feature_set.days_to_earnings if feature_set else None,
             recent_sec_filing=feature_set.recent_sec_filing if feature_set else False,
+            # Category G
+            ema_9=feature_set.ema_9 if feature_set else None,
+            ema_21=feature_set.ema_21 if feature_set else None,
+            ema_50=feature_set.ema_50 if feature_set else None,
+            ema_200=feature_set.ema_200 if feature_set else None,
+            ema_alignment=feature_set.ema_alignment if feature_set else None,
+            rsi_14=feature_set.rsi_14 if feature_set else None,
+            macd_histogram=feature_set.macd_histogram if feature_set else None,
+            adx_14=feature_set.adx_14 if feature_set else None,
+            plus_di=feature_set.plus_di if feature_set else None,
+            minus_di=feature_set.minus_di if feature_set else None,
+            obv_trend=feature_set.obv_trend if feature_set else None,
         )

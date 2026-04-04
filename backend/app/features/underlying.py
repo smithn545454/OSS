@@ -10,12 +10,20 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from app.services.polygon import DailyBar
 from app.scanners.utils import (
-    calculate_sma,
-    calculate_returns,
     calculate_atr,
+    calculate_returns,
     calculate_rv,
+    calculate_sma,
+)
+from app.services.polygon import DailyBar
+from app.services.technicals import (
+    calculate_adx,
+    calculate_ema,
+    calculate_macd,
+    calculate_obv_trend,
+    calculate_rsi,
+    classify_ema_alignment,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +43,19 @@ class UnderlyingFeatures:
     atr14: Optional[float] = None
     atr14_pct: Optional[float] = None
     rv20: Optional[float] = None  # Also used in Category C
+
+    # Category G: Technical Indicators (for Directional pillar)
+    ema_9: Optional[float] = None
+    ema_21: Optional[float] = None
+    ema_50: Optional[float] = None
+    ema_200: Optional[float] = None
+    ema_alignment: Optional[str] = None  # BULLISH_STACK, BEARISH_STACK, etc.
+    rsi_14: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    adx_14: Optional[float] = None
+    plus_di: Optional[float] = None
+    minus_di: Optional[float] = None
+    obv_trend: Optional[str] = None  # RISING, FALLING, FLAT
 
 
 def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[UnderlyingFeatures]:
@@ -81,7 +102,34 @@ def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[Underlying
     
     # Calculate Realized Volatility (also used in Category C)
     rv20 = calculate_rv(closes, 20)
-    
+
+    # =========================================================================
+    # Category G: Technical Indicators (for Directional pillar)
+    # =========================================================================
+    ema_9 = calculate_ema(closes, 9)
+    ema_21 = calculate_ema(closes, 21)
+    ema_50 = calculate_ema(closes, 50)
+    ema_200 = calculate_ema(closes, 200)
+
+    ema_alignment_val = None
+    if any(e is not None for e in [ema_9, ema_21, ema_50, ema_200]):
+        ema_alignment_val = classify_ema_alignment(
+            current_close, ema_9, ema_21, ema_50, ema_200
+        )
+
+    rsi_14 = calculate_rsi(closes, 14)
+
+    macd_result = calculate_macd(closes)
+    macd_histogram = macd_result.histogram if macd_result else None
+
+    adx_result = calculate_adx(bars, 14)
+    adx_14 = adx_result.adx if adx_result else None
+    plus_di = adx_result.plus_di if adx_result else None
+    minus_di = adx_result.minus_di if adx_result else None
+
+    obv_result = calculate_obv_trend(bars, 20)
+    obv_trend_val = obv_result["trend"] if obv_result else None
+
     return UnderlyingFeatures(
         close=current_close,
         sma20=sma20,
@@ -93,4 +141,15 @@ def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[Underlying
         atr14=atr14,
         atr14_pct=atr14_pct,
         rv20=rv20,
+        ema_9=ema_9,
+        ema_21=ema_21,
+        ema_50=ema_50,
+        ema_200=ema_200,
+        ema_alignment=ema_alignment_val,
+        rsi_14=rsi_14,
+        macd_histogram=macd_histogram,
+        adx_14=adx_14,
+        plus_di=plus_di,
+        minus_di=minus_di,
+        obv_trend=obv_trend_val,
     )
