@@ -369,7 +369,7 @@ def calculate_obv_trend(
 # ---------------------------------------------------------------------------
 
 
-def _classify_ema_alignment(
+def classify_ema_alignment(
     price: float,
     ema9: float | None,
     ema21: float | None,
@@ -662,7 +662,7 @@ def compute_stock_technicals(
     ema_21 = calculate_ema(closes, 21)
     ema_50 = calculate_ema(closes, 50)
     ema_200 = calculate_ema(closes, 200)
-    ema_alignment = _classify_ema_alignment(price, ema_9, ema_21, ema_50, ema_200)
+    ema_alignment = classify_ema_alignment(price, ema_9, ema_21, ema_50, ema_200)
 
     # --- Indicators ---
     rsi_14 = calculate_rsi(closes)

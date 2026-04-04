@@ -877,6 +877,18 @@ function EditablePolicyConfig({
                 error={errors['pillars.directional.momentum_weight']}
               />
               <ConfigField
+                label="Trend Strength (ADX)"
+                value={displayConfig.pillars.directional.trend_strength_weight * 100}
+                unit="%"
+                fieldPath="pillars.directional.trend_strength_weight"
+                isEditing={isEditing}
+                onChange={(path, value) => onConfigChange(path, value / 100)}
+                min={0}
+                max={100}
+                step={5}
+                error={errors['pillars.directional.trend_strength_weight']}
+              />
+              <ConfigField
                 label="Signal Confirmation"
                 value={displayConfig.pillars.directional.signal_confirmation_weight * 100}
                 unit="%"
@@ -918,6 +930,7 @@ function EditablePolicyConfig({
                 'text-xs mt-2',
                 Math.abs((displayConfig.pillars.directional.trend_alignment_weight +
                   displayConfig.pillars.directional.momentum_weight +
+                  displayConfig.pillars.directional.trend_strength_weight +
                   displayConfig.pillars.directional.signal_confirmation_weight +
                   displayConfig.pillars.directional.relative_strength_weight +
                   displayConfig.pillars.directional.catalyst_weight) - 1) > 0.01
@@ -926,6 +939,7 @@ function EditablePolicyConfig({
               )}>
                 Total: {((displayConfig.pillars.directional.trend_alignment_weight +
                   displayConfig.pillars.directional.momentum_weight +
+                  displayConfig.pillars.directional.trend_strength_weight +
                   displayConfig.pillars.directional.signal_confirmation_weight +
                   displayConfig.pillars.directional.relative_strength_weight +
                   displayConfig.pillars.directional.catalyst_weight) * 100).toFixed(0)}%
@@ -1272,6 +1286,7 @@ export default function PolicyConfig() {
     // Validate directional subscore weights sum to 1
     const dirSum = config.pillars.directional.trend_alignment_weight +
       config.pillars.directional.momentum_weight +
+      config.pillars.directional.trend_strength_weight +
       config.pillars.directional.signal_confirmation_weight +
       config.pillars.directional.relative_strength_weight +
       config.pillars.directional.catalyst_weight

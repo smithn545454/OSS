@@ -674,27 +674,39 @@ class PillarWeights(OSSBaseModel):
 
 class DirectionalPillarConfig(OSSBaseModel):
     """Directional pillar subscore weights (Section 14.2).
-    
-    Weights must sum to 1.0.
+
+    Weights must sum to 1.0. Field names kept for backward compatibility
+    with existing Policy records in DynamoDB.
     """
 
-    # Subscore weights
-    trend_alignment_weight: float = 0.30
-    momentum_weight: float = 0.25
-    signal_confirmation_weight: float = 0.20
-    relative_strength_weight: float = 0.15
-    catalyst_weight: float = 0.10
-    
+    # Subscore weights (6 subscores)
+    trend_alignment_weight: float = 0.25  # EMA alignment (was 0.30 with SMA)
+    momentum_weight: float = 0.25  # RSI + MACD + returns composite
+    trend_strength_weight: float = 0.15  # NEW: ADX with +DI/-DI
+    signal_confirmation_weight: float = 0.15  # Scanner triggers (was 0.20)
+    relative_strength_weight: float = 0.10  # RS vs SPY + OBV (was 0.15)
+    catalyst_weight: float = 0.10  # Earnings + SEC filings
+
     # DTE bucket momentum blending weights (return_5d weight, return_20d is 1 - this)
     momentum_blend_bucket_a: float = 0.70  # 7-21 DTE: 70% 5d, 30% 20d
     momentum_blend_bucket_b: float = 0.50  # 22-45 DTE: 50% each
     momentum_blend_bucket_c: float = 0.30  # 46-75 DTE: 30% 5d, 70% 20d
     momentum_blend_bucket_d: float = 0.20  # 76-120 DTE: 20% 5d, 80% 20d
 
+    # Momentum sub-blending weights (RSI, MACD, returns components)
+    momentum_rsi_blend: float = 0.35
+    momentum_macd_blend: float = 0.25
+    momentum_returns_blend: float = 0.40
+
+    # Relative strength sub-blending weights (RS performance, OBV confirmation)
+    rs_performance_blend: float = 0.70
+    rs_obv_blend: float = 0.30
+
     @model_validator(mode="after")
     def _subscore_weights_must_sum_to_one(self) -> "DirectionalPillarConfig":
         total = (
             self.trend_alignment_weight + self.momentum_weight
+            + self.trend_strength_weight
             + self.signal_confirmation_weight + self.relative_strength_weight
             + self.catalyst_weight
         )

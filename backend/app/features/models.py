@@ -79,6 +79,21 @@ class FeatureSet:
     # =========================================================================
     days_to_earnings: Optional[int] = None  # days (null if unknown)
     recent_sec_filing: bool = False  # 1 if 8-K/10-Q/10-K in last 10 trading days
+
+    # =========================================================================
+    # Category G: Technical Indicators (for Directional pillar)
+    # =========================================================================
+    ema_9: Optional[float] = None
+    ema_21: Optional[float] = None
+    ema_50: Optional[float] = None
+    ema_200: Optional[float] = None
+    ema_alignment: Optional[str] = None  # BULLISH_STACK, BEARISH_STACK, etc.
+    rsi_14: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    adx_14: Optional[float] = None
+    plus_di: Optional[float] = None
+    minus_di: Optional[float] = None
+    obv_trend: Optional[str] = None  # RISING, FALLING, FLAT
     
     # =========================================================================
     # Metadata
@@ -151,7 +166,23 @@ class FeatureSet:
             FeatureValue(evaluation_id=self.evaluation_id, feature_name="days_to_earnings", value=self.days_to_earnings, units="days"),
             FeatureValue(evaluation_id=self.evaluation_id, feature_name="recent_sec_filing", value=self.recent_sec_filing, units="boolean"),
         ])
-        
+
+        # Category G
+        eid = self.evaluation_id
+        features.extend([
+            FeatureValue(evaluation_id=eid, feature_name="ema_9", value=self.ema_9, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="ema_21", value=self.ema_21, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="ema_50", value=self.ema_50, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="ema_200", value=self.ema_200, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="ema_alignment", value=self.ema_alignment, units="enum"),
+            FeatureValue(evaluation_id=eid, feature_name="rsi_14", value=self.rsi_14, units="index"),
+            FeatureValue(evaluation_id=eid, feature_name="macd_histogram", value=self.macd_histogram, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="adx_14", value=self.adx_14, units="index"),
+            FeatureValue(evaluation_id=eid, feature_name="plus_di", value=self.plus_di, units="index"),
+            FeatureValue(evaluation_id=eid, feature_name="minus_di", value=self.minus_di, units="index"),
+            FeatureValue(evaluation_id=eid, feature_name="obv_trend", value=self.obv_trend, units="enum"),
+        ])
+
         return features
     
     def to_dict(self) -> dict[str, Any]:
@@ -197,6 +228,18 @@ class FeatureSet:
             # Category F
             "days_to_earnings": self.days_to_earnings,
             "recent_sec_filing": self.recent_sec_filing,
+            # Category G
+            "ema_9": self.ema_9,
+            "ema_21": self.ema_21,
+            "ema_50": self.ema_50,
+            "ema_200": self.ema_200,
+            "ema_alignment": self.ema_alignment,
+            "rsi_14": self.rsi_14,
+            "macd_histogram": self.macd_histogram,
+            "adx_14": self.adx_14,
+            "plus_di": self.plus_di,
+            "minus_di": self.minus_di,
+            "obv_trend": self.obv_trend,
             # Metadata
             "computed_at": self.computed_at,
         }

@@ -526,17 +526,17 @@ class TestSignalConfirmationSubscore:
 
 class TestRelativeStrengthSubscore:
     """Tests for relative strength subscore."""
-    
+
     def test_outperforming_call(self, bullish_call_context):
         """Test outperforming stock with CALL."""
-        subscore = compute_relative_strength_subscore(bullish_call_context)
+        subscore = compute_relative_strength_subscore(bullish_call_context, DirectionalPillarConfig())
         assert subscore.score >= 65
-    
+
     def test_underperforming_put(self, bearish_put_context):
         """Test underperforming stock with PUT (should score high)."""
-        subscore = compute_relative_strength_subscore(bearish_put_context)
+        subscore = compute_relative_strength_subscore(bearish_put_context, DirectionalPillarConfig())
         assert subscore.score >= 65
-    
+
     def test_missing_data(self):
         """Test with missing RS data."""
         ctx = ScoringContext(
@@ -546,7 +546,7 @@ class TestRelativeStrengthSubscore:
             dte_bucket="B",
             rs_20d=None,
         )
-        subscore = compute_relative_strength_subscore(ctx)
+        subscore = compute_relative_strength_subscore(ctx, DirectionalPillarConfig())
         assert subscore.score == 50
 
 
@@ -832,9 +832,9 @@ class TestDirectionalPillar:
         result = compute_directional_pillar(bullish_call_context)
         assert result.pillar_id == PillarId.DIRECTIONAL
         assert result.score >= 65
-        assert len(result.subscores) == 5
+        assert len(result.subscores) == 6
         assert len(result.top_contributors) <= 3
-    
+
     def test_bearish_put_high_score(self, bearish_put_context):
         """Test bearish setup with PUT scores high."""
         result = compute_directional_pillar(bearish_put_context)
@@ -973,6 +973,17 @@ class TestPillarCalculator:
         fs_mock.oi_5d_change_pct = bullish_call_context.oi_5d_change_pct
         fs_mock.days_to_earnings = bullish_call_context.days_to_earnings
         fs_mock.recent_sec_filing = bullish_call_context.recent_sec_filing
+        fs_mock.ema_9 = None
+        fs_mock.ema_21 = None
+        fs_mock.ema_50 = None
+        fs_mock.ema_200 = None
+        fs_mock.ema_alignment = None
+        fs_mock.rsi_14 = None
+        fs_mock.macd_histogram = None
+        fs_mock.adx_14 = None
+        fs_mock.plus_di = None
+        fs_mock.minus_di = None
+        fs_mock.obv_trend = None
         
         # Create mock opportunity
         opp_mock = MagicMock()

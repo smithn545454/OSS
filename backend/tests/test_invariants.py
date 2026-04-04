@@ -91,6 +91,7 @@ class TestScoreInvariants:
         cfg = DirectionalPillarConfig()
         total = (
             cfg.trend_alignment_weight + cfg.momentum_weight
+            + cfg.trend_strength_weight
             + cfg.signal_confirmation_weight + cfg.relative_strength_weight
             + cfg.catalyst_weight
         )
