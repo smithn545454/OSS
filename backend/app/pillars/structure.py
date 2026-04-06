@@ -147,6 +147,11 @@ def generate_structure_tags(subscores: list[Subscore], ctx: ScoringContext) -> l
             elif subscore.score <= 30:
                 tags.append("SHORT_DTE")
 
+    # Interaction tag: both delta and IV in sweet spot
+    abs_delta = abs(ctx.delta)
+    if abs_delta <= 0.15 and ctx.iv is not None and 0 < ctx.iv <= 0.35:
+        tags.append("ENTRY_SWEET_SPOT")
+
     return tags
 
 
@@ -187,6 +192,18 @@ def compute_structure_pillar(
 
     # Calculate final weighted score
     final_score = sum(s.weighted_contribution for s in subscores)
+
+    # Interaction bonus: reward co-occurrence of low delta + low IV
+    # Intelligence data: +15.1pp WR lift when both are in favorable zone (62% WR, n=2,518)
+    abs_delta = abs(ctx.delta)
+    iv = ctx.iv
+    if (
+        config.interaction_bonus > 0
+        and abs_delta <= config.interaction_delta_threshold
+        and iv is not None
+        and 0 < iv <= config.interaction_iv_threshold
+    ):
+        final_score += config.interaction_bonus
 
     # Generate tags
     tags = generate_structure_tags(subscores, ctx)

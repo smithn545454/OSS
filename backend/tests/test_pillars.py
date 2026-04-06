@@ -922,6 +922,88 @@ class TestStructurePillar:
         assert "LOW_IV_ENTRY" in result.tags
 
 
+class TestEntryQualitySweetSpotBonus:
+    """Tests for the low-delta + low-IV interaction bonus."""
+
+    def test_sweet_spot_bonus_applied(self):
+        """Sweet spot (low delta + low IV) adds bonus points and tag."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.10,
+            iv=0.25,
+            dte=45,
+        )
+        result = compute_structure_pillar(ctx)
+        # Compute expected score without bonus for comparison
+        no_bonus_config = StructurePillarConfig(interaction_bonus=0.0)
+        result_no_bonus = compute_structure_pillar(ctx, config=no_bonus_config)
+        assert result.score == pytest.approx(result_no_bonus.score + 8.0, abs=0.1)
+        assert "ENTRY_SWEET_SPOT" in result.tags
+
+    def test_bonus_not_applied_high_delta(self):
+        """No bonus when delta is above threshold."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.40,
+            iv=0.25,
+            dte=45,
+        )
+        result = compute_structure_pillar(ctx)
+        assert "ENTRY_SWEET_SPOT" not in result.tags
+
+    def test_bonus_not_applied_high_iv(self):
+        """No bonus when IV is above threshold."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.10,
+            iv=0.50,
+            dte=45,
+        )
+        result = compute_structure_pillar(ctx)
+        assert "ENTRY_SWEET_SPOT" not in result.tags
+
+    def test_bonus_disabled_via_config(self):
+        """Bonus can be disabled by setting interaction_bonus=0."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="CALL",
+            dte_bucket="B",
+            delta=0.10,
+            iv=0.25,
+            dte=45,
+        )
+        config = StructurePillarConfig(interaction_bonus=0.0)
+        result_disabled = compute_structure_pillar(ctx, config=config)
+        result_enabled = compute_structure_pillar(ctx)
+        assert result_enabled.score > result_disabled.score
+
+    def test_bonus_clamped_at_100(self):
+        """Bonus cannot push score above 100."""
+        ctx = ScoringContext(
+            evaluation_id="test",
+            underlying_ticker="TEST",
+            option_type="PUT",
+            dte_bucket="C",
+            delta=-0.08,
+            iv=0.12,
+            dte=55,
+        )
+        # Use a large bonus to test clamping
+        config = StructurePillarConfig(interaction_bonus=50.0)
+        result = compute_structure_pillar(ctx, config=config)
+        assert result.score == 100.0
+
+
 # ============================================================================
 # Test Pillar Calculator Integration
 # ============================================================================

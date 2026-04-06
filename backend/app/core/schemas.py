@@ -758,6 +758,11 @@ class StructurePillarConfig(OSSBaseModel):
     raw_iv_weight: float = 0.25
     dte_appropriateness_weight: float = 0.25
 
+    # Interaction bonus: awarded when both delta and IV are in the sweet spot
+    interaction_bonus: float = 8.0              # Points added to pillar score (0 = disabled)
+    interaction_delta_threshold: float = 0.15   # abs(delta) must be <= this
+    interaction_iv_threshold: float = 0.35      # IV must be <= this
+
     @model_validator(mode="before")
     @classmethod
     def _migrate_old_fields(cls, data: Any) -> Any:
