@@ -702,6 +702,32 @@ class DirectionalPillarConfig(OSSBaseModel):
     rs_performance_blend: float = 0.70
     rs_obv_blend: float = 0.30
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_add_trend_strength(cls, data: Any) -> Any:
+        """Migrate policies created before trend_strength_weight existed.
+
+        Old policies have 5 weights summing to 1.0. When trend_strength_weight
+        (default 0.15) is injected by Pydantic, the total becomes 1.15. Fix by
+        scaling the old weights down proportionally to free up 0.15 for the new
+        field. Only applies when old weights sum to ~1.0 (valid pre-migration).
+        """
+        if isinstance(data, dict) and "trend_strength_weight" not in data:
+            old_keys = [
+                "trend_alignment_weight", "momentum_weight",
+                "signal_confirmation_weight", "relative_strength_weight",
+                "catalyst_weight",
+            ]
+            old_total = sum(data.get(k, 0) for k in old_keys if k in data)
+            if abs(old_total - 1.0) < 1e-4:
+                new_weight = 0.15
+                scale = (1.0 - new_weight) / old_total
+                for k in old_keys:
+                    if k in data:
+                        data[k] = round(data[k] * scale, 6)
+                data["trend_strength_weight"] = new_weight
+        return data
+
     @model_validator(mode="after")
     def _subscore_weights_must_sum_to_one(self) -> "DirectionalPillarConfig":
         total = (
