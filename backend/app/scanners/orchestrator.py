@@ -902,7 +902,7 @@ class ScannerOrchestrator:
                             theses=theses if 'theses' in dir() else [],
                         )
                     except Exception as e:
-                        logger.warning(f"Slack alerts failed (non-blocking): {e}")
+                        logger.warning(f"Slack alerts failed (non-blocking): {e}", exc_info=True)
 
                 # Mark pipeline run as complete (batch path only)
                 if not streaming:
@@ -1961,6 +1961,14 @@ async def _fire_slack_alerts(
         if verdict_str not in allowed_verdicts:
             continue
 
+        quality_tier_str = None
+        if decision.quality_tier:
+            quality_tier_str = (
+                decision.quality_tier.value
+                if hasattr(decision.quality_tier, "value")
+                else str(decision.quality_tier)
+            )
+
         checked_count += 1
 
         # Get scanner types for this evaluation
@@ -2035,6 +2043,7 @@ async def _fire_slack_alerts(
             underlying_price=ev.underlying_price or 0,
             gate_margin=gate_margin,
             dte=ev.dte or 0,
+            quality_tier=quality_tier_str,
         )
         if success:
             sent_count += 1

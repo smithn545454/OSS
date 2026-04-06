@@ -27,6 +27,7 @@ class AlertConfigUpdate(BaseModel):
     webhook_channels: Optional[list[dict[str, str]]] = None
     setup_rule_filter_ids: Optional[list[str]] = None
     verdicts: Optional[list[str]] = None
+    tier_1_bypass: Optional[bool] = None
 
 
 class TestAlertRequest(BaseModel):
@@ -160,12 +161,15 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         except Exception:
             pass
 
+    tier_1_bypass_enabled = config.get("tier_1_bypass", True)
+
     breakdown = {
         "totalEvaluations": len(evaluations),
         "belowScoreThreshold": 0,
         "aboveMaxPremium": 0,
         "failedUrgencyConvergence": 0,
         "noMatchingSetupRule": 0,
+        "tier1Bypassed": 0,
         "wouldAlert": 0,
     }
 
@@ -321,6 +325,13 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             final_score=final_score,
             evaluated_at=evaluated_at,
         )
+
+        # Check Tier 1 fast path — bypass soft filters
+        quality_tier = item.get("quality_tier")
+        if tier_1_bypass_enabled and quality_tier == "TIER_1":
+            breakdown["tier1Bypassed"] += 1
+            breakdown["wouldAlert"] += 1
+            continue
 
         # Check score threshold
         if result.total < threshold:

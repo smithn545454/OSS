@@ -42,6 +42,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "cheap_gem_enabled": False,
     "cheap_gem_threshold": 60,
     "cheap_gem_max_premium": 1.50,
+    "tier_1_bypass": True,
 }
 
 
@@ -87,6 +88,7 @@ async def log_alert(
     conviction_score: float,
     channel_name: str,
     status: str,
+    quality_tier: str | None = None,
 ) -> None:
     """Write an alert log entry for audit/volume preview."""
     try:
@@ -106,6 +108,7 @@ async def log_alert(
             "conviction_score": conviction_score,
             "channel": channel_name,
             "status": status,
+            "quality_tier": quality_tier,
             "timestamp": ts,
         }
         await db.put_item(PAPER_POSITIONS_TABLE, item)
@@ -245,6 +248,7 @@ class SlackAlertService:
         verdict: str = "APPROVE",
         matched_rule_ids: list[str] | None = None,
         premium: float = 0,
+        quality_tier: str | None = None,
     ) -> tuple[bool, str | None]:
         """Determine if an alert should be sent.
 
@@ -252,6 +256,8 @@ class SlackAlertService:
             Tuple of (should_alert, reason_if_not)
         """
         config = await self._ensure_config()
+
+        # --- Hard checks (always enforced, even for Tier 1) ---
 
         if not config.get("enabled", False):
             return False, "Alerts disabled"
@@ -264,6 +270,29 @@ class SlackAlertService:
         allowed_verdicts = config.get("verdicts", ["APPROVE"])
         if verdict not in allowed_verdicts:
             return False, f"Verdict {verdict} not in allowed list {allowed_verdicts}"
+
+        # Reset daily count if new day
+        self._reset_daily_count_if_needed()
+
+        # Check daily cap
+        daily_cap = config.get("daily_cap", 10)
+        if self._daily_count >= daily_cap:
+            return False, f"Daily alert cap ({daily_cap}) reached"
+
+        # Check cooldown
+        if not self._check_cooldown(contract_id):
+            cooldown = config.get("cooldown_minutes", 30)
+            return False, f"Contract in {cooldown}min cooldown"
+
+        # --- Tier 1 fast path: bypass soft filters ---
+        if quality_tier == "TIER_1" and config.get("tier_1_bypass", True):
+            logger.info(
+                f"Tier 1 fast path: alerting for {contract_id} "
+                f"(score={conviction_score:.0f})"
+            )
+            return True, "tier_1"
+
+        # --- Soft checks (skipped for Tier 1) ---
 
         # Check score threshold (with cheap gem fallback)
         threshold = config.get("score_threshold", 75)
@@ -303,19 +332,6 @@ class SlackAlertService:
         if self._is_within_quiet_hours():
             return False, "Within quiet hours"
 
-        # Reset daily count if new day
-        self._reset_daily_count_if_needed()
-
-        # Check daily cap
-        daily_cap = config.get("daily_cap", 10)
-        if self._daily_count >= daily_cap:
-            return False, f"Daily alert cap ({daily_cap}) reached"
-
-        # Check cooldown
-        if not self._check_cooldown(contract_id):
-            cooldown = config.get("cooldown_minutes", 30)
-            return False, f"Contract in {cooldown}min cooldown"
-
         return True, "cheap_gem" if is_cheap_gem else None
 
     def _format_message(
@@ -340,6 +356,7 @@ class SlackAlertService:
         dte: int = 0,
         is_test: bool = False,
         is_cheap_gem: bool = False,
+        quality_tier: str | None = None,
     ) -> dict[str, Any]:
         """Format Slack message with rich blocks.
 
@@ -356,16 +373,22 @@ class SlackAlertService:
         test_prefix = "[TEST] " if is_test else ""
         gem_prefix = "\U0001f48e Cheap Gem: " if is_cheap_gem else ""
 
+        # Tier 1 gets a distinct header
+        if quality_tier == "TIER_1" and not is_test:
+            header_text = f"\u2b50 {test_prefix}TIER 1: {ticker} ${strike} {option_type}"
+        else:
+            header_text = (
+                f"\U0001f3af {test_prefix}{gem_prefix}High Conviction: "
+                f"{ticker} ${strike} {option_type}"
+            )
+
         blocks: list[dict[str, Any]] = [
             # Header
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": (
-                        f"\U0001f3af {test_prefix}{gem_prefix}High Conviction: "
-                        f"{ticker} ${strike} {option_type}"
-                    ),
+                    "text": header_text,
                     "emoji": True,
                 },
             },
@@ -400,6 +423,12 @@ class SlackAlertService:
         dir_score = pillars.get("DIRECTIONAL", 0)
         vol_score = pillars.get("VOLATILITY", 0)
         str_score = pillars.get("STRUCTURE", 0)
+
+        tier_labels = {"TIER_1": "\u2b50 Tier 1", "TIER_2": "Tier 2", "TIER_3": "Tier 3"}
+        tier_line = ""
+        if quality_tier and quality_tier in tier_labels:
+            tier_line = f"Quality: {tier_labels[quality_tier]}\n"
+
         blocks.append(
             {
                 "type": "section",
@@ -408,6 +437,7 @@ class SlackAlertService:
                     "text": (
                         f"\U0001f4c8 *Scores*\n"
                         f"Conviction: {conviction_score:.0f}/100\n"
+                        f"{tier_line}"
                         f"Directional: {dir_score:.0f} \u00b7 "
                         f"Volatility: {vol_score:.0f} \u00b7 "
                         f"Structure: {str_score:.0f}\n"
@@ -501,6 +531,7 @@ class SlackAlertService:
         underlying_price: float = 0,
         gate_margin: float = 50,
         dte: int = 0,
+        quality_tier: str | None = None,
     ) -> tuple[bool, str | None]:
         """Send a Slack alert for a high-conviction opportunity.
 
@@ -515,6 +546,7 @@ class SlackAlertService:
             verdict=verdict,
             matched_rule_ids=matched_rule_ids,
             premium=premium,
+            quality_tier=quality_tier,
         )
 
         if not should_send:
@@ -544,6 +576,7 @@ class SlackAlertService:
             gate_margin=gate_margin,
             dte=dte,
             is_cheap_gem=is_cheap_gem,
+            quality_tier=quality_tier,
         )
 
         # Send to all configured webhooks
@@ -573,6 +606,7 @@ class SlackAlertService:
                     conviction_score=conviction_score,
                     channel_name=channel,
                     status="sent",
+                    quality_tier=quality_tier,
                 )
 
             except httpx.HTTPError as e:
@@ -583,6 +617,7 @@ class SlackAlertService:
                     conviction_score=conviction_score,
                     channel_name=channel,
                     status="failed",
+                    quality_tier=quality_tier,
                 )
 
         if sent_count == 0:
