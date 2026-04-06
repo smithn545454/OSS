@@ -15,7 +15,8 @@ import {
   GitCompare,
   History,
   AlertCircle,
-  Crosshair
+  Crosshair,
+  Globe
 } from 'lucide-react'
 import { usePolicies, useActivePolicy, useActivatePolicy, useCreatePolicy, usePolicyDiff } from '@/hooks/useApi'
 import { formatDate, formatDateTime } from '@/lib/formatTime'
@@ -364,7 +365,7 @@ interface EditablePolicyConfigProps {
   isEditing: boolean
   editedConfig: PolicyConfigType
   errors: Record<string, string>
-  onConfigChange: (path: string, value: number) => void
+  onConfigChange: (path: string, value: number | string) => void
 }
 
 function EditablePolicyConfig({ 
@@ -378,6 +379,38 @@ function EditablePolicyConfig({
 
   return (
     <div className="space-y-6">
+      {/* Ticker Universe */}
+      <ConfigSection title="Ticker Universe" icon={<Globe className="h-4 w-4" />}>
+        <div className="space-y-3">
+          <div className="rounded-lg bg-oss-bg p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-oss-muted">Scanner Universe</span>
+                <p className="text-xs text-oss-muted/60 mt-0.5">
+                  Controls which tickers the pipeline scans each run
+                </p>
+              </div>
+              {isEditing ? (
+                <select
+                  value={displayConfig.watchlist?.universe ?? 'sp500'}
+                  onChange={(e) => onConfigChange('watchlist.universe', e.target.value)}
+                  className="rounded-md border border-oss-border bg-oss-surface px-3 py-1.5 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                >
+                  <option value="sp500">S&P 500 (~500 tickers)</option>
+                  <option value="russell1000">Russell 1000 (~1,000 tickers)</option>
+                </select>
+              ) : (
+                <span className="text-sm font-mono text-oss-text">
+                  {(displayConfig.watchlist?.universe ?? 'sp500') === 'sp500'
+                    ? 'S&P 500'
+                    : 'Russell 1000'}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </ConfigSection>
+
       {/* Scanner Config */}
       <ConfigSection title="Scanner Configuration" icon={<Activity className="h-4 w-4" />}>
         <div className="space-y-4">
@@ -1205,7 +1238,7 @@ function EditablePolicyConfig({
 // ============================================================================
 
 // Helper to deep clone and set nested value
-function setNestedValue(obj: PolicyConfigType, path: string, value: number): PolicyConfigType {
+function setNestedValue(obj: PolicyConfigType, path: string, value: number | string): PolicyConfigType {
   const clone = JSON.parse(JSON.stringify(obj)) as PolicyConfigType
   const parts = path.split('.')
   let current: Record<string, unknown> = clone as unknown as Record<string, unknown>
@@ -1249,7 +1282,7 @@ export default function PolicyConfig() {
     setIsEditing(false)
   }, [])
 
-  const handleConfigChange = useCallback((path: string, value: number) => {
+  const handleConfigChange = useCallback((path: string, value: number | string) => {
     if (!editedConfig) return
     
     const newConfig = setNestedValue(editedConfig, path, value)

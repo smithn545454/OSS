@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from app.core.schemas import PolicyConfig, WatchlistConfig
+from app.core.schemas import PolicyConfig, TickerUniverse, WatchlistConfig
 
 logger = logging.getLogger(__name__)
 
@@ -133,28 +133,35 @@ class WatchlistManager:
 
     @classmethod
     async def from_policy_async(cls, policy_config: PolicyConfig) -> "WatchlistManager":
-        """Create manager from policy configuration, loading S&P 500 from DynamoDB.
+        """Create manager from policy configuration, loading tickers from DynamoDB.
 
+        Loads tickers based on the configured universe tier (sp500, russell1000).
         Falls back to DEFAULT_WATCHLIST if DynamoDB read fails.
 
         Args:
             policy_config: The policy configuration
 
         Returns:
-            WatchlistManager instance with S&P 500 tickers if available
+            WatchlistManager instance with universe tickers if available
         """
         from app.db.tables import SP500TickerTable
 
-        sp500: Optional[list[str]] = None
+        universe = policy_config.watchlist.universe
+        db_tickers: Optional[list[str]] = None
         try:
-            sp500 = await SP500TickerTable.get_active_tickers()
-            if not sp500:
-                sp500 = None
+            if universe == TickerUniverse.SP500:
+                db_tickers = await SP500TickerTable.get_active_tickers()
             else:
-                logger.info(f"Loaded {len(sp500)} S&P 500 tickers from DynamoDB")
+                db_tickers = await SP500TickerTable.get_tickers_by_universe(universe.value)
+            if not db_tickers:
+                db_tickers = None
+            else:
+                logger.info(
+                    f"Loaded {len(db_tickers)} tickers for universe={universe.value} from DynamoDB"
+                )
         except Exception as e:
-            logger.warning(f"Failed to load S&P 500 tickers, using fallback: {e}")
-        return cls(config=policy_config.watchlist, sp500_tickers=sp500)
+            logger.warning(f"Failed to load {universe.value} tickers, using fallback: {e}")
+        return cls(config=policy_config.watchlist, sp500_tickers=db_tickers)
 
 
 def get_default_watchlist() -> list[str]:

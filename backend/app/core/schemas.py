@@ -852,10 +852,19 @@ class TrackingConfig(OSSBaseModel):
     shadow_near_miss_threshold: int = 60
 
 
+class TickerUniverse(str, Enum):
+    """Ticker universe tiers for scanner watchlist."""
+
+    SP500 = "sp500"
+    RUSSELL1000 = "russell1000"
+    CUSTOM = "custom"
+
+
 class WatchlistConfig(OSSBaseModel):
     """Watchlist configuration for scanners."""
 
     tickers: list[str] = Field(default_factory=list)
+    universe: TickerUniverse = TickerUniverse.SP500
     max_concurrent_requests: int = 50  # Increased from 10 for better throughput
     batch_size: int = 100  # Increased from 25 for larger ticker lists
 

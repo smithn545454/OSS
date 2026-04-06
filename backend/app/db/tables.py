@@ -1803,8 +1803,10 @@ class CalibrationReportTable:
 class SP500TickerTable:
     """Operations for the sp500-tickers table.
 
-    Reads the S&P 500 ticker list maintained by the UV scanner infrastructure.
+    Stores ticker universe data with index membership for tiered scanning.
     PK=TICKER_LIST, SK={ticker}
+    Fields: ticker, sector, is_active, index_membership (list of indices),
+            has_options (bool), avg_dollar_volume (number)
     """
 
     TABLE = SP500_TICKERS_TABLE
@@ -1823,6 +1825,32 @@ class SP500TickerTable:
         return sorted(item["ticker"] for item in items if item.get("is_active", True))
 
     @staticmethod
+    async def get_tickers_by_universe(universe: str) -> list[str]:
+        """Get active tickers belonging to a specific universe tier.
+
+        Filters by index_membership field. Tickers without index_membership
+        are treated as S&P 500 for backward compatibility.
+
+        Args:
+            universe: Universe tier to filter by (e.g. "sp500", "russell1000")
+
+        Returns:
+            Sorted list of active ticker symbols in the specified universe
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            SP500TickerTable.TABLE, "TICKER_LIST", limit=None, scan_forward=True
+        )
+        result = []
+        for item in items:
+            if not item.get("is_active", True):
+                continue
+            membership = item.get("index_membership", ["sp500"])
+            if universe in membership:
+                result.append(item["ticker"])
+        return sorted(result)
+
+    @staticmethod
     async def get_sector_map() -> dict[str, str]:
         """Get a mapping of ticker → sector for all active S&P 500 tickers.
 
@@ -1838,6 +1866,41 @@ class SP500TickerTable:
             for item in items
             if item.get("is_active", True) and item.get("sector")
         }
+
+    @staticmethod
+    async def put_ticker(
+        ticker: str,
+        sector: str = "",
+        is_active: bool = True,
+        index_membership: list[str] | None = None,
+        has_options: bool = True,
+        avg_dollar_volume: float | None = None,
+    ) -> None:
+        """Write or update a ticker in the universe table.
+
+        Args:
+            ticker: Ticker symbol
+            sector: Sector classification
+            is_active: Whether the ticker is actively scanned
+            index_membership: List of index tiers (e.g. ["sp500", "russell1000"])
+            has_options: Whether the ticker has liquid options
+            avg_dollar_volume: Average daily dollar volume
+        """
+        db = get_dynamodb()
+        item: dict[str, Any] = {
+            "PK": "TICKER_LIST",
+            "SK": ticker,
+            "ticker": ticker,
+            "sector": sector,
+            "is_active": is_active,
+            "index_membership": index_membership or ["sp500"],
+            "has_options": has_options,
+        }
+        if avg_dollar_volume is not None:
+            from decimal import Decimal
+
+            item["avg_dollar_volume"] = Decimal(str(avg_dollar_volume))
+        await db.put_item(SP500TickerTable.TABLE, item)
 
 
 class ScanStatusTable:

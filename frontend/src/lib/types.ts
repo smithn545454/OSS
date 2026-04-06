@@ -458,6 +458,13 @@ export interface TrackingConfig {
   shadow_near_miss_threshold: number
 }
 
+export interface WatchlistConfig {
+  tickers: string[]
+  universe: 'sp500' | 'russell1000' | 'custom'
+  max_concurrent_requests: number
+  batch_size: number
+}
+
 export interface PolicyConfig {
   scanner: ScannerConfig
   underlying_filter: UnderlyingFilterConfig
@@ -467,6 +474,7 @@ export interface PolicyConfig {
   pillar_weights: PillarWeights
   decision: DecisionConfig
   tracking: TrackingConfig
+  watchlist: WatchlistConfig
 }
 
 export interface PolicyChangelog {
