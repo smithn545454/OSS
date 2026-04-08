@@ -1930,7 +1930,7 @@ async def rescore_paper_positions(
     from app.pillars.volatility import compute_volatility_pillar
 
     # Load active policy for pillar config
-    policy = await PolicyService.get_active()
+    policy = await PolicyService().get_active()
     if not policy:
         raise HTTPException(status_code=500, detail="No active policy found")
     pillar_config = policy.config.pillars
