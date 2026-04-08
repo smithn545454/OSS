@@ -609,6 +609,8 @@ interface MatchedRuleDisplay {
   rule_id: string
   name: string
   mode: 'production' | 'test'
+  regime?: string
+  is_stale?: boolean
   criteria?: Record<string, unknown>
   performance_at_creation?: {
     win_rate?: number
@@ -621,6 +623,8 @@ interface MatchedRuleDisplay {
 function MatchedRulesPanel({ rules }: { rules: MatchedRuleDisplay[] }) {
   if (!rules || rules.length === 0) return null
 
+  const hasStaleRules = rules.some((r) => r.is_stale)
+
   return (
     <div className="rounded-xl border border-purple-400/20 bg-purple-400/5 p-6">
       <div className="flex items-center gap-3 mb-4">
@@ -628,6 +632,15 @@ function MatchedRulesPanel({ rules }: { rules: MatchedRuleDisplay[] }) {
         <h3 className="text-lg font-medium text-oss-text">Matching Setup Rules</h3>
         <span className="text-xs text-oss-muted">({rules.length})</span>
       </div>
+
+      {hasStaleRules && (
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 mb-3">
+          <p className="text-xs text-amber-400">
+            Some rules were created under an older scoring regime. Pillar score distributions have changed
+            since these rules were calibrated — consider re-running pattern discovery for updated rules.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {rules.map((rule) => (
@@ -644,6 +657,14 @@ function MatchedRulesPanel({ rules }: { rules: MatchedRuleDisplay[] }) {
               >
                 {rule.mode === 'production' ? 'Production' : 'Test'}
               </span>
+              {rule.is_stale && (
+                <span
+                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border bg-amber-500/10 text-amber-400 border-amber-500/20"
+                  title={`Created under scoring regime ${rule.regime || 'v1'}. Scoring logic has changed since — thresholds may not reflect current distributions.`}
+                >
+                  Needs Recalibration
+                </span>
+              )}
             </div>
             {rule.performance_at_creation && (
               <div className="flex items-center gap-4 text-xs text-oss-muted mb-2">

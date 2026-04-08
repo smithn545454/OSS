@@ -28,8 +28,11 @@ ANALYSIS_PK_PREFIX = "ANALYSIS#"
 SETUP_RULE_PK = "SETUP_RULE"
 
 # Scoring regime version. Bumped when pillar/gate/conviction logic changes materially.
-# Existing rules missing this field are treated as "v1" (pre-Entry Quality pillar).
-CURRENT_SCORING_REGIME = "v2"
+# v1: pre-Entry Quality pillar (before April 2026)
+# v2: Entry Quality added but before directional enhancement (April 1-2)
+# v3: current — Entry Quality structure, enhanced directional (EMA/RSI/ADX/OBV),
+#     interaction bonus, premium leverage subscore (April 3+)
+CURRENT_SCORING_REGIME = "v3"
 
 # Abbreviations for token-efficient CSV encoding
 SCANNER_ABBREV = {
@@ -531,6 +534,7 @@ async def list_setup_rules() -> list[dict[str, Any]]:
     for item in items:
         item.pop("PK", None)
         item.pop("SK", None)
+        item["is_stale"] = item.get("regime", "v1") != CURRENT_SCORING_REGIME
         rules.append(item)
 
     return rules

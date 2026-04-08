@@ -266,14 +266,18 @@ def format_matched_rules(
     include_criteria: bool = False,
 ) -> list[dict[str, Any]]:
     """Format matched rules for API response."""
+    from app.paper_trading.pattern_discovery import CURRENT_SCORING_REGIME
+
     result = []
     for rule in matched:
+        rule_regime = rule.get("regime", "v1")
         entry: dict[str, Any] = {
             "rule_id": rule["rule_id"],
             "name": rule["name"],
             "mode": rule.get("mode", "production"),
             "source": rule.get("source", "ai"),
-            "regime": rule.get("regime", "v1"),
+            "regime": rule_regime,
+            "is_stale": rule_regime != CURRENT_SCORING_REGIME,
             "performance_at_creation": rule.get("performance_at_creation"),
         }
         if include_criteria:
