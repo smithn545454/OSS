@@ -101,7 +101,113 @@ class FeatureSet:
     computed_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    
+
+    @classmethod
+    def from_feature_values(
+        cls, evaluation_id: str, feature_values: list[FeatureValue]
+    ) -> "FeatureSet":
+        """Reconstruct a FeatureSet from stored FeatureValue records.
+
+        Args:
+            evaluation_id: The evaluation this feature set belongs to.
+            feature_values: List of FeatureValue records from FeatureValueTable.
+
+        Returns:
+            FeatureSet with all available fields populated.
+        """
+        fv_map: dict[str, Any] = {fv.feature_name: fv.value for fv in feature_values}
+
+        def _float(key: str, default: Any = None) -> Optional[float]:
+            v = fv_map.get(key)
+            if v is None:
+                return default
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        def _int(key: str, default: Any = None) -> Optional[int]:
+            v = fv_map.get(key)
+            if v is None:
+                return default
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return default
+
+        def _bool(key: str, default: bool = False) -> bool:
+            v = fv_map.get(key)
+            if v is None:
+                return default
+            if isinstance(v, bool):
+                return v
+            return str(v).lower() in ("true", "1", "yes")
+
+        def _str(key: str, default: Optional[str] = None) -> Optional[str]:
+            v = fv_map.get(key)
+            return str(v) if v is not None else default
+
+        iv_regime_str = _str("iv_regime")
+        try:
+            iv_regime = IVRegime(iv_regime_str) if iv_regime_str else IVRegime.IV_NEUTRAL_REGIME
+        except ValueError:
+            iv_regime = IVRegime.IV_NEUTRAL_REGIME
+
+        return cls(
+            evaluation_id=evaluation_id,
+            # Category A
+            close=_float("close", 0.0),
+            sma20=_float("sma20"),
+            sma50=_float("sma50"),
+            return_5d=_float("return_5d"),
+            return_20d=_float("return_20d"),
+            trend_aligned_bullish=_bool("trend_aligned_bullish"),
+            trend_aligned_bearish=_bool("trend_aligned_bearish"),
+            atr14=_float("atr14"),
+            atr14_pct=_float("atr14_pct"),
+            # Category B
+            spy_return_5d=_float("spy_return_5d"),
+            spy_return_20d=_float("spy_return_20d"),
+            rs_5d=_float("rs_5d"),
+            rs_20d=_float("rs_20d"),
+            # Category C
+            rv20=_float("rv20"),
+            iv=_float("iv", 0.0),
+            iv_rv_ratio=_float("iv_rv_ratio"),
+            iv_percentile=_float("iv_percentile"),
+            iv_10d_change=_float("iv_10d_change"),
+            iv_regime=iv_regime,
+            # Category D
+            mid=_float("mid", 0.0),
+            spread_pct=_float("spread_pct", 0.0),
+            theta_pct=_float("theta_pct", 0.0),
+            breakeven_price=_float("breakeven_price", 0.0),
+            required_move_pct=_float("required_move_pct", 0.0),
+            expected_move_pct=_float("expected_move_pct", 0.0),
+            feasibility_ratio=_float("feasibility_ratio", 0.0),
+            time_adjusted_feasibility=_float("time_adjusted_feasibility", 0.0),
+            theta_adjusted_edge=_float("theta_adjusted_edge"),
+            # Category E
+            open_interest=_int("open_interest", 0),
+            volume=_int("volume", 0),
+            oi_5d_change_pct=_float("oi_5d_change_pct"),
+            # Category F
+            days_to_earnings=_int("days_to_earnings"),
+            recent_sec_filing=_bool("recent_sec_filing"),
+            # Category G
+            ema_9=_float("ema_9"),
+            ema_21=_float("ema_21"),
+            ema_50=_float("ema_50"),
+            ema_200=_float("ema_200"),
+            ema_alignment=_str("ema_alignment"),
+            rsi_14=_float("rsi_14"),
+            macd_histogram=_float("macd_histogram"),
+            adx_14=_float("adx_14"),
+            plus_di=_float("plus_di"),
+            minus_di=_float("minus_di"),
+            obv_trend=_str("obv_trend"),
+        )
+
     def to_feature_values(self) -> list[FeatureValue]:
         """Convert FeatureSet to list of FeatureValue records for storage.
         

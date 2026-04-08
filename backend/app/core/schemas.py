@@ -460,6 +460,9 @@ class PaperPosition(OSSBaseModel):
     matched_rule_ids: Optional[list[str]] = None
     matched_rules: Optional[list[dict[str, Any]]] = None  # Full rule snapshots at creation
 
+    # Batch rescore tracking
+    rescored_at: Optional[str] = None  # ISO timestamp set by POST /rescore
+
 
 # ============================================================================
 # Pipeline Run & Stage Events

@@ -1893,6 +1893,177 @@ async def migrate_setup_rules_regime() -> dict[str, Any]:
 
 
 # ============================================================================
+# Batch Rescore
+# ============================================================================
+
+
+@router.post("/rescore")
+async def rescore_paper_positions(
+    batch_size: int = 200,
+    status_filter: str = "all",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Re-run pillar scoring on paper positions using the current active policy.
+
+    Reads stored feature values for each position's evaluation, runs the v3
+    pillar scoring functions, and updates the position's pillar scores and
+    conviction score. Call repeatedly until remaining=0.
+
+    Args:
+        batch_size: Max positions to process per call (default 200).
+        status_filter: "all", "open", or "closed".
+        dry_run: If true, compute new scores but don't write them.
+
+    Returns:
+        Summary with rescored/skipped/errors counts and before/after samples.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from app.core.policy import PolicyService
+    from app.db.tables import FeatureValueTable, PaperPositionTable, PillarScoreTable
+    from app.features.models import FeatureSet
+    from app.pillars.calculator import PillarCalculator, compute_final_score
+    from app.pillars.directional import compute_directional_pillar
+    from app.pillars.models import ScoringContext
+    from app.pillars.structure import compute_structure_pillar
+    from app.pillars.volatility import compute_volatility_pillar
+
+    # Load active policy for pillar config
+    policy = await PolicyService.get_active()
+    if not policy:
+        raise HTTPException(status_code=500, detail="No active policy found")
+    pillar_config = policy.config.pillars
+    calculator = PillarCalculator(pillar_config)
+    rescore_marker = datetime.now(timezone.utc).isoformat()
+
+    # Load positions
+    all_positions: list = []
+    if status_filter in ("all", "open"):
+        all_positions.extend(await PaperPositionTable.list_open())
+    if status_filter in ("all", "closed"):
+        all_positions.extend(await PaperPositionTable.list_closed())
+
+    # Filter to positions not yet rescored in this session
+    needs_rescore = [
+        p for p in all_positions
+        if not getattr(p, "rescored_at", None)
+    ]
+    batch = needs_rescore[:batch_size]
+    total_needing = len(needs_rescore)
+
+    if not batch:
+        return {
+            "rescored": 0,
+            "skipped": 0,
+            "errors": 0,
+            "remaining": 0,
+            "total_needing_rescore": 0,
+            "sample_before_after": [],
+        }
+
+    # Parallel fetch features for all positions in batch
+    semaphore = asyncio.Semaphore(50)
+
+    async def _fetch_features(eval_id: str):
+        async with semaphore:
+            return eval_id, await FeatureValueTable.list_by_evaluation(eval_id)
+
+    feature_tasks = [_fetch_features(p.evaluation_id) for p in batch]
+    feature_results = await asyncio.gather(*feature_tasks, return_exceptions=True)
+
+    # Build eval_id -> FeatureSet map
+    feature_map: dict[str, FeatureSet] = {}
+    for result in feature_results:
+        if isinstance(result, Exception):
+            continue
+        eval_id, fv_list = result
+        if fv_list:
+            feature_map[eval_id] = FeatureSet.from_feature_values(eval_id, fv_list)
+
+    rescored = 0
+    skipped = 0
+    errors = 0
+    samples: list[dict[str, Any]] = []
+
+    for pos in batch:
+        try:
+            feature_set = feature_map.get(pos.evaluation_id)
+            if not feature_set:
+                skipped += 1
+                continue
+
+            # Build scoring context from position + features
+            ctx = ScoringContext.from_position_and_features(pos, feature_set)
+
+            # Compute new pillar scores
+            directional = compute_directional_pillar(ctx, pillar_config.directional)
+            volatility = compute_volatility_pillar(ctx, pillar_config.volatility)
+            structure = compute_structure_pillar(ctx, pillar_config.structure)
+
+            new_d = round(directional.score, 2)
+            new_v = round(volatility.score, 2)
+            new_s = round(structure.score, 2)
+            new_final = round(compute_final_score(new_d, new_v, new_s, pillar_config), 2)
+
+            # Collect before/after samples
+            if len(samples) < 5:
+                samples.append({
+                    "ticker": pos.underlying_ticker,
+                    "option_type": pos.option_type,
+                    "scanner": pos.scanner_source,
+                    "old_scores": {
+                        "directional": pos.pillar_directional,
+                        "volatility": pos.pillar_volatility,
+                        "structure": pos.pillar_structure,
+                        "final": pos.conviction_score,
+                    },
+                    "new_scores": {
+                        "directional": new_d,
+                        "volatility": new_v,
+                        "structure": new_s,
+                        "final": new_final,
+                    },
+                })
+
+            if dry_run:
+                rescored += 1
+                continue
+
+            # Update position scores
+            await PaperPositionTable.update(pos, {
+                "pillar_directional": new_d,
+                "pillar_volatility": new_v,
+                "pillar_structure": new_s,
+                "conviction_score": new_final,
+                "rescored_at": rescore_marker,
+            })
+
+            # Write new PillarScore records
+            pillar_scores = [
+                r.to_pillar_score() for r in [directional, volatility, structure]
+            ]
+            await PillarScoreTable.put_batch(pillar_scores)
+
+            rescored += 1
+
+        except Exception as e:
+            logger.warning(f"Rescore error for position {pos.position_id}: {e}")
+            errors += 1
+
+    remaining = total_needing - len(batch)
+    return {
+        "rescored": rescored,
+        "skipped": skipped,
+        "errors": errors,
+        "remaining": max(0, remaining),
+        "total_needing_rescore": total_needing,
+        "dry_run": dry_run,
+        "sample_before_after": samples,
+    }
+
+
+# ============================================================================
 # Scanner Performance Analysis (AI-Powered)
 # ============================================================================
 

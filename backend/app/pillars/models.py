@@ -155,6 +155,81 @@ class ScoringContext:
         return self.option_type == "CALL"
     
     @classmethod
+    def from_position_and_features(
+        cls,
+        position: Any,
+        feature_set: Any,
+    ) -> "ScoringContext":
+        """Create ScoringContext from a PaperPosition and FeatureSet.
+
+        Used by the batch rescore job to avoid fetching Evaluation/Opportunity
+        records — PaperPosition has all the contract data snapshotted at entry.
+
+        Args:
+            position: PaperPosition with denormalized evaluation fields.
+            feature_set: FeatureSet reconstructed from FeatureValueTable.
+
+        Returns:
+            ScoringContext populated with all data.
+        """
+        scanner_triggers = position.scanner_list or []
+
+        return cls(
+            evaluation_id=position.evaluation_id,
+            underlying_ticker=position.underlying_ticker or "",
+            option_type=str(position.option_type or "CALL"),
+            dte_bucket=str(position.dte_bucket or "B"),
+            scanner_triggers=scanner_triggers,
+            direction_hint="NONE",
+            # Category A
+            close=feature_set.close if feature_set else (position.entry_underlying_price or 0.0),
+            sma20=feature_set.sma20 if feature_set else None,
+            sma50=feature_set.sma50 if feature_set else None,
+            return_5d=feature_set.return_5d if feature_set else None,
+            return_20d=feature_set.return_20d if feature_set else None,
+            trend_aligned_bullish=feature_set.trend_aligned_bullish if feature_set else False,
+            trend_aligned_bearish=feature_set.trend_aligned_bearish if feature_set else False,
+            # Category B
+            rs_5d=feature_set.rs_5d if feature_set else None,
+            rs_20d=feature_set.rs_20d if feature_set else None,
+            # Category C
+            rv20=feature_set.rv20 if feature_set else None,
+            iv=feature_set.iv if feature_set else (position.entry_iv or 0.0),
+            iv_rv_ratio=feature_set.iv_rv_ratio if feature_set else None,
+            iv_percentile=feature_set.iv_percentile if feature_set else None,
+            iv_regime=(
+                str(feature_set.iv_regime) if feature_set and feature_set.iv_regime
+                else "IV_NEUTRAL_REGIME"
+            ),
+            # Category D
+            mid=feature_set.mid if feature_set else (position.entry_price or 0.0),
+            spread_pct=feature_set.spread_pct if feature_set else (position.entry_spread_pct or 0.0),
+            theta_pct=feature_set.theta_pct if feature_set else 0.0,
+            theta_adjusted_edge=feature_set.theta_adjusted_edge if feature_set else None,
+            delta=position.entry_delta or 0.0,
+            dte=position.dte_at_entry or 0,
+            # Category E
+            open_interest=feature_set.open_interest if feature_set else (position.entry_open_interest or 0),
+            volume=feature_set.volume if feature_set else (position.entry_volume or 0),
+            oi_5d_change_pct=feature_set.oi_5d_change_pct if feature_set else None,
+            # Category F
+            days_to_earnings=feature_set.days_to_earnings if feature_set else None,
+            recent_sec_filing=feature_set.recent_sec_filing if feature_set else False,
+            # Category G
+            ema_9=feature_set.ema_9 if feature_set else None,
+            ema_21=feature_set.ema_21 if feature_set else None,
+            ema_50=feature_set.ema_50 if feature_set else None,
+            ema_200=feature_set.ema_200 if feature_set else None,
+            ema_alignment=feature_set.ema_alignment if feature_set else None,
+            rsi_14=feature_set.rsi_14 if feature_set else None,
+            macd_histogram=feature_set.macd_histogram if feature_set else None,
+            adx_14=feature_set.adx_14 if feature_set else None,
+            plus_di=feature_set.plus_di if feature_set else None,
+            minus_di=feature_set.minus_di if feature_set else None,
+            obv_trend=feature_set.obv_trend if feature_set else None,
+        )
+
+    @classmethod
     def from_evaluation_and_features(
         cls,
         evaluation: Any,
