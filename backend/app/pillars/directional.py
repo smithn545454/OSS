@@ -380,7 +380,7 @@ def compute_signal_confirmation_subscore(ctx: ScoringContext) -> Subscore:
         else:
             score = 40.0
     elif has_cheap:
-        score = 50.0
+        score = 70.0
 
     return Subscore(
         name="signal_confirmation",

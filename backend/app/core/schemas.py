@@ -783,6 +783,7 @@ class StructurePillarConfig(OSSBaseModel):
     delta_moneyness_weight: float = 0.50
     raw_iv_weight: float = 0.25
     dte_appropriateness_weight: float = 0.25
+    premium_leverage_weight: float = 0.0  # Rewards cheap premium; 0 = disabled (backward compat)
 
     # Interaction bonus: awarded when both delta and IV are in the sweet spot
     interaction_bonus: float = 8.0              # Points added to pillar score (0 = disabled)
@@ -810,7 +811,7 @@ class StructurePillarConfig(OSSBaseModel):
     def _subscore_weights_must_sum_to_one(self) -> "StructurePillarConfig":
         total = (
             self.delta_moneyness_weight + self.raw_iv_weight
-            + self.dte_appropriateness_weight
+            + self.dte_appropriateness_weight + self.premium_leverage_weight
         )
         if abs(total - 1.0) > 1e-4:
             raise ValueError(

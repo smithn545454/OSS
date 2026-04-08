@@ -426,6 +426,36 @@ def map_dte_appropriateness_score(dte: int) -> float:
     return linear_interpolate(float(dte), breakpoints)
 
 
+def map_premium_leverage_score(mid_price: float) -> float:
+    """Map option mid price to premium leverage subscore (0-100).
+
+    Cheaper contracts provide more leverage for asymmetric payoff.
+    A $0.50 contract that doubles = same profit as $5 contract +10%,
+    but with 1/10th the capital at risk.
+
+    Args:
+        mid_price: Option mid price in dollars
+
+    Returns:
+        Premium leverage subscore (0-100)
+    """
+    if mid_price <= 0:
+        return 50.0  # Neutral if no data
+
+    breakpoints = [
+        (0.05, 98.0),     # Extreme leverage — lottery ticket territory
+        (0.20, 95.0),     # Very cheap — excellent asymmetry
+        (0.50, 90.0),     # Cheap — strong leverage
+        (1.00, 80.0),     # Affordable — user's sweet spot ceiling
+        (2.00, 60.0),     # Moderate — still viable
+        (5.00, 35.0),     # Expensive — losing asymmetric edge
+        (10.00, 18.0),    # Very expensive — not suitable for this strategy
+        (20.00, 8.0),     # Institutional-sized premium
+    ]
+
+    return linear_interpolate(mid_price, breakpoints)
+
+
 def map_spread_score(spread_pct: float) -> float:
     """Map spread percentage to structure subscore (0-100).
     

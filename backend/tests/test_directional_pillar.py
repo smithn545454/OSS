@@ -368,7 +368,7 @@ class TestSignalConfirmation:
     def test_cheap_options_scanner(self):
         ctx = _ctx(scanner_triggers=[ScannerType.CHEAP_OPTIONS], option_type="CALL")
         sub = compute_signal_confirmation_subscore(ctx)
-        assert sub.score == 50.0
+        assert sub.score == 70.0
 
 
 # ---------------------------------------------------------------------------

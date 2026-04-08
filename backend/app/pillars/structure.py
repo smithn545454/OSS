@@ -26,6 +26,7 @@ from app.pillars.models import PillarResult, ScoringContext, Subscore
 from app.pillars.utils import (
     clamp_score,
     map_delta_moneyness_score,
+    map_premium_leverage_score,
     map_raw_iv_score,
     map_dte_appropriateness_score,
 )
@@ -114,6 +115,33 @@ def compute_dte_appropriateness_subscore(ctx: ScoringContext) -> Subscore:
     )
 
 
+def compute_premium_leverage_subscore(ctx: ScoringContext) -> Subscore:
+    """Compute premium leverage subscore (0-100).
+
+    Cheaper contracts provide more leverage for asymmetric payoff.
+    A $0.50 contract that doubles = same profit as a $5 contract +10%,
+    but with 1/10th the capital at risk.
+
+    Args:
+        ctx: ScoringContext with mid price data
+
+    Returns:
+        Premium Leverage Subscore
+    """
+    mid = ctx.mid
+
+    score = map_premium_leverage_score(mid)
+
+    return Subscore(
+        name="premium_leverage",
+        raw_value={
+            "mid_price": mid,
+        },
+        score=clamp_score(score),
+        weight=0.0,  # Default 0; set from config
+    )
+
+
 def generate_structure_tags(subscores: list[Subscore], ctx: ScoringContext) -> list[str]:
     """Generate descriptive tags for entry quality pillar.
 
@@ -146,6 +174,12 @@ def generate_structure_tags(subscores: list[Subscore], ctx: ScoringContext) -> l
                 tags.append("GOOD_DTE")
             elif subscore.score <= 30:
                 tags.append("SHORT_DTE")
+
+        if subscore.name == "premium_leverage":
+            if subscore.score >= 85:
+                tags.append("CHEAP_PREMIUM")
+            elif subscore.score <= 40:
+                tags.append("EXPENSIVE_PREMIUM")
 
     # Interaction tag: both delta and IV in sweet spot
     abs_delta = abs(ctx.delta)
@@ -181,6 +215,10 @@ def compute_structure_pillar(
         compute_dte_appropriateness_subscore(ctx),
     ]
 
+    # Add premium leverage subscore if weight > 0
+    if config.premium_leverage_weight > 0:
+        subscores.append(compute_premium_leverage_subscore(ctx))
+
     # Update weights from config
     for subscore in subscores:
         if subscore.name == "delta_moneyness":
@@ -189,6 +227,8 @@ def compute_structure_pillar(
             subscore.weight = config.raw_iv_weight
         elif subscore.name == "dte_appropriateness":
             subscore.weight = config.dte_appropriateness_weight
+        elif subscore.name == "premium_leverage":
+            subscore.weight = config.premium_leverage_weight
 
     # Calculate final weighted score
     final_score = sum(s.weighted_contribution for s in subscores)
