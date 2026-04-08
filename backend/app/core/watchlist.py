@@ -152,15 +152,15 @@ class WatchlistManager:
             if universe == TickerUniverse.SP500:
                 db_tickers = await SP500TickerTable.get_active_tickers()
             else:
-                db_tickers = await SP500TickerTable.get_tickers_by_universe(universe.value)
+                db_tickers = await SP500TickerTable.get_tickers_by_universe(universe)
             if not db_tickers:
                 db_tickers = None
             else:
                 logger.info(
-                    f"Loaded {len(db_tickers)} tickers for universe={universe.value} from DynamoDB"
+                    f"Loaded {len(db_tickers)} tickers for universe={universe} from DynamoDB"
                 )
         except Exception as e:
-            logger.warning(f"Failed to load {universe.value} tickers, using fallback: {e}")
+            logger.warning(f"Failed to load {universe} tickers, using fallback: {e}")
         return cls(config=policy_config.watchlist, sp500_tickers=db_tickers)
 
 
