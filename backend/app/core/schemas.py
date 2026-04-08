@@ -1274,6 +1274,51 @@ class LLMUsage(OSSBaseModel):
     )
 
 
+class StockSummaryStatus(str, Enum):
+    """AI stock summary generation status."""
+
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    RATE_LIMITED = "RATE_LIMITED"
+    GENERATING = "GENERATING"
+
+
+class MaterialEvent(OSSBaseModel):
+    """A material event affecting the underlying stock."""
+
+    event: str
+    date: str
+    impact: str
+    severity: str  # HIGH, MEDIUM, LOW
+
+
+class StockSummary(OSSBaseModel):
+    """AI-generated summary of underlying stock context.
+
+    Generated on-demand for APPROVE evaluations to surface fundamental
+    context (acquisitions, regulatory actions, etc.) that affects the trade.
+    Cached per-ticker per-day.
+    """
+
+    summary_id: str = Field(default_factory=lambda: str(uuid4()))
+    ticker: str
+    company_snapshot: str = ""
+    sector_context: str = ""
+    material_events: list[MaterialEvent] = Field(default_factory=list)
+    trading_considerations: list[str] = Field(default_factory=list)
+    trade_impact_assessment: str = ""
+    risk_level: str = ""  # LOW, MODERATE, ELEVATED, HIGH
+    risk_level_rationale: str = ""
+    llm_provider: LLMProvider = LLMProvider.ANTHROPIC
+    model_used: str = ""
+    tokens_used: int = 0
+    status: StockSummaryStatus = StockSummaryStatus.GENERATING
+    error_message: Optional[str] = None
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 # ============================================================================
 # Pipeline Monitor Display Schemas (oss-pipeline-monitor-requirements.md)
 # ============================================================================

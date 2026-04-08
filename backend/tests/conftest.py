@@ -496,6 +496,11 @@ def moto_dynamodb():
             BillingMode="PAY_PER_REQUEST",
         )
 
+        # Stock summaries: PK/SK only (per-ticker per-day cache)
+        db.create_table(
+            TableName=f"{table_prefix}-stock-summaries", **pk_sk_schema
+        )
+
         # Earnings cache: ticker-keyed (no PK/SK pattern)
         db.create_table(
             TableName=f"{table_prefix}-earnings-cache",

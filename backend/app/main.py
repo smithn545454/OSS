@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(calibration_routes.router, prefix="/api/calibration", tags=["Calibration"])
     app.include_router(llm_routes.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(llm_routes.thesis_router, prefix="/api/thesis", tags=["Thesis"])
+    app.include_router(llm_routes.stock_summary_router, prefix="/api/stock-summary", tags=["Stock Summary"])
     app.include_router(observability_routes.router, prefix="/api/observability", tags=["Observability"])
     app.include_router(market_routes.router, prefix="/api/market", tags=["Market"])
     app.include_router(alerts_routes.router, prefix="/api/alerts", tags=["Alerts"])
@@ -1152,6 +1153,135 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "evaluation_id": evaluation_id, "error": str(e)}
 
 
+async def _run_stock_summary_worker(event: dict[str, Any]) -> dict[str, Any]:
+    """Generate a stock summary asynchronously (invoked by fire-and-forget dispatch).
+
+    Fetches company data, news, and SEC filings, then calls the LLM to
+    generate a fundamental context summary for the underlying stock.
+    """
+    from app.core.schemas import StockSummary, StockSummaryStatus
+    from app.db.tables import EvaluationTable, StockSummaryTable
+    from app.llm.stock_summary import StockSummaryInput
+    from app.llm.stock_summary_generator import (
+        StockSummaryGenerator,
+        fetch_news_context,
+    )
+    from app.services.catalyst import CatalystDataService
+    from app.services.polygon import PolygonClient
+
+    ticker = event.get("ticker", "")
+    summary_id = event.get("summary_id", "")
+    evaluation_id = event.get("evaluation_id", "")
+
+    try:
+        # Fetch evaluation context for option details
+        option_type = ""
+        strike = None
+        expiration = ""
+        dte = None
+        mid = None
+        verdict = ""
+        final_score = None
+        price = None
+
+        if evaluation_id:
+            eval_dict = await EvaluationTable.get_by_id(ticker, evaluation_id)
+            if eval_dict:
+                option_type = str(eval_dict.get("option_type", ""))
+                strike = eval_dict.get("strike")
+                expiration = str(eval_dict.get("expiration_date", ""))
+                dte = eval_dict.get("dte")
+                mid = eval_dict.get("mid")
+                price = eval_dict.get("underlying_price")
+                decision = eval_dict.get("decision", {})
+                if isinstance(decision, dict):
+                    verdict = decision.get("verdict", "")
+                    final_score = decision.get("final_score")
+
+        # Fetch company data and news in parallel
+        async with PolygonClient() as polygon:
+            # Gather company details and news
+            ticker_details_task = polygon.get_ticker_details(ticker)
+            news_task = fetch_news_context(ticker, polygon)
+            ticker_details, news_items = await asyncio.gather(
+                ticker_details_task, news_task
+            )
+
+        # Fetch SEC 8-K filings
+        sec_filings: list[dict[str, str]] = []
+        try:
+            catalyst = CatalystDataService()
+            sec_filings = await catalyst.get_recent_8k_filings(ticker, days=30)
+        except Exception as e:
+            logger.warning(f"Failed to fetch SEC filings for {ticker}: {e}")
+
+        # Extract company info from ticker details
+        company_name = ""
+        company_description = ""
+        sic_description = ""
+        market_cap = None
+        if ticker_details:
+            company_name = ticker_details.get("name", "")
+            company_description = ticker_details.get("description", "")
+            sic_description = ticker_details.get("sic_description", "")
+            market_cap = ticker_details.get("market_cap")
+            if price is None:
+                # Use previous close if we don't have eval price
+                async with PolygonClient() as polygon:
+                    prev = await polygon.get_previous_close(ticker)
+                    if prev:
+                        price = prev.get("c")
+
+        # Build input
+        input_data = StockSummaryInput(
+            ticker=ticker,
+            company_name=company_name,
+            company_description=company_description,
+            sic_description=sic_description,
+            market_cap=market_cap,
+            price=price,
+            news_items=news_items,
+            sec_filings=sec_filings,
+            option_type=option_type,
+            strike=strike,
+            expiration=expiration,
+            dte=dte,
+            mid=mid,
+            verdict=verdict,
+            final_score=final_score,
+        )
+
+        # Generate summary
+        generator = StockSummaryGenerator()
+        summary = await generator.generate(input_data)
+
+        # Overwrite the GENERATING stub with same summary_id
+        summary = summary.model_copy(update={"summary_id": summary_id})
+        await StockSummaryTable.put(summary)
+
+        summary_status = str(
+            summary.status.value
+            if hasattr(summary.status, "value")
+            else summary.status
+        )
+        logger.info(f"Stock summary worker completed: {ticker} status={summary_status}")
+        return {"status": "success", "ticker": ticker, "summary_status": summary_status}
+
+    except Exception as e:
+        logger.exception(f"Stock summary worker failed for {ticker}: {e}")
+        try:
+            failed = StockSummary(
+                summary_id=summary_id,
+                ticker=ticker,
+                status=StockSummaryStatus.FAILED,
+                error_message=str(e),
+            )
+            await StockSummaryTable.put(failed)
+        except Exception as put_err:
+            logger.error(f"Failed to persist FAILED stock summary: {put_err}")
+        return {"status": "error", "ticker": ticker, "error": str(e)}
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
 
@@ -1169,6 +1299,7 @@ def handler(event: dict[str, Any], context: Any) -> Any:
     10. Daily data capture: {"source": "oss.scheduler", "action": "daily_data_capture"}
     11. Thesis worker: {"source": "oss.scheduler", "action": "thesis_worker", ...}
     12. Pattern discovery: {"source": "oss.scheduler", "action": "pattern_discovery_worker", ...}
+    13. Stock summary worker: {"source": "oss.scheduler", "action": "stock_summary_worker", ...}
 
     Args:
         event: Lambda event (API Gateway, EventBridge, or worker invocation)
@@ -1280,6 +1411,12 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             evaluation_id = event.get("evaluation_id", "")
             logger.info(f"Received thesis_worker event (eval={evaluation_id})")
             return asyncio.run(_run_thesis_worker(event))
+
+        elif action == "stock_summary_worker":
+            # Async stock summary generation (dispatched by /api/stock-summary/generate)
+            ticker = event.get("ticker", "")
+            logger.info(f"Received stock_summary_worker event (ticker={ticker})")
+            return asyncio.run(_run_stock_summary_worker(event))
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

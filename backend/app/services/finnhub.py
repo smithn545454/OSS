@@ -111,6 +111,34 @@ class FinnhubClient:
                 logger.error(f"Finnhub API error: {e}")
                 return None
 
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> list[dict[str, Any]]:
+        """Get company news articles for a symbol.
+
+        Args:
+            symbol: Stock ticker symbol (e.g., "AAPL")
+            from_date: Start date for news range
+            to_date: End date for news range
+
+        Returns:
+            List of news dicts with headline, summary, source, datetime, url
+        """
+        data = await self._rate_limited_request(
+            "/company-news",
+            {
+                "symbol": symbol,
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+            },
+        )
+        if isinstance(data, list):
+            return data
+        return []
+
     async def get_earnings_calendar(
         self,
         symbol: Optional[str] = None,

@@ -21,6 +21,7 @@ from app.core.schemas import (
     Policy,
     RealTrade,
     StageEvent,
+    StockSummary,
     TradeThesis,
 )
 from app.db.dynamodb import get_dynamodb
@@ -46,6 +47,7 @@ CALIBRATION_REPORTS_TABLE = "calibration-reports"
 SCAN_STATUS_TABLE = "scan-status"
 SP500_TICKERS_TABLE = "sp500-tickers"
 REAL_TRADES_TABLE = "real-trades"
+STOCK_SUMMARIES_TABLE = "stock-summaries"
 
 
 class PolicyTable:
@@ -2180,3 +2182,70 @@ class RealTradeTable:
                 break
             query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         return count
+
+
+class StockSummaryTable:
+    """Operations for the stock-summaries table.
+
+    Stores AI-generated stock summaries cached per-ticker per-day.
+    PK: TICKER#{ticker}, SK: SUMMARY#{YYYY-MM-DD}
+    """
+
+    TABLE = STOCK_SUMMARIES_TABLE
+
+    @staticmethod
+    async def put(summary: StockSummary) -> None:
+        """Store a stock summary."""
+        db = get_dynamodb()
+        item = summary.to_dynamodb_item()
+        item["PK"] = f"TICKER#{summary.ticker}"
+        date_str = summary.generated_at[:10]
+        item["SK"] = f"SUMMARY#{date_str}"
+        await db.put_item(StockSummaryTable.TABLE, item)
+
+    @staticmethod
+    async def get_by_ticker_date(ticker: str, date: str) -> Optional[StockSummary]:
+        """Get stock summary for a ticker on a specific date.
+
+        Args:
+            ticker: Stock ticker symbol
+            date: Date string in YYYY-MM-DD format
+
+        Returns:
+            StockSummary if found, None otherwise
+        """
+        db = get_dynamodb()
+        item = await db.get_item(
+            StockSummaryTable.TABLE,
+            f"TICKER#{ticker}",
+            f"SUMMARY#{date}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return StockSummary(**item)
+        return None
+
+    @staticmethod
+    async def get_latest_for_ticker(ticker: str) -> Optional[StockSummary]:
+        """Get the most recent stock summary for a ticker.
+
+        Args:
+            ticker: Stock ticker symbol
+
+        Returns:
+            Most recent StockSummary if found, None otherwise
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            StockSummaryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=1,
+            scan_forward=False,
+        )
+        if items:
+            item = items[0]
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return StockSummary(**item)
+        return None

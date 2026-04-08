@@ -581,6 +581,30 @@ class PolygonClient:
 
         return output
 
+    async def get_ticker_news(
+        self,
+        ticker: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Get recent news articles for a ticker.
+
+        Args:
+            ticker: Stock ticker symbol
+            limit: Maximum number of articles to return
+
+        Returns:
+            List of news article dicts with title, published_utc, description, etc.
+        """
+        response = await self._rate_limited_request(
+            "GET",
+            "/v2/reference/news",
+            params={"ticker": ticker, "limit": limit, "order": "desc"},
+        )
+        if response:
+            data = response.json()
+            return data.get("results", [])
+        return []
+
     async def get_previous_close(self, ticker: str) -> Optional[dict[str, Any]]:
         """Get previous day's close for a ticker.
 

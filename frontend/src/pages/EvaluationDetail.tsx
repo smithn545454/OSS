@@ -14,7 +14,7 @@ import {
   BarChart3,
   Crosshair,
 } from 'lucide-react'
-import { useEvaluationDetail, useGenerateThesis, useIsTradeTracked } from '@/hooks/useApi'
+import { useEvaluationDetail, useGenerateThesis, useStockSummary, useGenerateStockSummary, useIsTradeTracked } from '@/hooks/useApi'
 import type { 
   PillarScoreDetail, 
   GateResultDetail, 
@@ -26,6 +26,7 @@ import type {
 } from '@/lib/types'
 import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
+import AIStockSummary from '@/components/evaluation/AIStockSummary'
 import TrackTradeModal from '@/components/TrackTradeModal'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
@@ -953,6 +954,11 @@ export default function EvaluationDetail() {
   const [showTrackModal, setShowTrackModal] = useState(false)
   const { data: trackStatus } = useIsTradeTracked(evaluationId || '')
 
+  // Stock summary hooks
+  const { data: stockSummaryData } = useStockSummary(ticker)
+  const generateStockSummary = useGenerateStockSummary()
+  const hasTriggeredSummary = useRef(false)
+
   // Auto-generate thesis on page load for APPROVE evaluations
   useEffect(() => {
     const verdict = data?.evaluation?.decision?.verdict
@@ -972,6 +978,26 @@ export default function EvaluationDetail() {
       generateThesis.mutate({ evaluationId, ticker })
     }
   }, [data, evaluationId, ticker, generateThesis.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-generate stock summary on page load for APPROVE evaluations
+  useEffect(() => {
+    const verdict = data?.evaluation?.decision?.verdict
+    const summaryStatus = stockSummaryData?.status
+    if (
+      data &&
+      evaluationId &&
+      ticker &&
+      verdict === 'APPROVE' &&
+      summaryStatus !== 'COMPLETED' &&
+      summaryStatus !== 'GENERATING' &&
+      summaryStatus !== 'RATE_LIMITED' &&
+      !generateStockSummary.isPending &&
+      !hasTriggeredSummary.current
+    ) {
+      hasTriggeredSummary.current = true
+      generateStockSummary.mutate({ ticker, evaluationId })
+    }
+  }, [data, stockSummaryData, evaluationId, ticker, generateStockSummary.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (
@@ -1068,6 +1094,16 @@ export default function EvaluationDetail() {
 
       {/* Underlying Stock Details */}
       <UnderlyingStockDetails ticker={ticker!} />
+
+      {/* AI Stock Summary (APPROVE only) */}
+      {decision?.verdict === 'APPROVE' && (
+        <AIStockSummary
+          summary={stockSummaryData}
+          onGenerate={() => ticker && evaluationId && generateStockSummary.mutate({ ticker, evaluationId })}
+          isGenerating={generateStockSummary.isPending}
+          generateError={generateStockSummary.error as Error | null}
+        />
+      )}
 
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />

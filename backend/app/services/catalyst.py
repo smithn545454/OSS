@@ -95,6 +95,95 @@ class CatalystDataService:
             logger.debug(f"Error fetching earnings for {ticker}: {e}")
             return None
     
+    async def get_recent_8k_filings(
+        self, ticker: str, days: int = 30
+    ) -> list[dict[str, str]]:
+        """Get recent 8-K filing details for a ticker.
+
+        Returns filing type, date, and description for 8-K filings
+        within the lookback period.
+
+        Args:
+            ticker: Stock ticker symbol
+            days: Calendar days to look back
+
+        Returns:
+            List of dicts with 'form', 'filingDate', 'primaryDocument' keys
+        """
+        ticker_upper = ticker.upper()
+
+        if not self._cik_loaded:
+            await self._load_cik_mapping()
+
+        cik = self._cik_cache.get(ticker_upper)
+        if not cik:
+            return []
+
+        try:
+            filings = await self._fetch_sec_submissions_detailed(cik)
+            if not filings:
+                return []
+
+            cutoff_date = datetime.now().date() - timedelta(days=days)
+            results = []
+            for filing in filings:
+                form_type = filing.get("form", "")
+                if form_type not in ("8-K", "8-K/A"):
+                    continue
+                filing_date_str = filing.get("filingDate", "")
+                try:
+                    filing_date = datetime.strptime(filing_date_str, "%Y-%m-%d").date()
+                    if filing_date >= cutoff_date:
+                        results.append(filing)
+                except ValueError:
+                    continue
+            return results
+        except Exception as e:
+            logger.debug(f"Error fetching 8-K filings for {ticker}: {e}")
+            return []
+
+    async def _fetch_sec_submissions_detailed(self, cik: str) -> list[dict[str, str]]:
+        """Fetch recent submissions with document descriptions from SEC EDGAR.
+
+        Args:
+            cik: 10-digit CIK number (zero-padded)
+
+        Returns:
+            List of filing dicts with 'form', 'filingDate', 'primaryDocument' keys
+        """
+        try:
+            if not self._client:
+                self._client = httpx.AsyncClient(
+                    timeout=30.0,
+                    headers={"User-Agent": SEC_USER_AGENT},
+                )
+
+            url = SEC_SUBMISSIONS_URL.format(cik=cik)
+            response = await self._client.get(url)
+            response.raise_for_status()
+
+            data = response.json()
+            filings_data = data.get("filings", {}).get("recent", {})
+
+            forms = filings_data.get("form", [])
+            dates = filings_data.get("filingDate", [])
+            primary_docs = filings_data.get("primaryDocDescription", [])
+
+            filings = []
+            for i, (form, date_val) in enumerate(zip(forms, dates)):
+                doc_desc = primary_docs[i] if i < len(primary_docs) else ""
+                filings.append({
+                    "form": form,
+                    "filingDate": date_val,
+                    "primaryDocument": doc_desc,
+                })
+
+            return filings
+
+        except Exception as e:
+            logger.debug(f"Error fetching detailed SEC submissions for CIK {cik}: {e}")
+            return []
+
     async def get_recent_sec_filing(self, ticker: str) -> bool:
         """Check if there was an 8-K, 10-Q, or 10-K filing in last 10 trading days.
         

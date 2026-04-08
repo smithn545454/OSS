@@ -497,6 +497,44 @@ export function useGenerateThesis() {
 }
 
 // ============================================================================
+// Stock Summary Hooks
+// ============================================================================
+
+/**
+ * Fetch stock summary for a ticker.
+ */
+export function useStockSummary(ticker: string | undefined) {
+  return useQuery({
+    queryKey: ['stock-summary', ticker] as const,
+    queryFn: () => api.getStockSummary(ticker!),
+    enabled: !!ticker,
+    refetchInterval: (query) => {
+      const data = query.state.data as Record<string, unknown> | undefined
+      if (data?.status === 'GENERATING') return 2000
+      return false
+    },
+  })
+}
+
+/**
+ * Generate stock summary for a ticker.
+ */
+export function useGenerateStockSummary() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: { ticker: string; evaluationId?: string }) =>
+      api.generateStockSummary(params),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(
+        ['stock-summary', variables.ticker],
+        data
+      )
+    },
+  })
+}
+
+// ============================================================================
 // Paper Trading Workstation Hooks
 // ============================================================================
 

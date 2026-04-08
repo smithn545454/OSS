@@ -744,6 +744,34 @@ export interface TradeThesis {
   error_message: string | null
 }
 
+// Stock Summary Types (AI-generated underlying stock context)
+export type StockSummaryStatus = 'COMPLETED' | 'FAILED' | 'RATE_LIMITED' | 'GENERATING' | 'NOT_FOUND'
+
+export interface MaterialEvent {
+  event: string
+  date: string
+  impact: string
+  severity: 'HIGH' | 'MEDIUM' | 'LOW'
+}
+
+export interface StockSummary {
+  summary_id: string
+  ticker: string
+  status: StockSummaryStatus
+  company_snapshot: string
+  sector_context: string
+  material_events: MaterialEvent[]
+  trading_considerations: string[]
+  trade_impact_assessment: string
+  risk_level: string
+  risk_level_rationale: string
+  llm_provider: LLMProvider
+  model_used: string
+  tokens_used: number
+  generated_at: string
+  error_message: string | null
+}
+
 export interface LLMUsageStats {
   date: string
   calls_made: number

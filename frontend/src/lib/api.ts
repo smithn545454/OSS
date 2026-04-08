@@ -48,6 +48,7 @@ import type {
   PaginatedPositionsResponse,
   SummaryMetricsResponse,
   PerformanceBreakdownResponse,
+  StockSummary,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -442,6 +443,21 @@ export async function generateThesis(params: {
   ticker: string
 }): Promise<TradeThesis> {
   return fetchApi<TradeThesis>(`/api/thesis/generate`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+// Stock Summary
+export async function getStockSummary(ticker: string): Promise<StockSummary> {
+  return fetchApi<StockSummary>(`/api/stock-summary/${encodeURIComponent(ticker)}`)
+}
+
+export async function generateStockSummary(params: {
+  ticker: string
+  evaluationId?: string
+}): Promise<StockSummary> {
+  return fetchApi<StockSummary>(`/api/stock-summary/generate`, {
     method: 'POST',
     body: JSON.stringify(params),
   })

@@ -300,3 +300,142 @@ async def generate_thesis(body: GenerateThesisRequest) -> dict[str, Any]:
         return _thesis_to_dict(failed_thesis)
 
     return _thesis_to_dict(generating_thesis)
+
+
+# ============================================================================
+# Stock Summary Endpoints (stock_summary_router, mounted at /api/stock-summary)
+# ============================================================================
+
+stock_summary_router = APIRouter()
+
+
+class GenerateStockSummaryRequest(BaseModel):
+    """Request body for on-demand stock summary generation."""
+
+    ticker: str
+    evaluationId: Optional[str] = None
+
+
+def _summary_to_dict(summary: Any) -> dict[str, Any]:
+    """Convert a StockSummary to a serializable dict."""
+    events = []
+    for ev in (summary.material_events or []):
+        events.append({
+            "event": ev.event if hasattr(ev, "event") else ev.get("event", ""),
+            "date": ev.date if hasattr(ev, "date") else ev.get("date", ""),
+            "impact": ev.impact if hasattr(ev, "impact") else ev.get("impact", ""),
+            "severity": ev.severity if hasattr(ev, "severity") else ev.get("severity", ""),
+        })
+
+    return {
+        "summary_id": summary.summary_id,
+        "ticker": summary.ticker,
+        "status": str(summary.status.value) if hasattr(summary.status, "value") else str(summary.status),
+        "company_snapshot": summary.company_snapshot,
+        "sector_context": summary.sector_context,
+        "material_events": events,
+        "trading_considerations": summary.trading_considerations,
+        "trade_impact_assessment": summary.trade_impact_assessment,
+        "risk_level": summary.risk_level,
+        "risk_level_rationale": summary.risk_level_rationale,
+        "llm_provider": str(summary.llm_provider.value) if hasattr(summary.llm_provider, "value") else str(summary.llm_provider),
+        "model_used": summary.model_used,
+        "tokens_used": summary.tokens_used,
+        "generated_at": summary.generated_at,
+        "error_message": summary.error_message,
+    }
+
+
+@stock_summary_router.get("/{ticker}")
+async def get_stock_summary(ticker: str) -> dict[str, Any]:
+    """Get the latest stock summary for a ticker (today's cache or most recent)."""
+    from app.db.tables import StockSummaryTable
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    summary = await StockSummaryTable.get_by_ticker_date(ticker.upper(), today)
+    if summary:
+        return _summary_to_dict(summary)
+
+    # Fallback: return most recent summary
+    summary = await StockSummaryTable.get_latest_for_ticker(ticker.upper())
+    if summary:
+        return _summary_to_dict(summary)
+
+    return {"status": "NOT_FOUND", "ticker": ticker.upper()}
+
+
+@stock_summary_router.post("/generate")
+async def generate_stock_summary(body: GenerateStockSummaryRequest) -> dict[str, Any]:
+    """Dispatch async AI stock summary generation.
+
+    Checks for today's cached summary first. If not found, writes a
+    GENERATING stub and invokes Lambda asynchronously.
+    """
+    import json as json_mod
+    import os
+    from uuid import uuid4
+
+    import boto3
+
+    from app.core.schemas import (
+        LLMProvider as LLMProviderEnum,
+        StockSummary,
+        StockSummaryStatus,
+    )
+    from app.db.tables import StockSummaryTable
+
+    ticker = body.ticker.upper()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Check cache: return existing summary for today
+    existing = await StockSummaryTable.get_by_ticker_date(ticker, today)
+    if existing:
+        existing_status = str(
+            getattr(existing.status, "value", existing.status)
+        )
+        if existing_status in ("COMPLETED", "GENERATING"):
+            return _summary_to_dict(existing)
+
+    # Create GENERATING stub
+    summary_id = str(uuid4())
+    if existing:
+        summary_id = existing.summary_id
+
+    generating = StockSummary(
+        summary_id=summary_id,
+        ticker=ticker,
+        status=StockSummaryStatus.GENERATING,
+        llm_provider=LLMProviderEnum.ANTHROPIC,
+    )
+    await StockSummaryTable.put(generating)
+
+    # Fire-and-forget Lambda invocation
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+    payload = {
+        "source": "oss.scheduler",
+        "action": "stock_summary_worker",
+        "ticker": ticker,
+        "summary_id": summary_id,
+        "evaluation_id": body.evaluationId or "",
+    }
+
+    try:
+        lambda_client = boto3.client("lambda")
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json_mod.dumps(payload),
+        )
+        logger.info(f"Dispatched stock summary worker for {ticker}")
+    except Exception as e:
+        logger.error(f"Failed to dispatch stock summary worker: {e}")
+        failed = generating.model_copy(
+            update={
+                "status": StockSummaryStatus.FAILED,
+                "error_message": f"Failed to dispatch generation: {e}",
+            }
+        )
+        await StockSummaryTable.put(failed)
+        return _summary_to_dict(failed)
+
+    return _summary_to_dict(generating)
