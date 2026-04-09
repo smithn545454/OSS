@@ -897,6 +897,43 @@ export function usePatternAnalysis(analysisId: string, polling = false) {
 }
 
 // ============================================================================
+// Custom Analysis Hooks
+// ============================================================================
+
+export function useRunCustomAnalysis() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: {
+      prompt: string
+      period?: string
+      verdict?: string
+      scanner?: string
+      min_return?: number
+    }) => api.runCustomAnalysis(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-trading', 'custom-analyses'] })
+    },
+  })
+}
+
+export function useCustomAnalyses() {
+  return useQuery({
+    queryKey: ['paper-trading', 'custom-analyses', 'list'] as const,
+    queryFn: api.listCustomAnalyses,
+    staleTime: 30000,
+  })
+}
+
+export function useCustomAnalysis(analysisId: string, polling = false) {
+  return useQuery({
+    queryKey: ['paper-trading', 'custom-analysis', analysisId] as const,
+    queryFn: () => api.getCustomAnalysis(analysisId),
+    enabled: !!analysisId,
+    refetchInterval: polling ? 3000 : false,
+  })
+}
+
+// ============================================================================
 // Setup Rules Hooks
 // ============================================================================
 

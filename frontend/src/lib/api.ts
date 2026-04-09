@@ -783,6 +783,36 @@ export async function getPatternAnalysis(
 }
 
 // ============================================================================
+// Custom Analysis API
+// ============================================================================
+
+export async function runCustomAnalysis(params: {
+  prompt: string
+  period?: string
+  verdict?: string
+  scanner?: string
+  min_return?: number
+}): Promise<import('./types').CustomAnalysis> {
+  return fetchApi('/api/paper-trading/custom-analysis', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function listCustomAnalyses(): Promise<import('./types').CustomAnalysisSummary[]> {
+  const response = await fetchApi<{ analyses: import('./types').CustomAnalysisSummary[]; count: number }>(
+    '/api/paper-trading/custom-analyses'
+  )
+  return response.analyses
+}
+
+export async function getCustomAnalysis(
+  analysisId: string
+): Promise<import('./types').CustomAnalysis> {
+  return fetchApi(`/api/paper-trading/custom-analysis/${encodeURIComponent(analysisId)}`)
+}
+
+// ============================================================================
 // Setup Rules API
 // ============================================================================
 

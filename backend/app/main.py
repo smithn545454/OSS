@@ -968,6 +968,30 @@ async def _run_pattern_discovery_worker(event: dict[str, Any]) -> dict[str, Any]
         return {"status": "error", "analysis_id": analysis_id, "error": str(e)}
 
 
+async def _run_custom_analysis_worker(event: dict[str, Any]) -> dict[str, Any]:
+    """Run custom analysis asynchronously (no API Gateway timeout).
+
+    Invoked by fire-and-forget dispatch from the POST endpoint.
+    Updates the pre-created analysis stub with results or error.
+    """
+    from app.paper_trading.custom_analysis import run_custom_analysis
+
+    analysis_id = event.get("analysis_id", "")
+    try:
+        result = await run_custom_analysis(
+            analysis_id=analysis_id,
+            prompt=event.get("prompt", ""),
+            period=event.get("period"),
+            verdict=event.get("verdict"),
+            scanner=event.get("scanner"),
+            min_return=event.get("min_return"),
+        )
+        return {"status": "success", "analysis_id": analysis_id, "result": result.get("status")}
+    except Exception as e:
+        logger.error(f"Custom analysis worker failed: {e}")
+        return {"status": "error", "analysis_id": analysis_id, "error": str(e)}
+
+
 async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
     """Generate a trade thesis asynchronously (invoked by fire-and-forget dispatch).
 
@@ -1405,6 +1429,12 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             analysis_id = event.get("analysis_id", "")
             logger.info(f"Received pattern_discovery_worker event (analysis={analysis_id})")
             return asyncio.run(_run_pattern_discovery_worker(event))
+
+        elif action == "custom_analysis_worker":
+            # Async custom analysis (dispatched by /api/paper-trading/custom-analysis)
+            analysis_id = event.get("analysis_id", "")
+            logger.info(f"Received custom_analysis_worker event (analysis={analysis_id})")
+            return asyncio.run(_run_custom_analysis_worker(event))
 
         elif action == "thesis_worker":
             # Async thesis generation (dispatched by /api/thesis/generate)

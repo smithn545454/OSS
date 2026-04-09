@@ -1714,6 +1714,41 @@ export interface PatternAnalysisSummary {
 }
 
 // ============================================================================
+// Custom Analysis types
+// ============================================================================
+
+export interface CustomAnalysisSuggestedRule {
+  name: string
+  criteria: Record<string, unknown>
+  performance: ArchetypePerformance
+  reasoning?: string
+  confidence: string
+  confidence_label: string
+}
+
+export interface CustomAnalysis {
+  analysis_id: string
+  status: string
+  created_at?: string
+  user_prompt: string
+  positions_analyzed: number
+  analysis?: string
+  suggested_rules?: CustomAnalysisSuggestedRule[]
+  context?: Record<string, unknown>
+  message?: string
+}
+
+export interface CustomAnalysisSummary {
+  analysis_id: string
+  status?: string
+  created_at: string
+  user_prompt: string
+  positions_analyzed: number
+  suggested_rule_count: number
+  period: string
+}
+
+// ============================================================================
 // Setup Rules types
 // ============================================================================
 

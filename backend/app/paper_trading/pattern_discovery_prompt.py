@@ -10,6 +10,8 @@ import json
 import logging
 from typing import Any
 
+from app.paper_trading.custom_analysis_prompt import CSV_COLUMN_REFERENCE
+
 logger = logging.getLogger(__name__)
 
 DISCOVERY_SYSTEM_PROMPT = (
@@ -18,36 +20,8 @@ DISCOVERY_SYSTEM_PROMPT = (
     "statistically significant trade archetypes — repeatable combinations "
     "of characteristics that correlate with above-average win rates and returns.\n"
     "\n"
-    "## CSV Column Reference\n"
-    "The data uses abbreviated column names and values for compactness:\n"
-    "- tkr: Ticker symbol\n"
-    "- sec: Sector (Tech=Technology, HC=Healthcare, Enrg=Energy, Matl=Materials, "
-    "Fin=Financials, ConD=Consumer Discretionary, ConS=Consumer Staples, "
-    "Ind=Industrials, Util=Utilities, RE=Real Estate, Comm=Communication Services)\n"
-    "- scn: Scanner (BRK=BREAKOUT, CMP=COMPRESSION, CHP=CHEAP_OPTIONS, UV=UNUSUAL_VOLUME)\n"
-    "- conv: Scanner confluence count (1-4)\n"
-    "- cscore: Conviction score 0-100\n"
-    "- p_dir/p_vol/p_str: Directional/Volatility/Structure pillar scores 0-100\n"
-    "- type: C=CALL, P=PUT\n"
-    "- dte: Days to expiration at entry\n"
-    "- iv: Implied volatility at entry\n"
-    "- iv_pct: IV percentile 0-100 (lower = historically cheaper)\n"
-    "- ivrv: IV/RV ratio (below 1.0 = IV < realized vol, tailwind for longs)\n"
-    "- theta_edge: Delta gain per theta decay (above 1.5 = strong)\n"
-    "- gate_m: Distance above gate threshold (higher = safer)\n"
-    "- money_pct: OTM/ITM % (positive = OTM for calls)\n"
-    "- spread: Bid-ask spread % of mid (lower = more liquid)\n"
-    "- oi/vol: Open interest / volume at entry\n"
-    "- dte_earn: Days to earnings\n"
-    "- atr: 14-day ATR as % of price\n"
-    "- rs: 20-day relative strength vs SPY\n"
-    "- feas: Feasibility ratio (lower = easier breakeven)\n"
-    "- ret: Final return %\n"
-    "- days: Days held\n"
-    "- verdict: Entry verdict (A=APPROVE, W=WATCH, R=REJECT)\n"
-    "\n"
-    "Empty cells = data unavailable.\n"
-    "\n"
+    + CSV_COLUMN_REFERENCE
+    + "\n"
     "Your analysis MUST:\n"
     "1. Look for combinations of 2-4 characteristics "
     "that produce above-average results\n"

@@ -1893,6 +1893,115 @@ async def migrate_setup_rules_regime() -> dict[str, Any]:
 
 
 # ============================================================================
+# Custom Analysis Endpoints
+# ============================================================================
+
+
+class CustomAnalysisRequest(BaseModel):
+    """Request body for triggering a custom analysis."""
+
+    prompt: str
+    period: Optional[str] = None
+    verdict: Optional[str] = None
+    scanner: Optional[str] = None
+    min_return: Optional[float] = None
+
+
+@router.post("/custom-analysis")
+async def run_custom_analysis_endpoint(request: CustomAnalysisRequest) -> dict[str, Any]:
+    """Run a custom analysis on paper trade data using AI.
+
+    Accepts a user-provided analytical question. Creates a 'running' stub
+    and dispatches an async Lambda worker. Frontend polls for results.
+    Returns both freeform markdown analysis and structured suggested rules.
+    """
+    import json as json_mod
+    import os
+
+    import boto3
+
+    from app.paper_trading.custom_analysis import create_custom_analysis_stub
+
+    if not request.prompt or not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    if len(request.prompt) > 2000:
+        raise HTTPException(status_code=400, detail="Prompt must be under 2000 characters")
+
+    result = await create_custom_analysis_stub(
+        prompt=request.prompt.strip(),
+        period=request.period,
+        verdict=request.verdict,
+        scanner=request.scanner,
+        min_return=request.min_return,
+    )
+
+    if result["status"] != "running":
+        return result
+
+    # Fire-and-forget: invoke Lambda async
+    function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "oss-dev-backend")
+    payload = {
+        "source": "oss.scheduler",
+        "action": "custom_analysis_worker",
+        "analysis_id": result["analysis_id"],
+        "prompt": request.prompt.strip(),
+        "period": request.period,
+        "verdict": request.verdict,
+        "scanner": request.scanner,
+        "min_return": request.min_return,
+    }
+
+    try:
+        lambda_client = boto3.client("lambda")
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json_mod.dumps(payload),
+        )
+        logger.info(f"Dispatched custom analysis worker for {result['analysis_id']}")
+    except Exception as e:
+        logger.error(f"Failed to dispatch custom analysis worker: {e}")
+        from app.db.dynamodb import get_dynamodb
+        from app.db.tables import PaperPositionTable
+
+        db = get_dynamodb()
+        try:
+            await db.update_item(
+                PaperPositionTable.TABLE,
+                f"CUSTOM_ANALYSIS#{result['analysis_id']}",
+                "META",
+                {"status": "error", "error_message": f"Failed to dispatch: {e}"},
+            )
+        except Exception:
+            pass
+        result["status"] = "error"
+        result["message"] = f"Failed to start analysis: {e}"
+
+    return result
+
+
+@router.get("/custom-analyses")
+async def list_custom_analyses_endpoint(limit: int = 10) -> dict[str, Any]:
+    """List previous custom analysis runs."""
+    from app.paper_trading.custom_analysis import list_custom_analyses
+
+    analyses = await list_custom_analyses(limit=min(limit, 50))
+    return {"analyses": analyses, "count": len(analyses)}
+
+
+@router.get("/custom-analysis/{analysis_id}")
+async def get_custom_analysis_endpoint(analysis_id: str) -> dict[str, Any]:
+    """Get a specific custom analysis with its suggested rules."""
+    from app.paper_trading.custom_analysis import get_custom_analysis
+
+    result = await get_custom_analysis(analysis_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Analysis not found: {analysis_id}")
+    return result
+
+
+# ============================================================================
 # Batch Rescore
 # ============================================================================
 
