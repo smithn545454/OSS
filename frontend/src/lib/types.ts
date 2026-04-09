@@ -603,7 +603,7 @@ export interface PaperPositionDetail {
 export interface ScannerTriggerDetail {
   scanner_type: ScannerType
   reason_codes: string[]
-  metrics: Record<string, number>
+  metrics: Record<string, unknown>
   triggered_at: string
 }
 

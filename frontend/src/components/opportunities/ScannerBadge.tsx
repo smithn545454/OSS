@@ -18,6 +18,7 @@ const SCANNER_LABELS: Record<string, string> = {
   UNUSUAL_VOLUME: 'Unusual Vol',
   COMPRESSION_EXPANSION: 'Compression',
   CHEAP_OPTIONS: 'Cheap',
+  REVALIDATION: 'Revalidation',
 }
 
 const SCANNER_ICONS: Record<string, string> = {
@@ -26,6 +27,7 @@ const SCANNER_ICONS: Record<string, string> = {
   UNUSUAL_VOLUME: '📊',
   COMPRESSION_EXPANSION: '⟷',
   CHEAP_OPTIONS: '💰',
+  REVALIDATION: '↻',
 }
 
 export function ScannerBadge({ scanner, className = '' }: ScannerBadgeProps) {

@@ -416,19 +416,48 @@ class ScannerOrchestrator:
                             force_include_contracts.add(ot)
 
                     # Create synthetic opportunities for missing tickers
-                    approve_tickers: dict[str, str] = {}
+                    # Track ticker -> {opt_type, opportunity_id} for original scanner lookup
+                    approve_info: dict[str, dict[str, str]] = {}
                     for item in recent_approves:
                         t = item.get("underlying_ticker", "")
-                        if t and t not in scanner_tickers and t not in approve_tickers:
-                            approve_tickers[t] = item.get("option_type", "NONE")
+                        if t and t not in scanner_tickers and t not in approve_info:
+                            approve_info[t] = {
+                                "opt_type": item.get("option_type", "NONE"),
+                                "opportunity_id": item.get("opportunity_id", ""),
+                            }
+
+                    # Fetch original opportunities to recover scanner triggers
+                    original_scanners: dict[str, list[str]] = {}
+                    if approve_info:
+                        opp_results = await asyncio.gather(*[
+                            OpportunityTable.list_by_ticker(t, limit=10)
+                            for t in approve_info
+                        ])
+                        for ticker, opps in zip(approve_info, opp_results):
+                            opp_id = approve_info[ticker]["opportunity_id"]
+                            if not opp_id:
+                                continue
+                            for opp in opps:
+                                if opp.opportunity_id == opp_id:
+                                    original_scanners[ticker] = [
+                                        st.scanner_type.value
+                                        for st in opp.scanner_triggers
+                                        if st.scanner_type != ScannerType.REVALIDATION
+                                    ]
+                                    break
 
                     revalidation_count = 0
-                    for ticker, opt_type in approve_tickers.items():
+                    for ticker, info in approve_info.items():
+                        opt_type = info["opt_type"]
                         direction = DirectionHint.NONE
                         if opt_type == "CALL":
                             direction = DirectionHint.CALL
                         elif opt_type == "PUT":
                             direction = DirectionHint.PUT
+
+                        metrics: dict[str, Any] = {}
+                        if ticker in original_scanners:
+                            metrics["original_scanners"] = original_scanners[ticker]
 
                         opp = Opportunity(
                             underlying_ticker=ticker,
@@ -437,7 +466,7 @@ class ScannerOrchestrator:
                                 ScannerTrigger(
                                     scanner_type=ScannerType.REVALIDATION,
                                     reason_codes=["APPROVE_REVALIDATION"],
-                                    metrics={},
+                                    metrics=metrics,
                                     triggered_at=timestamp,
                                 )
                             ],

@@ -824,16 +824,27 @@ async def list_approve_evaluations(
     opp_by_ticker: dict[str, list[Any]] = dict(zip(unique_tickers, opp_results))
 
     def _scanner_types_for(item: dict[str, Any]) -> list[str]:
-        """Resolve scanner types from pre-fetched opportunities or eval field."""
+        """Resolve scanner types from pre-fetched opportunities or eval field.
+
+        For REVALIDATION opportunities, prepends original scanner types from
+        metrics.original_scanners so the UI shows both the origin and revalidation.
+        """
         opportunity_id = item.get("opportunity_id")
         ticker = item.get("underlying_ticker", "")
         if opportunity_id and ticker in opp_by_ticker:
             for opp in opp_by_ticker[ticker]:
                 if opp.opportunity_id == opportunity_id:
-                    return [
+                    scanners = [
                         _enum_str(st.scanner_type)
                         for st in opp.scanner_triggers
                     ]
+                    # For REVALIDATION-only opps, prepend original scanners
+                    if scanners == ["REVALIDATION"]:
+                        for st in opp.scanner_triggers:
+                            originals = st.metrics.get("original_scanners", [])
+                            if originals:
+                                return list(originals) + ["REVALIDATION"]
+                    return scanners
         eval_scanner_source = item.get("scanner_source")
         if eval_scanner_source:
             return [eval_scanner_source]

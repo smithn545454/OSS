@@ -554,6 +554,15 @@ interface ScannerTriggersProps {
   triggers: ScannerTriggerDetail[]
 }
 
+const SCANNER_TYPE_LABELS: Record<string, string> = {
+  BREAKOUT: 'Breakout',
+  BREAKDOWN: 'Breakdown',
+  UNUSUAL_VOLUME: 'Unusual Volume',
+  COMPRESSION_EXPANSION: 'Compression',
+  CHEAP_OPTIONS: 'Cheap Options',
+  REVALIDATION: 'Revalidation',
+}
+
 function ScannerTriggers({ triggers }: ScannerTriggersProps) {
   if (triggers.length === 0) return null
 
@@ -565,36 +574,58 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
       </div>
 
       <div className="space-y-3">
-        {triggers.map((trigger, idx) => (
-          <div key={idx} className="rounded-lg bg-oss-bg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-oss-accent">
-                {trigger.scanner_type.replace(/_/g, ' ')}
-              </span>
-              <span className="text-xs text-oss-muted">{formatDateTime(trigger.triggered_at)}</span>
-            </div>
-            <div className="flex flex-wrap gap-1 mb-2">
-              {trigger.reason_codes.map((code) => (
-                <span 
-                  key={code} 
-                  className="rounded-full bg-oss-surface px-2 py-0.5 text-xs text-oss-muted"
-                >
-                  {code}
+        {triggers.map((trigger, idx) => {
+          const originalScanners = Array.isArray(trigger.metrics?.original_scanners)
+            ? (trigger.metrics.original_scanners as string[])
+            : []
+          const displayMetrics = Object.entries(trigger.metrics).filter(
+            ([key]) => key !== 'original_scanners'
+          )
+
+          return (
+            <div key={idx} className="rounded-lg bg-oss-bg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-oss-accent">
+                  {trigger.scanner_type.replace(/_/g, ' ')}
                 </span>
-              ))}
-            </div>
-            {Object.keys(trigger.metrics).length > 0 && (
-              <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-oss-border">
-                {Object.entries(trigger.metrics).map(([key, value]) => (
-                  <div key={key} className="flex justify-between text-xs">
-                    <span className="text-oss-muted">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value)}</span>
-                  </div>
+                <span className="text-xs text-oss-muted">{formatDateTime(trigger.triggered_at)}</span>
+              </div>
+              {originalScanners.length > 0 && (
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-oss-muted">Originally discovered by:</span>
+                  {originalScanners.map((s) => (
+                    <span
+                      key={s}
+                      className="rounded-full bg-oss-surface px-2 py-0.5 text-xs font-medium text-oss-accent"
+                    >
+                      {SCANNER_TYPE_LABELS[s] ?? s.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1 mb-2">
+                {trigger.reason_codes.map((code) => (
+                  <span
+                    key={code}
+                    className="rounded-full bg-oss-surface px-2 py-0.5 text-xs text-oss-muted"
+                  >
+                    {code}
+                  </span>
                 ))}
               </div>
-            )}
-          </div>
-        ))}
+              {displayMetrics.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-oss-border">
+                  {displayMetrics.map(([key, value]) => (
+                    <div key={key} className="flex justify-between text-xs">
+                      <span className="text-oss-muted">{key.replace(/_/g, ' ')}</span>
+                      <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
