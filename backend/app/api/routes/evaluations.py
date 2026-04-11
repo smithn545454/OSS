@@ -910,8 +910,33 @@ async def list_approve_evaluations(
     # ------------------------------------------------------------------
     # 5. Enrich all remaining evaluations in parallel
     # ------------------------------------------------------------------
+    def _migrate_legacy_decision_fields(item: dict[str, Any]) -> None:
+        """Rename v2 decision field names to v3 in-place.
+
+        Raw DynamoDB items from legacy evaluations have
+        directional_score/volatility_score/structure_score on the
+        embedded decision dict. Rename them to the v3 equivalents
+        so the frontend sees the new field names on every record.
+        """
+        decision = item.get("decision")
+        if not isinstance(decision, dict):
+            return
+        if "directional_score" in decision and "premium_leverage_score" not in decision:
+            decision["premium_leverage_score"] = decision.pop("directional_score")
+        else:
+            decision.pop("directional_score", None)
+        if "volatility_score" in decision and "underlying_behavior_score" not in decision:
+            decision["underlying_behavior_score"] = decision.pop("volatility_score")
+        else:
+            decision.pop("volatility_score", None)
+        if "structure_score" in decision and "setup_quality_score" not in decision:
+            decision["setup_quality_score"] = decision.pop("structure_score")
+        else:
+            decision.pop("structure_score", None)
+
     async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
         evaluation_id = item.get("evaluation_id", "")
+        _migrate_legacy_decision_fields(item)
 
         pillar_scores, gate_results, thesis, feature_values = await asyncio.gather(
             _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
