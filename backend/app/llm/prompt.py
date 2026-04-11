@@ -15,7 +15,7 @@ THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst. Your task i
 You will receive data about:
 - The underlying stock (ticker, price, technical indicators, ATR)
 - The option contract (type, strike, expiration, Greeks, breakeven, expected move)
-- Scoring metrics (directional, volatility, structure scores)
+- Scoring metrics (premium leverage, underlying behavior, setup quality scores)
 - The factors that contributed to the recommendation
 - Setup rule matches (codified trade archetypes from the trader's rule library)
 
@@ -188,9 +188,9 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
     scores_text = f"""
 **Scoring Summary**
 - Final Score: {scores['final']:.1f}/100
-- Directional Score: {scores['directional']:.1f}/100
-- Volatility Score: {scores['volatility']:.1f}/100
-- Structure Score: {scores['structure']:.1f}/100
+- Premium Leverage Score: {scores['premium_leverage']:.1f}/100
+- Underlying Behavior Score: {scores['underlying_behavior']:.1f}/100
+- Setup Quality Score: {scores['setup_quality']:.1f}/100
 - Quality Tier: {data['quality_tier'] or 'N/A'}
 - Policy Version: {data.get('policy_version', 'N/A')}
 """

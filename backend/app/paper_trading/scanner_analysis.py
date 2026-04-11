@@ -154,14 +154,14 @@ def _build_profile(positions: list, label: str) -> dict[str, Any]:
         "avg_dte_at_entry": _safe_avg(
             [float(p.dte_at_entry) for p in positions if p.dte_at_entry is not None]
         ),
-        "avg_pillar_directional": _safe_avg(
-            [p.pillar_directional for p in positions if p.pillar_directional is not None]
+        "avg_pillar_premium_leverage": _safe_avg(
+            [p.pillar_premium_leverage for p in positions if p.pillar_premium_leverage is not None]
         ),
-        "avg_pillar_volatility": _safe_avg(
-            [p.pillar_volatility for p in positions if p.pillar_volatility is not None]
+        "avg_pillar_underlying_behavior": _safe_avg(
+            [p.pillar_underlying_behavior for p in positions if p.pillar_underlying_behavior is not None]
         ),
-        "avg_pillar_structure": _safe_avg(
-            [p.pillar_structure for p in positions if p.pillar_structure is not None]
+        "avg_pillar_setup_quality": _safe_avg(
+            [p.pillar_setup_quality for p in positions if p.pillar_setup_quality is not None]
         ),
         "by_option_type": _count_by(positions, lambda p: p.option_type or "UNKNOWN"),
         "by_exit_reason": _count_by(
@@ -183,9 +183,9 @@ def _compute_feature_divergences(
         ("gate_margin", "Gate Margin", lambda p: p.gate_margin),
         ("theta_adj_ev", "Theta-Adj EV", lambda p: p.theta_adj_ev),
         ("conviction_score", "Conviction Score", lambda p: p.conviction_score),
-        ("pillar_directional", "Directional Pillar", lambda p: p.pillar_directional),
-        ("pillar_volatility", "Volatility Pillar", lambda p: p.pillar_volatility),
-        ("pillar_structure", "Entry Quality Pillar", lambda p: p.pillar_structure),
+        ("pillar_premium_leverage", "Premium Leverage Pillar", lambda p: p.pillar_premium_leverage),
+        ("pillar_underlying_behavior", "Underlying Behavior Pillar", lambda p: p.pillar_underlying_behavior),
+        ("pillar_setup_quality", "Setup Quality Pillar", lambda p: p.pillar_setup_quality),
     ]
 
     result = []
@@ -331,9 +331,9 @@ def build_scanner_analysis_prompt(
         ("Avg Entry IV", "avg_entry_iv"),
         ("Avg Entry Delta (abs)", "avg_entry_delta"),
         ("Avg DTE at Entry", "avg_dte_at_entry"),
-        ("Avg Directional Pillar", "avg_pillar_directional"),
-        ("Avg Volatility Pillar", "avg_pillar_volatility"),
-        ("Avg Entry Quality Pillar", "avg_pillar_structure"),
+        ("Avg Premium Leverage Pillar", "avg_pillar_premium_leverage"),
+        ("Avg Underlying Behavior Pillar", "avg_pillar_underlying_behavior"),
+        ("Avg Setup Quality Pillar", "avg_pillar_setup_quality"),
     ]
     sections.append(f"{'Metric':<28} {'Winners':<14} {'Losers':<14}")
     sections.append("-" * 56)

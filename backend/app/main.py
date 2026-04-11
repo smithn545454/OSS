@@ -1080,9 +1080,9 @@ async def _run_thesis_worker(event: dict[str, Any]) -> dict[str, Any]:
                     pass
                 decision_dict = {
                     "final_score": decision.final_score,
-                    "directional_score": decision.directional_score,
-                    "volatility_score": decision.volatility_score,
-                    "structure_score": decision.structure_score,
+                    "premium_leverage_score": decision.premium_leverage_score,
+                    "underlying_behavior_score": decision.underlying_behavior_score,
+                    "setup_quality_score": decision.setup_quality_score,
                 }
                 scanner_names = [
                     str(

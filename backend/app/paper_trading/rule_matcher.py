@@ -47,16 +47,31 @@ def _check_criterion(
             score = decision.get("final_score")
             return score is not None and score <= float(value)
 
+        # Policy v3.0.0 pillar criteria
+        if key == "pillar_premium_leverage_min":
+            score = decision.get("premium_leverage_score")
+            return score is not None and score >= float(value)
+
+        if key == "pillar_underlying_behavior_min":
+            score = decision.get("underlying_behavior_score")
+            return score is not None and score >= float(value)
+
+        if key == "pillar_setup_quality_min":
+            score = decision.get("setup_quality_score")
+            return score is not None and score >= float(value)
+
+        # Legacy v2 pillar criteria — accepted for backward compat in
+        # stored setup rules. Map old names to new scores.
         if key == "pillar_directional_min":
-            score = decision.get("directional_score")
+            score = decision.get("premium_leverage_score")
             return score is not None and score >= float(value)
 
         if key == "pillar_volatility_min":
-            score = decision.get("volatility_score")
+            score = decision.get("underlying_behavior_score")
             return score is not None and score >= float(value)
 
         if key == "pillar_structure_min":
-            score = decision.get("structure_score")
+            score = decision.get("setup_quality_score")
             return score is not None and score >= float(value)
 
         if key == "dte_min":
@@ -206,7 +221,7 @@ def match_rules(
     Args:
         rules: List of setup rule dicts
         evaluation: Evaluation data (option_type, dte, iv, etc.)
-        decision: Decision data (final_score, directional_score, etc.)
+        decision: Decision data (final_score, premium_leverage_score, etc.)
         scanners: List of scanner names that fired for this evaluation
         active_only: Only consider active rules (default True)
         mode_filter: If set, only consider rules with this mode ("production" or "test")
@@ -253,9 +268,9 @@ def build_dicts_from_position(
     }
     decision_dict: dict[str, Any] = {
         "final_score": position.conviction_score,
-        "directional_score": position.pillar_directional,
-        "volatility_score": position.pillar_volatility,
-        "structure_score": position.pillar_structure,
+        "premium_leverage_score": position.pillar_premium_leverage,
+        "underlying_behavior_score": position.pillar_underlying_behavior,
+        "setup_quality_score": position.pillar_setup_quality,
     }
     scanners: list[str] = position.scanner_list or []
     return eval_dict, decision_dict, scanners

@@ -174,9 +174,9 @@ async def create_position_from_evaluation(
         scanner_list=scanner_list or None,
         convergence_count=convergence_count,
         conviction_score=decision.final_score,
-        pillar_directional=decision.directional_score,
-        pillar_volatility=decision.volatility_score,
-        pillar_structure=decision.structure_score,
+        pillar_premium_leverage=decision.premium_leverage_score,
+        pillar_underlying_behavior=decision.underlying_behavior_score,
+        pillar_setup_quality=decision.setup_quality_score,
         strike=evaluation.strike,
         option_type=evaluation.option_type,
         expiration_date=evaluation.expiration_date,
@@ -261,9 +261,9 @@ async def create_position_from_evaluation(
             }
             decision_dict = {
                 "final_score": decision.final_score,
-                "directional_score": decision.directional_score,
-                "volatility_score": decision.volatility_score,
-                "structure_score": decision.structure_score,
+                "premium_leverage_score": decision.premium_leverage_score,
+                "underlying_behavior_score": decision.underlying_behavior_score,
+                "setup_quality_score": decision.setup_quality_score,
             }
             matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
             if matched:

@@ -59,7 +59,7 @@ SECTOR_ABBREV = {
 # Dropped: bucket (redundant with dte), mfe/mae (outcome tracking, not criteria),
 # ev (niche), delta (correlated with moneyness+type)
 CSV_COLUMNS = [
-    "tkr", "sec", "scn", "conv", "cscore", "p_dir", "p_vol", "p_str",
+    "tkr", "sec", "scn", "conv", "cscore", "p_pl", "p_ub", "p_sq",
     "type", "dte", "iv", "iv_pct", "ivrv", "theta_edge",
     "gate_m", "money_pct", "spread", "oi", "vol",
     "dte_earn", "atr", "rs", "feas", "ret", "days", "verdict",
@@ -106,9 +106,9 @@ def build_trade_csv(
             SCANNER_ABBREV.get(scanner_raw, scanner_raw),
             str(p.convergence_count or 1),
             _fmt(p.conviction_score, 0),
-            _fmt(p.pillar_directional, 0),
-            _fmt(p.pillar_volatility, 0),
-            _fmt(p.pillar_structure, 0),
+            _fmt(p.pillar_premium_leverage, 0),
+            _fmt(p.pillar_underlying_behavior, 0),
+            _fmt(p.pillar_setup_quality, 0),
             TYPE_ABBREV.get(str(p.option_type or ""), str(p.option_type or "")),
             _fmt(p.dte_at_entry, 0),
             _fmt(p.entry_iv, 2),

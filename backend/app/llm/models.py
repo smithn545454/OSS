@@ -48,12 +48,12 @@ class ContractData:
 
 @dataclass
 class ScoresData:
-    """Pillar and final scores for thesis input."""
+    """Pillar and final scores for thesis input (Policy v3.0.0)."""
 
     final: float
-    directional: float
-    volatility: float
-    structure: float
+    premium_leverage: float
+    underlying_behavior: float
+    setup_quality: float
 
 
 @dataclass
@@ -128,9 +128,9 @@ class ThesisInput:
             },
             "scores": {
                 "final": self.scores.final,
-                "directional": self.scores.directional,
-                "volatility": self.scores.volatility,
-                "structure": self.scores.structure,
+                "premium_leverage": self.scores.premium_leverage,
+                "underlying_behavior": self.scores.underlying_behavior,
+                "setup_quality": self.scores.setup_quality,
             },
             "pillar_contributors": {
                 pillar: [

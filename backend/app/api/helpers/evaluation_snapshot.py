@@ -227,12 +227,18 @@ async def build_evaluation_snapshot_data(
             if not eval_decision.get("final_score"):
                 for ps in pillar_scores_list:
                     pid = ps.get("pillar_id", "")
-                    if pid == "DIRECTIONAL":
-                        eval_decision.setdefault("directional_score", ps.get("score"))
-                    elif pid == "VOLATILITY":
-                        eval_decision.setdefault("volatility_score", ps.get("score"))
-                    elif pid == "STRUCTURE":
-                        eval_decision.setdefault("structure_score", ps.get("score"))
+                    if pid == "PREMIUM_LEVERAGE":
+                        eval_decision.setdefault(
+                            "premium_leverage_score", ps.get("score")
+                        )
+                    elif pid == "UNDERLYING_BEHAVIOR":
+                        eval_decision.setdefault(
+                            "underlying_behavior_score", ps.get("score")
+                        )
+                    elif pid == "SETUP_QUALITY":
+                        eval_decision.setdefault(
+                            "setup_quality_score", ps.get("score")
+                        )
 
             eval_scanners = [
                 st.get("scanner_type", "") for st in scanner_triggers if st.get("scanner_type")

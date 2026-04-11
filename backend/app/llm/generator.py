@@ -163,9 +163,9 @@ class ThesisGenerator:
         # Build scores data
         scores = ScoresData(
             final=decision.final_score,
-            directional=decision.directional_score,
-            volatility=decision.volatility_score,
-            structure=decision.structure_score,
+            premium_leverage=decision.premium_leverage_score,
+            underlying_behavior=decision.underlying_behavior_score,
+            setup_quality=decision.setup_quality_score,
         )
 
         # Build pillar contributors

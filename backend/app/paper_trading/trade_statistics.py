@@ -63,9 +63,9 @@ def _fmt_stat(val: float | None, decimals: int = 1) -> str:
 # Features to compare between top performers and the rest
 COMPARISON_FEATURES = [
     ("conviction_score", "Conviction Score", 0),
-    ("pillar_directional", "Directional Pillar", 0),
-    ("pillar_volatility", "Volatility Pillar", 0),
-    ("pillar_structure", "Structure Pillar", 0),
+    ("pillar_premium_leverage", "Premium Leverage Pillar", 0),
+    ("pillar_underlying_behavior", "Underlying Behavior Pillar", 0),
+    ("pillar_setup_quality", "Setup Quality Pillar", 0),
     ("entry_iv", "Entry IV", 2),
     ("entry_iv_percentile", "IV Percentile", 0),
     ("entry_iv_rv_ratio", "IV/RV Ratio", 2),

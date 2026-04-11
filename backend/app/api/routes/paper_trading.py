@@ -106,9 +106,9 @@ def _position_to_dict(pos: Any) -> dict[str, Any]:
         "scanner_list": pos.scanner_list,
         "convergence_count": pos.convergence_count,
         "conviction_score": pos.conviction_score,
-        "pillar_directional": pos.pillar_directional,
-        "pillar_volatility": pos.pillar_volatility,
-        "pillar_structure": pos.pillar_structure,
+        "pillar_premium_leverage": pos.pillar_premium_leverage,
+        "pillar_underlying_behavior": pos.pillar_underlying_behavior,
+        "pillar_setup_quality": pos.pillar_setup_quality,
         "strike": pos.strike,
         "option_type": pos.option_type,
         "expiration_date": pos.expiration_date,
@@ -264,8 +264,9 @@ async def browse_positions(
         page: Page number (1-indexed). Default: 1.
         page_size: Items per page (default 50, max 200).
         sort_by: Sort field (entry_date, current_pnl_pct, conviction_score,
-                 scanner_source, days_held, underlying_ticker, pillar_directional,
-                 pillar_structure).
+                 scanner_source, days_held, underlying_ticker,
+                 pillar_premium_leverage, pillar_underlying_behavior,
+                 pillar_setup_quality).
         sort_order: asc or desc. Default: desc.
         verdict: Filter by verdict_at_entry (APPROVE, WATCH).
         scanner: Filter by scanner_source.
@@ -293,7 +294,8 @@ async def browse_positions(
     # Sort
     valid_sort_fields = {
         "entry_date", "current_pnl_pct", "conviction_score", "scanner_source",
-        "days_held", "underlying_ticker", "pillar_directional", "pillar_structure",
+        "days_held", "underlying_ticker",
+        "pillar_premium_leverage", "pillar_underlying_behavior", "pillar_setup_quality",
     }
     if sort_by not in valid_sort_fields:
         sort_by = "entry_date"
@@ -1342,9 +1344,9 @@ async def analyze_position(position_id: str) -> dict[str, Any]:
         decision = eval_data.get("decision", {})
         score_info = (
             f" Score: {decision.get('final_score', 'N/A')}."
-            f" Directional: {decision.get('directional_score', 'N/A')},"
-            f" Volatility: {decision.get('volatility_score', 'N/A')},"
-            f" Structure: {decision.get('structure_score', 'N/A')}."
+            f" Premium Leverage: {decision.get('premium_leverage_score', 'N/A')},"
+            f" Underlying Behavior: {decision.get('underlying_behavior_score', 'N/A')},"
+            f" Setup Quality: {decision.get('setup_quality_score', 'N/A')}."
         )
 
     prompt = (
@@ -1830,9 +1832,9 @@ async def backfill_setup_rule_matches(
 
             decision_dict = {
                 "final_score": decision.get("final_score"),
-                "directional_score": decision.get("directional_score"),
-                "volatility_score": decision.get("volatility_score"),
-                "structure_score": decision.get("structure_score"),
+                "premium_leverage_score": decision.get("premium_leverage_score"),
+                "underlying_behavior_score": decision.get("underlying_behavior_score"),
+                "setup_quality_score": decision.get("setup_quality_score"),
             }
 
             scanner_list = pos.scanner_list or []
@@ -2033,10 +2035,10 @@ async def rescore_paper_positions(
     from app.db.tables import FeatureValueTable, PaperPositionTable, PillarScoreTable
     from app.features.models import FeatureSet
     from app.pillars.calculator import PillarCalculator, compute_final_score
-    from app.pillars.directional import compute_directional_pillar
+    from app.pillars.premium_leverage import compute_premium_leverage_pillar
+    from app.pillars.underlying_behavior import compute_underlying_behavior_pillar
+    from app.pillars.setup_quality import compute_setup_quality_pillar
     from app.pillars.models import ScoringContext
-    from app.pillars.structure import compute_structure_pillar
-    from app.pillars.volatility import compute_volatility_pillar
 
     # Load active policy for pillar config
     policy = await PolicyService().get_active()
@@ -2105,15 +2107,23 @@ async def rescore_paper_positions(
             # Build scoring context from position + features
             ctx = ScoringContext.from_position_and_features(pos, feature_set)
 
-            # Compute new pillar scores
-            directional = compute_directional_pillar(ctx, pillar_config.directional)
-            volatility = compute_volatility_pillar(ctx, pillar_config.volatility)
-            structure = compute_structure_pillar(ctx, pillar_config.structure)
+            # Compute new pillar scores (Policy v3.0.0)
+            premium_leverage = compute_premium_leverage_pillar(
+                ctx, pillar_config.premium_leverage
+            )
+            underlying_behavior = compute_underlying_behavior_pillar(
+                ctx, pillar_config.underlying_behavior
+            )
+            setup_quality = compute_setup_quality_pillar(
+                ctx, pillar_config.setup_quality
+            )
 
-            new_d = round(directional.score, 2)
-            new_v = round(volatility.score, 2)
-            new_s = round(structure.score, 2)
-            new_final = round(compute_final_score(new_d, new_v, new_s, pillar_config), 2)
+            new_pl = round(premium_leverage.score, 2)
+            new_ub = round(underlying_behavior.score, 2)
+            new_sq = round(setup_quality.score, 2)
+            new_final = round(
+                compute_final_score(new_pl, new_ub, new_sq, pillar_config), 2
+            )
 
             # Collect before/after samples
             if len(samples) < 5:
@@ -2122,15 +2132,15 @@ async def rescore_paper_positions(
                     "option_type": pos.option_type,
                     "scanner": pos.scanner_source,
                     "old_scores": {
-                        "directional": pos.pillar_directional,
-                        "volatility": pos.pillar_volatility,
-                        "structure": pos.pillar_structure,
+                        "premium_leverage": pos.pillar_premium_leverage,
+                        "underlying_behavior": pos.pillar_underlying_behavior,
+                        "setup_quality": pos.pillar_setup_quality,
                         "final": pos.conviction_score,
                     },
                     "new_scores": {
-                        "directional": new_d,
-                        "volatility": new_v,
-                        "structure": new_s,
+                        "premium_leverage": new_pl,
+                        "underlying_behavior": new_ub,
+                        "setup_quality": new_sq,
                         "final": new_final,
                     },
                 })
@@ -2141,16 +2151,17 @@ async def rescore_paper_positions(
 
             # Update position scores
             await PaperPositionTable.update(pos, {
-                "pillar_directional": new_d,
-                "pillar_volatility": new_v,
-                "pillar_structure": new_s,
+                "pillar_premium_leverage": new_pl,
+                "pillar_underlying_behavior": new_ub,
+                "pillar_setup_quality": new_sq,
                 "conviction_score": new_final,
                 "rescored_at": rescore_marker,
             })
 
             # Write new PillarScore records
             pillar_scores = [
-                r.to_pillar_score() for r in [directional, volatility, structure]
+                r.to_pillar_score()
+                for r in [premium_leverage, underlying_behavior, setup_quality]
             ]
             await PillarScoreTable.put_batch(pillar_scores)
 

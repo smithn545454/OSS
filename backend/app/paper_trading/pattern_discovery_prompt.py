@@ -45,7 +45,7 @@ DISCOVERY_OUTPUT_SCHEMA = """{
       "criteria": {
         "scanners": ["COMPRESSION"],
         "conviction_score_min": 78,
-        "pillar_directional_min": 75,
+        "pillar_premium_leverage_min": 75,
         "dte_min": 15,
         "dte_max": 30
       },
@@ -68,7 +68,7 @@ The criteria object can include any combination of:
 - scanners: list of FULL scanner names (BREAKOUT, COMPRESSION, CHEAP_OPTIONS, UNUSUAL_VOLUME)
 - scanner_confluence: true (requires 2+ scanners)
 - conviction_score_min / conviction_score_max: score thresholds
-- pillar_directional_min / pillar_structure_min / pillar_volatility_min (score floors)
+- pillar_premium_leverage_min / pillar_underlying_behavior_min / pillar_setup_quality_min (score floors, Policy v3.0.0)
 - dte_min / dte_max: DTE range
 - option_type: "CALL" or "PUT"
 - entry_iv_min / entry_iv_max: IV thresholds

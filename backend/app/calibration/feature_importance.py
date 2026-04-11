@@ -63,9 +63,9 @@ FEATURE_REGISTRY: list[FeatureRegistryEntry] = [
     ("gate_margin", "Gate Margin", None, None, None, True),
     ("conviction_score", "Conviction Score", None, None, None, True),
     ("convergence_count", "Scanner Convergence", None, None, None, True),
-    ("pillar_directional", "Directional Score", "directional", None, None, True),
-    ("pillar_volatility", "Volatility Score", "volatility", None, None, True),
-    ("pillar_structure", "Entry Quality Score", "structure", None, None, True),
+    ("pillar_premium_leverage", "Premium Leverage Score", "premium_leverage", None, None, True),
+    ("pillar_underlying_behavior", "Underlying Behavior Score", "underlying_behavior", None, None, True),
+    ("pillar_setup_quality", "Setup Quality Score", "setup_quality", None, None, True),
     ("entry_underlying_price", "Underlying Price", None, None, None, None),
     ("theta_adj_ev", "Theta-Adj EV", None, None, None, True),
 ]

@@ -357,9 +357,9 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
 
             decision_data = {
                 "final_score": item.get("final_score", 0),
-                "directional_score": pillar_scores.get("DIRECTIONAL", 0),
-                "volatility_score": pillar_scores.get("VOLATILITY", 0),
-                "structure_score": pillar_scores.get("STRUCTURE", 0),
+                "premium_leverage_score": pillar_scores.get("PREMIUM_LEVERAGE", 0),
+                "underlying_behavior_score": pillar_scores.get("UNDERLYING_BEHAVIOR", 0),
+                "setup_quality_score": pillar_scores.get("SETUP_QUALITY", 0),
             }
             matched = match_rules(
                 list(rules_by_id.values()),
