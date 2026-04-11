@@ -40,6 +40,35 @@ def _opt_enum_str(val: Any) -> str | None:
         return None
     return str(val.value) if hasattr(val, "value") else str(val)
 
+
+def _migrate_legacy_decision_fields(item: dict[str, Any]) -> None:
+    """Rename v2 decision field names to v3 in-place.
+
+    Raw DynamoDB items from pre-v3 evaluations have directional_score/
+    volatility_score/structure_score on the embedded decision dict.
+    Rename them to the v3 equivalents so the frontend sees the new
+    field names on every record. Also handles the case where the
+    decision dict is a top-level key on the evaluation item.
+    """
+    if not isinstance(item, dict):
+        return
+    decision = item.get("decision")
+    target = decision if isinstance(decision, dict) else item
+
+    if "directional_score" in target and "premium_leverage_score" not in target:
+        target["premium_leverage_score"] = target.pop("directional_score")
+    else:
+        target.pop("directional_score", None)
+    if "volatility_score" in target and "underlying_behavior_score" not in target:
+        target["underlying_behavior_score"] = target.pop("volatility_score")
+    else:
+        target.pop("volatility_score", None)
+    if "structure_score" in target and "setup_quality_score" not in target:
+        target["setup_quality_score"] = target.pop("structure_score")
+    else:
+        target.pop("structure_score", None)
+
+
 # In-memory cache for ticker company names (survives across warm Lambda invocations)
 _ticker_name_cache: dict[str, Optional[str]] = {}
 
@@ -221,6 +250,8 @@ async def get_evaluation_detail_by_id(
             status_code=404,
             detail=f"Evaluation not found: {ticker}/{evaluation_id}",
         )
+
+    _migrate_legacy_decision_fields(evaluation)
 
     opportunity_id = evaluation.get("opportunity_id")
 
@@ -910,30 +941,6 @@ async def list_approve_evaluations(
     # ------------------------------------------------------------------
     # 5. Enrich all remaining evaluations in parallel
     # ------------------------------------------------------------------
-    def _migrate_legacy_decision_fields(item: dict[str, Any]) -> None:
-        """Rename v2 decision field names to v3 in-place.
-
-        Raw DynamoDB items from legacy evaluations have
-        directional_score/volatility_score/structure_score on the
-        embedded decision dict. Rename them to the v3 equivalents
-        so the frontend sees the new field names on every record.
-        """
-        decision = item.get("decision")
-        if not isinstance(decision, dict):
-            return
-        if "directional_score" in decision and "premium_leverage_score" not in decision:
-            decision["premium_leverage_score"] = decision.pop("directional_score")
-        else:
-            decision.pop("directional_score", None)
-        if "volatility_score" in decision and "underlying_behavior_score" not in decision:
-            decision["underlying_behavior_score"] = decision.pop("volatility_score")
-        else:
-            decision.pop("volatility_score", None)
-        if "structure_score" in decision and "setup_quality_score" not in decision:
-            decision["setup_quality_score"] = decision.pop("structure_score")
-        else:
-            decision.pop("structure_score", None)
-
     async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
         evaluation_id = item.get("evaluation_id", "")
         _migrate_legacy_decision_fields(item)
