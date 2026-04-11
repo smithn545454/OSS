@@ -348,10 +348,10 @@ interface PillarCardProps {
 
 function PillarCard({ pillar }: PillarCardProps) {
   const pillarConfig = {
-    DIRECTIONAL: { icon: TrendingUp, color: 'text-sky-400', label: 'Directional Edge' },
-    VOLATILITY: { icon: Activity, color: 'text-purple-400', label: 'Volatility Edge' },
-    STRUCTURE: { icon: BarChart3, color: 'text-amber-400', label: 'Entry Quality' },
-  }[pillar.pillar_id] || { icon: Zap, color: 'text-oss-accent', label: pillar.pillar_id }
+    PREMIUM_LEVERAGE: { icon: Zap, color: 'text-sky-400', label: 'Premium Leverage' },
+    UNDERLYING_BEHAVIOR: { icon: Activity, color: 'text-purple-400', label: 'Underlying Behavior' },
+    SETUP_QUALITY: { icon: BarChart3, color: 'text-amber-400', label: 'Setup Quality' },
+  }[pillar.pillar_id] || { icon: TrendingUp, color: 'text-oss-accent', label: pillar.pillar_id }
 
   const Icon = pillarConfig.icon
   
@@ -392,10 +392,10 @@ function PillarCard({ pillar }: PillarCardProps) {
 
       <div className="mt-4 pt-4 border-t border-oss-border">
         <p className="text-xs text-oss-muted mb-2">
-          {pillar.pillar_id === 'DIRECTIONAL' ? 'Subscore Breakdown' : 'Top Contributors'}
+          {pillar.pillar_id === 'PREMIUM_LEVERAGE' ? 'Subscore Breakdown' : 'Top Contributors'}
         </p>
         <div className="space-y-2">
-          {(pillar.pillar_id === 'DIRECTIONAL'
+          {(pillar.pillar_id === 'PREMIUM_LEVERAGE'
             ? pillar.contributors
             : pillar.contributors.slice(0, 3)
           ).map((c) => (
@@ -404,7 +404,7 @@ function PillarCard({ pillar }: PillarCardProps) {
                 {c.feature_name.replace(/_/g, ' ')}
               </span>
               <div className="flex items-center gap-2">
-                {pillar.pillar_id === 'DIRECTIONAL' ? (
+                {pillar.pillar_id === 'PREMIUM_LEVERAGE' ? (
                   <>
                     <span className={clsx(
                       'font-mono text-xs',

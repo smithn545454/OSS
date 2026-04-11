@@ -72,9 +72,9 @@ const CRITERIA_GROUPS: CriteriaGroup[] = [
     defaultExpanded: false,
     fields: [
       { key: 'conviction_score_min', label: 'Conviction Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_directional_min', label: 'Directional Pillar Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_volatility_min', label: 'Volatility Pillar Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_structure_min', label: 'Entry Quality Pillar Min', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_premium_leverage_min', label: 'Premium Leverage Min', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_underlying_behavior_min', label: 'Underlying Behavior Min', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_setup_quality_min', label: 'Setup Quality Min', type: 'number', placeholder: '0', step: '5' },
       { key: 'gate_margin_min', label: 'Gate Margin Min', type: 'number', placeholder: '0', step: '0.1' },
     ],
   },

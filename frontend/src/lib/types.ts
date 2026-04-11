@@ -16,7 +16,7 @@ export type OptionType = 'CALL' | 'PUT'
 
 export type DTEBucket = 'A' | 'B' | 'C' | 'D'
 
-export type PillarId = 'DIRECTIONAL' | 'VOLATILITY' | 'STRUCTURE'
+export type PillarId = 'PREMIUM_LEVERAGE' | 'UNDERLYING_BEHAVIOR' | 'SETUP_QUALITY'
 
 export type Verdict = 'APPROVE' | 'WATCH' | 'REJECT'
 
@@ -137,15 +137,15 @@ export interface GateResult {
   notes: string | null
 }
 
-// Decision
+// Decision (Policy v3.0.0)
 export interface Decision {
   evaluation_id: string
   verdict: Verdict
   quality_tier: QualityTier | null
   final_score: number
-  directional_score: number
-  volatility_score: number
-  structure_score: number
+  premium_leverage_score: number
+  underlying_behavior_score: number
+  setup_quality_score: number
   primary_reason_code: string
   supporting_reason_codes: string[]
   failed_gates: string[]
@@ -180,9 +180,9 @@ export interface PaperPosition {
   scanner_list: string[] | null
   convergence_count: number | null
   conviction_score: number | null
-  pillar_directional: number | null
-  pillar_volatility: number | null
-  pillar_structure: number | null
+  pillar_premium_leverage: number | null
+  pillar_underlying_behavior: number | null
+  pillar_setup_quality: number | null
   strike: number | null
   option_type: OptionType | null
   expiration_date: string | null
@@ -401,44 +401,49 @@ export interface GateConfig {
   theta_burden_max: number
 }
 
+// Policy v3.0.0 pillar configuration
 export interface PillarWeights {
-  directional: number
-  volatility: number
-  structure: number
+  premium_leverage: number
+  underlying_behavior: number
+  setup_quality: number
 }
 
-export interface DirectionalPillarConfig {
-  trend_alignment_weight: number
-  momentum_weight: number
-  trend_strength_weight: number
-  signal_confirmation_weight: number
-  relative_strength_weight: number
-  catalyst_weight: number
-  momentum_rsi_blend: number
-  momentum_macd_blend: number
-  momentum_returns_blend: number
-  rs_performance_blend: number
-  rs_obv_blend: number
+export interface SubscoreBreakpoint {
+  value: number
+  score: number
 }
 
-export interface VolatilityPillarConfig {
-  iv_vs_rv_weight: number
-  iv_percentile_weight: number
-  iv_regime_weight: number
-  theta_adjusted_edge_weight: number
+export interface NumericSubscoreConfig {
+  subscore_id: string
+  display_name: string
+  feature_field: string
+  weight: number
+  breakpoints: SubscoreBreakpoint[]
+  source_tier: string
 }
 
-export interface StructurePillarConfig {
-  delta_moneyness_weight: number
-  raw_iv_weight: number
-  dte_appropriateness_weight: number
+export interface CategoricalSubscoreConfig {
+  subscore_id: string
+  display_name: string
+  feature_field: string
+  weight: number
+  category_scores: Record<string, number>
+  default_score: number
+}
+
+export interface PillarConfigV2 {
+  pillar_id: PillarId
+  display_name: string
+  description: string
+  numeric_subscores: NumericSubscoreConfig[]
+  categorical_subscores: CategoricalSubscoreConfig[]
 }
 
 export interface PillarConfig {
   weights: PillarWeights
-  directional: DirectionalPillarConfig
-  volatility: VolatilityPillarConfig
-  structure: StructurePillarConfig
+  premium_leverage: PillarConfigV2
+  underlying_behavior: PillarConfigV2
+  setup_quality: PillarConfigV2
 }
 
 export interface DecisionConfig {
@@ -471,7 +476,6 @@ export interface PolicyConfig {
   contract_selection: ContractSelectionConfig
   gates: GateConfig
   pillars: PillarConfig
-  pillar_weights: PillarWeights
   decision: DecisionConfig
   tracking: TrackingConfig
   watchlist: WatchlistConfig

@@ -71,19 +71,19 @@ export default function ScoreCalibration({ positions }: ScoreCalibrationProps) {
 
   const radarData = [
     {
-      axis: 'Directional',
-      winners: avg(winners, (p) => p.pillar_directional),
-      losers: avg(losers, (p) => p.pillar_directional),
+      axis: 'Premium Leverage',
+      winners: avg(winners, (p) => p.pillar_premium_leverage),
+      losers: avg(losers, (p) => p.pillar_premium_leverage),
     },
     {
-      axis: 'Entry Quality',
-      winners: avg(winners, (p) => p.pillar_structure),
-      losers: avg(losers, (p) => p.pillar_structure),
+      axis: 'Underlying Behavior',
+      winners: avg(winners, (p) => p.pillar_underlying_behavior),
+      losers: avg(losers, (p) => p.pillar_underlying_behavior),
     },
     {
-      axis: 'Volatility',
-      winners: avg(winners, (p) => p.pillar_volatility),
-      losers: avg(losers, (p) => p.pillar_volatility),
+      axis: 'Setup Quality',
+      winners: avg(winners, (p) => p.pillar_setup_quality),
+      losers: avg(losers, (p) => p.pillar_setup_quality),
     },
     {
       axis: 'Convergence',

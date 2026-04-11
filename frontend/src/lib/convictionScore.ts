@@ -1,11 +1,13 @@
 /**
- * Conviction Score Calculator
+ * Conviction Score Calculator (Policy v3.0.0)
  *
  * Uses the pipeline's decision final_score directly (pillar-weighted composite)
  * with freshness decay applied. No additional frontend scoring formula.
  *
- * The pipeline already evaluates quality through 3 pillars:
- *   final_score = 0.35 × Directional + 0.35 × Volatility + 0.30 × Structure
+ * The pipeline evaluates quality through 3 pillars:
+ *   final_score = 0.375 × Premium Leverage
+ *               + 0.455 × Underlying Behavior
+ *               + 0.170 × Setup Quality
  *
  * Freshness decay ensures recent opportunities rank higher than stale ones.
  */

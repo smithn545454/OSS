@@ -117,16 +117,16 @@ function ExpandedDetail({ position }: { position: PaperPosition }) {
               <span className="font-mono text-oss-accent">{position.conviction_score ?? '--'}</span>
             </div>
             <div>
-              <span className="text-oss-muted">Directional: </span>
-              <span className="font-mono text-oss-text">{position.pillar_directional ?? '--'}</span>
+              <span className="text-oss-muted">Prem. Leverage: </span>
+              <span className="font-mono text-oss-text">{position.pillar_premium_leverage ?? '--'}</span>
             </div>
             <div>
-              <span className="text-oss-muted">Volatility: </span>
-              <span className="font-mono text-oss-text">{position.pillar_volatility ?? '--'}</span>
+              <span className="text-oss-muted">Underlying: </span>
+              <span className="font-mono text-oss-text">{position.pillar_underlying_behavior ?? '--'}</span>
             </div>
             <div>
-              <span className="text-oss-muted">Structure: </span>
-              <span className="font-mono text-oss-text">{position.pillar_structure ?? '--'}</span>
+              <span className="text-oss-muted">Setup Qual.: </span>
+              <span className="font-mono text-oss-text">{position.pillar_setup_quality ?? '--'}</span>
             </div>
             <div>
               <span className="text-oss-muted">Verdict: </span>

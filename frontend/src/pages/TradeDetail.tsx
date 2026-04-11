@@ -458,9 +458,9 @@ export default function TradeDetail() {
           <h2 className="text-lg font-semibold text-oss-text mb-4">Decision Summary (at entry)</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <MetricItem label="Final Score" value={Number(finalScore).toFixed(0)} />
-            <MetricItem label="Directional" value={snapshot?.directional_score != null ? Number(snapshot.directional_score).toFixed(0) : '—'} />
-            <MetricItem label="Volatility" value={snapshot?.volatility_score != null ? Number(snapshot.volatility_score).toFixed(0) : '—'} />
-            <MetricItem label="Entry Quality" value={snapshot?.structure_score != null ? Number(snapshot.structure_score).toFixed(0) : '—'} />
+            <MetricItem label="Directional" value={snapshot?.premium_leverage_score != null ? Number(snapshot.premium_leverage_score).toFixed(0) : '—'} />
+            <MetricItem label="Volatility" value={snapshot?.underlying_behavior_score != null ? Number(snapshot.underlying_behavior_score).toFixed(0) : '—'} />
+            <MetricItem label="Entry Quality" value={snapshot?.setup_quality_score != null ? Number(snapshot.setup_quality_score).toFixed(0) : '—'} />
             {decidedAt && <MetricItem label="Decided At" value={formatDateTime(decidedAt)} />}
             {snapshot?.theta_adjusted_ev != null && (
               <MetricItem label="θ-Adj EV" value={`$${Number(snapshot.theta_adjusted_ev).toFixed(2)}`} />

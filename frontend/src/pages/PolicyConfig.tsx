@@ -819,297 +819,95 @@ function EditablePolicyConfig({
         </div>
       </ConfigSection>
 
-      {/* Scoring Config */}
+      {/* Scoring Config (Policy v3.0.0) */}
       <ConfigSection title="Scoring & Decision" icon={<BarChart3 className="h-4 w-4" />}>
         <div className="space-y-4">
           <div>
             <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Pillar Weights
+              Pillar Weights (v3.0.0)
             </h4>
             <div className="rounded-lg bg-oss-bg p-3">
               <ConfigField
-                label="Directional"
-                value={displayConfig.pillar_weights.directional * 100}
+                label="Premium Leverage"
+                value={displayConfig.pillars.weights.premium_leverage * 100}
                 unit="%"
-                fieldPath="pillar_weights.directional"
+                fieldPath="pillars.weights.premium_leverage"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
-                step={5}
-                error={errors['pillar_weights.directional']}
+                step={2.5}
+                error={errors['pillars.weights.premium_leverage']}
               />
               <ConfigField
-                label="Volatility"
-                value={displayConfig.pillar_weights.volatility * 100}
+                label="Underlying Behavior"
+                value={displayConfig.pillars.weights.underlying_behavior * 100}
                 unit="%"
-                fieldPath="pillar_weights.volatility"
+                fieldPath="pillars.weights.underlying_behavior"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
-                step={5}
-                error={errors['pillar_weights.volatility']}
+                step={2.5}
+                error={errors['pillars.weights.underlying_behavior']}
               />
               <ConfigField
-                label="Entry Quality"
-                value={displayConfig.pillar_weights.structure * 100}
+                label="Setup Quality"
+                value={displayConfig.pillars.weights.setup_quality * 100}
                 unit="%"
-                fieldPath="pillar_weights.structure"
+                fieldPath="pillars.weights.setup_quality"
                 isEditing={isEditing}
                 onChange={(path, value) => onConfigChange(path, value / 100)}
                 min={0}
                 max={100}
-                step={5}
-                error={errors['pillar_weights.structure']}
+                step={2.5}
+                error={errors['pillars.weights.setup_quality']}
               />
             </div>
             {isEditing && (
               <p className={clsx(
                 'text-xs mt-2',
-                Math.abs((displayConfig.pillar_weights.directional +
-                  displayConfig.pillar_weights.volatility +
-                  displayConfig.pillar_weights.structure) - 1) > 0.01
+                Math.abs((displayConfig.pillars.weights.premium_leverage +
+                  displayConfig.pillars.weights.underlying_behavior +
+                  displayConfig.pillars.weights.setup_quality) - 1) > 0.01
                   ? 'text-oss-reject'
                   : 'text-oss-muted'
               )}>
-                Total: {((displayConfig.pillar_weights.directional +
-                  displayConfig.pillar_weights.volatility +
-                  displayConfig.pillar_weights.structure) * 100).toFixed(0)}%
+                Total: {((displayConfig.pillars.weights.premium_leverage +
+                  displayConfig.pillars.weights.underlying_behavior +
+                  displayConfig.pillars.weights.setup_quality) * 100).toFixed(0)}%
                 (should equal 100%)
               </p>
             )}
           </div>
-          <div>
-            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Directional Subscores
-            </h4>
-            <div className="rounded-lg bg-oss-bg p-3">
-              <ConfigField
-                label="Trend Alignment"
-                value={displayConfig.pillars.directional.trend_alignment_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.trend_alignment_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.trend_alignment_weight']}
-              />
-              <ConfigField
-                label="Momentum"
-                value={displayConfig.pillars.directional.momentum_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.momentum_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.momentum_weight']}
-              />
-              <ConfigField
-                label="Trend Strength (ADX)"
-                value={displayConfig.pillars.directional.trend_strength_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.trend_strength_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.trend_strength_weight']}
-              />
-              <ConfigField
-                label="Signal Confirmation"
-                value={displayConfig.pillars.directional.signal_confirmation_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.signal_confirmation_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.signal_confirmation_weight']}
-              />
-              <ConfigField
-                label="Relative Strength"
-                value={displayConfig.pillars.directional.relative_strength_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.relative_strength_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.relative_strength_weight']}
-              />
-              <ConfigField
-                label="Catalyst"
-                value={displayConfig.pillars.directional.catalyst_weight * 100}
-                unit="%"
-                fieldPath="pillars.directional.catalyst_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.directional.catalyst_weight']}
-              />
-            </div>
-            {isEditing && (
-              <p className={clsx(
-                'text-xs mt-2',
-                Math.abs((displayConfig.pillars.directional.trend_alignment_weight +
-                  displayConfig.pillars.directional.momentum_weight +
-                  displayConfig.pillars.directional.trend_strength_weight +
-                  displayConfig.pillars.directional.signal_confirmation_weight +
-                  displayConfig.pillars.directional.relative_strength_weight +
-                  displayConfig.pillars.directional.catalyst_weight) - 1) > 0.01
-                  ? 'text-oss-reject'
-                  : 'text-oss-muted'
-              )}>
-                Total: {((displayConfig.pillars.directional.trend_alignment_weight +
-                  displayConfig.pillars.directional.momentum_weight +
-                  displayConfig.pillars.directional.trend_strength_weight +
-                  displayConfig.pillars.directional.signal_confirmation_weight +
-                  displayConfig.pillars.directional.relative_strength_weight +
-                  displayConfig.pillars.directional.catalyst_weight) * 100).toFixed(0)}%
-                (should equal 100%)
-              </p>
-            )}
-          </div>
-          <div>
-            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Volatility Subscores
-            </h4>
-            <div className="rounded-lg bg-oss-bg p-3">
-              <ConfigField
-                label="IV vs RV"
-                value={displayConfig.pillars.volatility.iv_vs_rv_weight * 100}
-                unit="%"
-                fieldPath="pillars.volatility.iv_vs_rv_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.volatility.iv_vs_rv_weight']}
-              />
-              <ConfigField
-                label="IV Percentile"
-                value={displayConfig.pillars.volatility.iv_percentile_weight * 100}
-                unit="%"
-                fieldPath="pillars.volatility.iv_percentile_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.volatility.iv_percentile_weight']}
-              />
-              <ConfigField
-                label="IV Regime"
-                value={displayConfig.pillars.volatility.iv_regime_weight * 100}
-                unit="%"
-                fieldPath="pillars.volatility.iv_regime_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.volatility.iv_regime_weight']}
-              />
-              <ConfigField
-                label="Theta-Adjusted Edge"
-                value={displayConfig.pillars.volatility.theta_adjusted_edge_weight * 100}
-                unit="%"
-                fieldPath="pillars.volatility.theta_adjusted_edge_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.volatility.theta_adjusted_edge_weight']}
-              />
-            </div>
-            {isEditing && (
-              <p className={clsx(
-                'text-xs mt-2',
-                Math.abs((displayConfig.pillars.volatility.iv_vs_rv_weight +
-                  displayConfig.pillars.volatility.iv_percentile_weight +
-                  displayConfig.pillars.volatility.iv_regime_weight +
-                  displayConfig.pillars.volatility.theta_adjusted_edge_weight) - 1) > 0.01
-                  ? 'text-oss-reject'
-                  : 'text-oss-muted'
-              )}>
-                Total: {((displayConfig.pillars.volatility.iv_vs_rv_weight +
-                  displayConfig.pillars.volatility.iv_percentile_weight +
-                  displayConfig.pillars.volatility.iv_regime_weight +
-                  displayConfig.pillars.volatility.theta_adjusted_edge_weight) * 100).toFixed(0)}%
-                (should equal 100%)
-              </p>
-            )}
-          </div>
-          <div>
-            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Entry Quality Subscores
-            </h4>
-            <div className="rounded-lg bg-oss-bg p-3">
-              <ConfigField
-                label="Delta / Moneyness"
-                value={displayConfig.pillars.structure.delta_moneyness_weight * 100}
-                unit="%"
-                fieldPath="pillars.structure.delta_moneyness_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.structure.delta_moneyness_weight']}
-              />
-              <ConfigField
-                label="Raw IV Level"
-                value={displayConfig.pillars.structure.raw_iv_weight * 100}
-                unit="%"
-                fieldPath="pillars.structure.raw_iv_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.structure.raw_iv_weight']}
-              />
-              <ConfigField
-                label="DTE Appropriateness"
-                value={displayConfig.pillars.structure.dte_appropriateness_weight * 100}
-                unit="%"
-                fieldPath="pillars.structure.dte_appropriateness_weight"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={5}
-                error={errors['pillars.structure.dte_appropriateness_weight']}
-              />
-            </div>
-            {isEditing && (
-              <p className={clsx(
-                'text-xs mt-2',
-                Math.abs((displayConfig.pillars.structure.delta_moneyness_weight +
-                  displayConfig.pillars.structure.raw_iv_weight +
-                  displayConfig.pillars.structure.dte_appropriateness_weight) - 1) > 0.01
-                  ? 'text-oss-reject'
-                  : 'text-oss-muted'
-              )}>
-                Total: {((displayConfig.pillars.structure.delta_moneyness_weight +
-                  displayConfig.pillars.structure.raw_iv_weight +
-                  displayConfig.pillars.structure.dte_appropriateness_weight) * 100).toFixed(0)}%
-                (should equal 100%)
-              </p>
-            )}
-          </div>
+
+          {/* Read-only subscore summary for all 3 pillars */}
+          {(['premium_leverage', 'underlying_behavior', 'setup_quality'] as const).map((pillarKey) => {
+            const pillar = displayConfig.pillars[pillarKey]
+            const allSubs = [...pillar.numeric_subscores, ...pillar.categorical_subscores]
+            return (
+              <div key={pillarKey}>
+                <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
+                  {pillar.display_name} Subscores
+                </h4>
+                <div className="rounded-lg bg-oss-bg p-3 space-y-1.5">
+                  {allSubs.map((sub) => (
+                    <div key={sub.subscore_id} className="flex justify-between text-xs">
+                      <span className="text-oss-text">{sub.display_name}</span>
+                      <span className="font-mono text-oss-muted">
+                        {(sub.weight * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] mt-1 text-oss-muted italic">
+                  Subscore breakpoints are tuned via the feature-outcome analysis script
+                  (<code>scripts/feature_outcome_analysis.py</code>). Edit through the script,
+                  then activate a new policy version.
+                </p>
+              </div>
+            )
+          })}
           <div>
             <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
               Decision Thresholds
@@ -1300,12 +1098,12 @@ export default function PolicyConfig() {
   const validateConfig = useCallback((config: PolicyConfigType): Record<string, string> => {
     const errors: Record<string, string> = {}
 
-    // Validate pillar weights sum to 1
-    const weightsSum = config.pillar_weights.directional +
-      config.pillar_weights.volatility +
-      config.pillar_weights.structure
+    // Validate pillar weights sum to 1 (Policy v3.0.0)
+    const weightsSum = config.pillars.weights.premium_leverage +
+      config.pillars.weights.underlying_behavior +
+      config.pillars.weights.setup_quality
     if (Math.abs(weightsSum - 1) > 0.01) {
-      errors['pillar_weights.directional'] = 'Weights must sum to 100%'
+      errors['pillars.weights.premium_leverage'] = 'Weights must sum to 100%'
     }
 
     // Validate ranking weights sum to 1
@@ -1314,34 +1112,6 @@ export default function PolicyConfig() {
       config.contract_selection.rank_weight_spread
     if (Math.abs(rankSum - 1) > 0.01) {
       errors['contract_selection.rank_weight_liquidity'] = 'Weights must sum to 100%'
-    }
-
-    // Validate directional subscore weights sum to 1
-    const dirSum = config.pillars.directional.trend_alignment_weight +
-      config.pillars.directional.momentum_weight +
-      config.pillars.directional.trend_strength_weight +
-      config.pillars.directional.signal_confirmation_weight +
-      config.pillars.directional.relative_strength_weight +
-      config.pillars.directional.catalyst_weight
-    if (Math.abs(dirSum - 1) > 0.01) {
-      errors['pillars.directional.trend_alignment_weight'] = 'Weights must sum to 100%'
-    }
-
-    // Validate volatility subscore weights sum to 1
-    const volSum = config.pillars.volatility.iv_vs_rv_weight +
-      config.pillars.volatility.iv_percentile_weight +
-      config.pillars.volatility.iv_regime_weight +
-      config.pillars.volatility.theta_adjusted_edge_weight
-    if (Math.abs(volSum - 1) > 0.01) {
-      errors['pillars.volatility.iv_vs_rv_weight'] = 'Weights must sum to 100%'
-    }
-
-    // Validate entry quality subscore weights sum to 1
-    const strSum = config.pillars.structure.delta_moneyness_weight +
-      config.pillars.structure.raw_iv_weight +
-      config.pillars.structure.dte_appropriateness_weight
-    if (Math.abs(strSum - 1) > 0.01) {
-      errors['pillars.structure.delta_moneyness_weight'] = 'Weights must sum to 100%'
     }
 
     // Validate call delta band
