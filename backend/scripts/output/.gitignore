@@ -1,0 +1,3 @@
+# Ephemeral analysis artifacts — regenerate via feature_outcome_analysis.py
+feature_analysis_data.json
+position_scores_backup_*.json

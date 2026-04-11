@@ -1,0 +1,270 @@
+{
+  "pillars": [
+    {
+      "name": "Premium Leverage",
+      "description": "Structural measure of how cheap and asymmetric the contract is. Far-OTM contracts with low implied volatility offer the best risk/reward profile, regardless of whether the trade is a CALL or PUT.",
+      "weight": 0.65,
+      "importance": 0.5516,
+      "n_subscores": 2,
+      "subscores": [
+        {
+          "feature": "entry_delta",
+          "display_name": "Entry Delta",
+          "weight": 0.77,
+          "direction": "lower_is_better",
+          "pearson_r": -0.2015,
+          "cohens_d": -0.4247,
+          "breakpoints": [
+            {
+              "value": -0.7488,
+              "score": 100,
+              "q_win_rate": 54.3,
+              "q_avg_return": 15.31
+            },
+            {
+              "value": -0.4042,
+              "score": 80,
+              "q_win_rate": 54.4,
+              "q_avg_return": 17.51
+            },
+            {
+              "value": 0.0161,
+              "score": 60,
+              "q_win_rate": 35.2,
+              "q_avg_return": -9.51
+            },
+            {
+              "value": 0.4191,
+              "score": 40,
+              "q_win_rate": 31.4,
+              "q_avg_return": -16.87
+            },
+            {
+              "value": 0.7482,
+              "score": 20,
+              "q_win_rate": 32.5,
+              "q_avg_return": -17.47
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        },
+        {
+          "feature": "entry_iv",
+          "display_name": "Entry IV",
+          "weight": 0.23,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0559,
+          "cohens_d": -0.1269,
+          "breakpoints": [
+            {
+              "value": 0.1362,
+              "score": 100,
+              "q_win_rate": 40.9,
+              "q_avg_return": -3.29
+            },
+            {
+              "value": 0.3026,
+              "score": 80,
+              "q_win_rate": 46.0,
+              "q_avg_return": 4.91
+            },
+            {
+              "value": 0.3665,
+              "score": 60,
+              "q_win_rate": 46.1,
+              "q_avg_return": 3.31
+            },
+            {
+              "value": 0.4554,
+              "score": 40,
+              "q_win_rate": 41.0,
+              "q_avg_return": -3.44
+            },
+            {
+              "value": 1.0217,
+              "score": 20,
+              "q_win_rate": 33.8,
+              "q_avg_return": -12.54
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        }
+      ]
+    },
+    {
+      "name": "Move Feasibility",
+      "description": "Whether the price move required to reach profitability is realistic given the option's time horizon and the underlying's expected volatility. Direction-agnostic structural measure.",
+      "weight": 0.25,
+      "importance": 0.2,
+      "n_subscores": 2,
+      "subscores": [
+        {
+          "feature": "fvt_time_adjusted_feasibility",
+          "display_name": "Time-Adj Feasibility",
+          "weight": 0.5,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0452,
+          "cohens_d": 0.0972,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 20,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 40,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.1605,
+              "score": 60,
+              "q_win_rate": 50.1,
+              "q_avg_return": 7.68
+            },
+            {
+              "value": 0.4506,
+              "score": 80,
+              "q_win_rate": 43.5,
+              "q_avg_return": -2.02
+            },
+            {
+              "value": 0.9153,
+              "score": 100,
+              "q_win_rate": 43.6,
+              "q_avg_return": 2.15
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_feasibility_ratio",
+          "display_name": "FVT Feasibility Ratio",
+          "weight": 0.5,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0404,
+          "cohens_d": 0.1028,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 20,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 40,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.2071,
+              "score": 60,
+              "q_win_rate": 49.9,
+              "q_avg_return": 8.33
+            },
+            {
+              "value": 0.5254,
+              "score": 80,
+              "q_win_rate": 44.1,
+              "q_avg_return": -1.08
+            },
+            {
+              "value": 1.2524,
+              "score": 100,
+              "q_win_rate": 43.3,
+              "q_avg_return": 0.56
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        }
+      ]
+    },
+    {
+      "name": "Setup Quality",
+      "description": "Structural setup indicators: days-to-expiration bucket suitability and how many independent scanners converged on the opportunity. Direction-agnostic meta-signal quality measures.",
+      "weight": 0.1,
+      "importance": 0.0501,
+      "n_subscores": 2,
+      "subscores": [
+        {
+          "feature": "dte_bucket",
+          "display_name": "Dte Bucket",
+          "weight": 0.6,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "D": 10.0,
+            "C": 36.7,
+            "B": 63.3,
+            "A": 90.0
+          }
+        },
+        {
+          "feature": "convergence_count",
+          "display_name": "Scanner Convergence",
+          "weight": 0.4,
+          "direction": "unclear",
+          "pearson_r": 0.0226,
+          "cohens_d": 0.0501,
+          "breakpoints": [
+            {
+              "value": 1.0,
+              "score": 20,
+              "q_win_rate": 38.5,
+              "q_avg_return": -8.13
+            },
+            {
+              "value": 1.0,
+              "score": 40,
+              "q_win_rate": 38.9,
+              "q_avg_return": -3.98
+            },
+            {
+              "value": 1.0,
+              "score": 60,
+              "q_win_rate": 42.0,
+              "q_avg_return": -2.47
+            },
+            {
+              "value": 1.0,
+              "score": 80,
+              "q_win_rate": 40.1,
+              "q_avg_return": -4.68
+            },
+            {
+              "value": 1.5,
+              "score": 100,
+              "q_win_rate": 48.1,
+              "q_avg_return": 7.98
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        }
+      ]
+    }
+  ],
+  "description": "Structural-only 3-pillar system. Excludes all features that could reflect short-term market regime (PUT vs CALL bias, scanner-specific performance, IV regime, market returns, directional indicators). Uses only features that describe the contract itself or direction-agnostic feasibility measures.",
+  "tier2_recommendations": [
+    {
+      "feature": "fvt_adx_14",
+      "display_name": "ADX (14)",
+      "cohens_d": -0.4087,
+      "pearson_r": -0.2266,
+      "recommendation": "Denormalize onto PaperPosition. ADX measures trend strength direction-agnostically \u2014 a strong trend (high ADX) helps both calls and puts that are positioned with the trend. Only n=395 currently due to limited feature history, but it's the strongest structural directional-strength signal available."
+    }
+  ],
+  "total_features_selected": 6
+}

@@ -1,0 +1,556 @@
+{
+  "pillars": [
+    {
+      "name": "Premium Leverage",
+      "description": "How cheap and asymmetric the contract is. Far-OTM (low |delta|) contracts with low implied volatility offer the best risk/reward profile. Direction-agnostic: works for both calls and puts.",
+      "weight": 0.2601,
+      "importance": 0.4327,
+      "n_subscores": 4,
+      "subscores": [
+        {
+          "feature": "fvt_iv",
+          "display_name": "FVT Implied Vol",
+          "weight": 0.5161,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0987,
+          "cohens_d": -0.2233,
+          "breakpoints": [
+            {
+              "value": 0.134,
+              "score": 67.9,
+              "q_win_rate": 42.3,
+              "q_avg_return": -1.43
+            },
+            {
+              "value": 0.2972,
+              "score": 90.0,
+              "q_win_rate": 47.3,
+              "q_avg_return": 5.55
+            },
+            {
+              "value": 0.3618,
+              "score": 86.1,
+              "q_win_rate": 46.4,
+              "q_avg_return": 4.33
+            },
+            {
+              "value": 0.456,
+              "score": 73.1,
+              "q_win_rate": 44.0,
+              "q_avg_return": 0.2
+            },
+            {
+              "value": 1.0237,
+              "score": 10.0,
+              "q_win_rate": 28.7,
+              "q_avg_return": -19.71
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "abs_entry_delta",
+          "display_name": "|Entry Delta|",
+          "weight": 0.2748,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0383,
+          "cohens_d": 0.1189,
+          "breakpoints": [
+            {
+              "value": 0.1701,
+              "score": 10.0,
+              "q_win_rate": 36.5,
+              "q_avg_return": -7.32
+            },
+            {
+              "value": 0.3782,
+              "score": 55.5,
+              "q_win_rate": 40.9,
+              "q_avg_return": -1.88
+            },
+            {
+              "value": 0.4617,
+              "score": 71.1,
+              "q_win_rate": 43.3,
+              "q_avg_return": -0.01
+            },
+            {
+              "value": 0.5544,
+              "score": 36.8,
+              "q_win_rate": 41.2,
+              "q_avg_return": -4.11
+            },
+            {
+              "value": 0.8058,
+              "score": 90.0,
+              "q_win_rate": 45.8,
+              "q_avg_return": 2.25
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        },
+        {
+          "feature": "fvt_iv_percentile",
+          "display_name": "IV Percentile",
+          "weight": 0.1449,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0479,
+          "cohens_d": -0.0627,
+          "breakpoints": [
+            {
+              "value": 5.555,
+              "score": 90.0,
+              "q_win_rate": 47.5,
+              "q_avg_return": 7.74
+            },
+            {
+              "value": 21.18,
+              "score": 47.6,
+              "q_win_rate": 42.0,
+              "q_avg_return": -0.51
+            },
+            {
+              "value": 40.25,
+              "score": 10.0,
+              "q_win_rate": 38.2,
+              "q_avg_return": -7.83
+            },
+            {
+              "value": 59.24,
+              "score": 33.5,
+              "q_win_rate": 40.9,
+              "q_avg_return": -3.25
+            },
+            {
+              "value": 77.115,
+              "score": 35.8,
+              "q_win_rate": 43.0,
+              "q_avg_return": -2.8
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_iv_rv_ratio",
+          "display_name": "IV/RV Ratio",
+          "weight": 0.0642,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0336,
+          "cohens_d": -0.0278,
+          "breakpoints": [
+            {
+              "value": 0.3678,
+              "score": 63.9,
+              "q_win_rate": 41.8,
+              "q_avg_return": 0.42
+            },
+            {
+              "value": 0.7961,
+              "score": 34.0,
+              "q_win_rate": 41.6,
+              "q_avg_return": -3.13
+            },
+            {
+              "value": 0.9141,
+              "score": 90.0,
+              "q_win_rate": 45.6,
+              "q_avg_return": 3.53
+            },
+            {
+              "value": 1.0418,
+              "score": 10.0,
+              "q_win_rate": 39.2,
+              "q_avg_return": -5.99
+            },
+            {
+              "value": 3.7591,
+              "score": 10.8,
+              "q_win_rate": 40.5,
+              "q_avg_return": -5.9
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        }
+      ]
+    },
+    {
+      "name": "Underlying Behavior",
+      "description": "How the underlying stock is behaving and whether the required move is realistic. Captures volatility context, trend strength (ADX), and feasibility of reaching profit targets within DTE. Direction-agnostic structural measures.",
+      "weight": 0.5391,
+      "importance": 0.8969,
+      "n_subscores": 5,
+      "subscores": [
+        {
+          "feature": "fvt_adx_14",
+          "display_name": "ADX (14)",
+          "weight": 0.4557,
+          "direction": "lower_is_better",
+          "pearson_r": -0.2266,
+          "cohens_d": -0.4087,
+          "breakpoints": [
+            {
+              "value": 11.6582,
+              "score": 90.0,
+              "q_win_rate": 81.0,
+              "q_avg_return": 72.01
+            },
+            {
+              "value": 15.8619,
+              "score": 84.7,
+              "q_win_rate": 72.2,
+              "q_avg_return": 67.37
+            },
+            {
+              "value": 19.1364,
+              "score": 10.0,
+              "q_win_rate": 39.2,
+              "q_avg_return": 2.17
+            },
+            {
+              "value": 23.0479,
+              "score": 58.9,
+              "q_win_rate": 73.4,
+              "q_avg_return": 44.83
+            },
+            {
+              "value": 45.8886,
+              "score": 40.5,
+              "q_win_rate": 60.8,
+              "q_avg_return": 28.78
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_rv20",
+          "display_name": "Realized Vol 20d",
+          "weight": 0.214,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0763,
+          "cohens_d": -0.1919,
+          "breakpoints": [
+            {
+              "value": 0.1531,
+              "score": 56.0,
+              "q_win_rate": 42.2,
+              "q_avg_return": -3.04
+            },
+            {
+              "value": 0.3201,
+              "score": 69.0,
+              "q_win_rate": 43.5,
+              "q_avg_return": 0.32
+            },
+            {
+              "value": 0.4034,
+              "score": 90.0,
+              "q_win_rate": 48.0,
+              "q_avg_return": 5.75
+            },
+            {
+              "value": 0.5286,
+              "score": 70.9,
+              "q_win_rate": 42.7,
+              "q_avg_return": 0.82
+            },
+            {
+              "value": 1.2389,
+              "score": 10.0,
+              "q_win_rate": 32.3,
+              "q_avg_return": -14.93
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_feasibility_ratio",
+          "display_name": "Feasibility Ratio",
+          "weight": 0.1146,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0404,
+          "cohens_d": 0.1028,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 10.0,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 48.3,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.2071,
+              "score": 90.0,
+              "q_win_rate": 49.9,
+              "q_avg_return": 8.33
+            },
+            {
+              "value": 0.5254,
+              "score": 57.8,
+              "q_win_rate": 44.1,
+              "q_avg_return": -1.08
+            },
+            {
+              "value": 1.2524,
+              "score": 63.4,
+              "q_win_rate": 43.3,
+              "q_avg_return": 0.56
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_time_adjusted_feasibility",
+          "display_name": "Time-Adj Feasibility",
+          "weight": 0.1084,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0452,
+          "cohens_d": 0.0972,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 10.0,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 49.4,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.1605,
+              "score": 90.0,
+              "q_win_rate": 50.1,
+              "q_avg_return": 7.68
+            },
+            {
+              "value": 0.4506,
+              "score": 55.8,
+              "q_win_rate": 43.5,
+              "q_avg_return": -2.02
+            },
+            {
+              "value": 0.9153,
+              "score": 70.5,
+              "q_win_rate": 43.6,
+              "q_avg_return": 2.15
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_atr14_pct",
+          "display_name": "ATR % (14)",
+          "weight": 0.1074,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0329,
+          "cohens_d": -0.0963,
+          "breakpoints": [
+            {
+              "value": 1.4479,
+              "score": 41.6,
+              "q_win_rate": 40.8,
+              "q_avg_return": -5.93
+            },
+            {
+              "value": 2.9684,
+              "score": 86.1,
+              "q_win_rate": 45.0,
+              "q_avg_return": 2.62
+            },
+            {
+              "value": 3.6037,
+              "score": 90.0,
+              "q_win_rate": 45.1,
+              "q_avg_return": 3.36
+            },
+            {
+              "value": 4.4884,
+              "score": 77.1,
+              "q_win_rate": 44.2,
+              "q_avg_return": 0.89
+            },
+            {
+              "value": 13.5904,
+              "score": 10.0,
+              "q_win_rate": 33.6,
+              "q_avg_return": -12.01
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        }
+      ]
+    },
+    {
+      "name": "Setup Quality",
+      "description": "Meta-indicators of a high-quality entry: scanner convergence, DTE bucket suitability, and contrarian liquidity (lower volume / open interest has historically predicted better outcomes within the already-filtered opportunity set).",
+      "weight": 0.2008,
+      "importance": 0.3342,
+      "n_subscores": 4,
+      "subscores": [
+        {
+          "feature": "fvt_volume",
+          "display_name": "Volume",
+          "weight": 0.3454,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0469,
+          "cohens_d": -0.1154,
+          "breakpoints": [
+            {
+              "value": 88.0,
+              "score": 61.7,
+              "q_win_rate": 43.4,
+              "q_avg_return": -1.32
+            },
+            {
+              "value": 173.0,
+              "score": 90.0,
+              "q_win_rate": 45.7,
+              "q_avg_return": 3.08
+            },
+            {
+              "value": 319.0,
+              "score": 76.4,
+              "q_win_rate": 43.6,
+              "q_avg_return": 0.96
+            },
+            {
+              "value": 696.5,
+              "score": 42.0,
+              "q_win_rate": 40.0,
+              "q_avg_return": -4.4
+            },
+            {
+              "value": 37536.0,
+              "score": 10.0,
+              "q_win_rate": 36.1,
+              "q_avg_return": -9.38
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_open_interest",
+          "display_name": "Open Interest",
+          "weight": 0.2514,
+          "direction": "lower_is_better",
+          "pearson_r": -0.041,
+          "cohens_d": -0.084,
+          "breakpoints": [
+            {
+              "value": 295.5,
+              "score": 90.0,
+              "q_win_rate": 45.0,
+              "q_avg_return": 3.26
+            },
+            {
+              "value": 792.5,
+              "score": 31.9,
+              "q_win_rate": 39.3,
+              "q_avg_return": -5.25
+            },
+            {
+              "value": 1534.0,
+              "score": 69.3,
+              "q_win_rate": 43.5,
+              "q_avg_return": 0.23
+            },
+            {
+              "value": 3350.5,
+              "score": 61.9,
+              "q_win_rate": 43.0,
+              "q_avg_return": -0.85
+            },
+            {
+              "value": 91380.0,
+              "score": 10.0,
+              "q_win_rate": 37.8,
+              "q_avg_return": -8.46
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "convergence_count",
+          "display_name": "Scanner Convergence",
+          "weight": 0.1499,
+          "direction": "unclear",
+          "pearson_r": 0.0226,
+          "cohens_d": 0.0501,
+          "breakpoints": [
+            {
+              "value": 1.0,
+              "score": 10.0,
+              "q_win_rate": 38.5,
+              "q_avg_return": -8.13
+            },
+            {
+              "value": 1.0,
+              "score": 30.6,
+              "q_win_rate": 38.9,
+              "q_avg_return": -3.98
+            },
+            {
+              "value": 1.0,
+              "score": 38.1,
+              "q_win_rate": 42.0,
+              "q_avg_return": -2.47
+            },
+            {
+              "value": 1.0,
+              "score": 27.1,
+              "q_win_rate": 40.1,
+              "q_avg_return": -4.68
+            },
+            {
+              "value": 1.5,
+              "score": 90.0,
+              "q_win_rate": 48.1,
+              "q_avg_return": 7.98
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        },
+        {
+          "feature": "dte_bucket",
+          "display_name": "Dte Bucket",
+          "weight": 0.2533,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "B": 68.3,
+            "C": 29.8,
+            "D": 10.0,
+            "A": 90.0
+          }
+        }
+      ]
+    }
+  ],
+  "description": "Finalized structural-only 3-pillar scoring system. Uses ALL significant structural features (p<0.05) available from the FeatureValueTable. Excludes features that could reflect short-term market regime: option_type (PUT/CALL bias), scanner_source, iv_regime, SPY returns, relative strength, MACD, +DI/-DI, 5d/20d returns. All subscores use empirical avg-return-based quintile scoring to handle non-monotonic relationships correctly.",
+  "tier2_recommendations": [],
+  "total_features_selected": 13
+}

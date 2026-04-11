@@ -1,0 +1,290 @@
+{
+  "new_composite": {
+    "pearson_r": 0.2223,
+    "p_value": 0.0,
+    "n": 15505
+  },
+  "new_pillar_correlations": {
+    "Contract Quality": {
+      "pearson_r": 0.2239,
+      "p_value": 0.0,
+      "n": 11834
+    },
+    "Market Context": {
+      "pearson_r": 0.1359,
+      "p_value": 0.0,
+      "n": 15505
+    },
+    "Signal Quality": {
+      "pearson_r": 0.0787,
+      "p_value": 0.0,
+      "n": 15505
+    }
+  },
+  "old_pillar_correlations": {
+    "Directional": {
+      "pearson_r": -0.0296,
+      "p_value": 0.000224,
+      "n": 15505
+    },
+    "Volatility": {
+      "pearson_r": 0.0492,
+      "p_value": 0.0,
+      "n": 15505
+    },
+    "Structure": {
+      "pearson_r": 0.0005,
+      "p_value": 0.950095,
+      "n": 15505
+    },
+    "Conviction": {
+      "pearson_r": 0.0029,
+      "p_value": 0.714088,
+      "n": 15505
+    }
+  },
+  "composite_quintiles": [
+    {
+      "quintile": 1,
+      "range_low": 19.93,
+      "range_high": 36.08,
+      "n": 3101,
+      "win_rate": 24.4,
+      "avg_return": -28.47,
+      "median_return": -54.72
+    },
+    {
+      "quintile": 2,
+      "range_low": 36.09,
+      "range_high": 45.0,
+      "n": 3101,
+      "win_rate": 37.0,
+      "avg_return": -8.47,
+      "median_return": -52.36
+    },
+    {
+      "quintile": 3,
+      "range_low": 45.0,
+      "range_high": 52.4,
+      "n": 3101,
+      "win_rate": 42.6,
+      "avg_return": -0.76,
+      "median_return": -51.02
+    },
+    {
+      "quintile": 4,
+      "range_low": 52.41,
+      "range_high": 61.07,
+      "n": 3101,
+      "win_rate": 47.7,
+      "avg_return": 7.35,
+      "median_return": -20.63
+    },
+    {
+      "quintile": 5,
+      "range_low": 61.08,
+      "range_high": 85.89,
+      "n": 3101,
+      "win_rate": 57.0,
+      "avg_return": 19.28,
+      "median_return": 52.17
+    }
+  ],
+  "pillar_quintiles": {
+    "Contract Quality": [
+      {
+        "quintile": 1,
+        "range_low": 16.45,
+        "range_high": 29.83,
+        "n": 2366,
+        "win_rate": 31.4,
+        "avg_return": -18.19,
+        "median_return": -52.89
+      },
+      {
+        "quintile": 2,
+        "range_low": 29.83,
+        "range_high": 34.87,
+        "n": 2366,
+        "win_rate": 30.5,
+        "avg_return": -19.58,
+        "median_return": -54.4
+      },
+      {
+        "quintile": 3,
+        "range_low": 34.87,
+        "range_high": 69.83,
+        "n": 2366,
+        "win_rate": 36.2,
+        "avg_return": -8.56,
+        "median_return": -53.14
+      },
+      {
+        "quintile": 4,
+        "range_low": 69.84,
+        "range_high": 80.04,
+        "n": 2366,
+        "win_rate": 53.3,
+        "avg_return": 13.77,
+        "median_return": 51.31
+      },
+      {
+        "quintile": 5,
+        "range_low": 80.04,
+        "range_high": 94.97,
+        "n": 2370,
+        "win_rate": 56.3,
+        "avg_return": 21.45,
+        "median_return": 50.0
+      }
+    ],
+    "Market Context": [
+      {
+        "quintile": 1,
+        "range_low": 19.48,
+        "range_high": 43.06,
+        "n": 3101,
+        "win_rate": 30.6,
+        "avg_return": -18.58,
+        "median_return": -53.46
+      },
+      {
+        "quintile": 2,
+        "range_low": 43.07,
+        "range_high": 50.71,
+        "n": 3101,
+        "win_rate": 38.9,
+        "avg_return": -6.81,
+        "median_return": -51.15
+      },
+      {
+        "quintile": 3,
+        "range_low": 50.71,
+        "range_high": 58.07,
+        "n": 3101,
+        "win_rate": 42.3,
+        "avg_return": -0.57,
+        "median_return": -50.84
+      },
+      {
+        "quintile": 4,
+        "range_low": 58.08,
+        "range_high": 66.33,
+        "n": 3101,
+        "win_rate": 45.1,
+        "avg_return": 3.98,
+        "median_return": -50.15
+      },
+      {
+        "quintile": 5,
+        "range_low": 66.33,
+        "range_high": 90.59,
+        "n": 3101,
+        "win_rate": 51.7,
+        "avg_return": 10.92,
+        "median_return": 50.18
+      }
+    ],
+    "Signal Quality": [
+      {
+        "quintile": 1,
+        "range_low": 10.0,
+        "range_high": 23.85,
+        "n": 3101,
+        "win_rate": 33.1,
+        "avg_return": -13.77,
+        "median_return": -52.63
+      },
+      {
+        "quintile": 2,
+        "range_low": 23.85,
+        "range_high": 24.1,
+        "n": 3101,
+        "win_rate": 43.0,
+        "avg_return": 1.43,
+        "median_return": -50.0
+      },
+      {
+        "quintile": 3,
+        "range_low": 24.1,
+        "range_high": 50.28,
+        "n": 3101,
+        "win_rate": 40.5,
+        "avg_return": -4.2,
+        "median_return": -51.2
+      },
+      {
+        "quintile": 4,
+        "range_low": 50.28,
+        "range_high": 52.31,
+        "n": 3101,
+        "win_rate": 43.2,
+        "avg_return": -1.08,
+        "median_return": -50.88
+      },
+      {
+        "quintile": 5,
+        "range_low": 52.31,
+        "range_high": 85.59,
+        "n": 3101,
+        "win_rate": 49.0,
+        "avg_return": 6.54,
+        "median_return": -34.03
+      }
+    ]
+  },
+  "decile_analysis": {
+    "top_10pct": {
+      "n": 1550,
+      "win_rate": 60.5,
+      "avg_return": 24.55,
+      "median_return": 54.78,
+      "avg_composite": 71.1
+    },
+    "bottom_10pct": {
+      "n": 1550,
+      "win_rate": 18.8,
+      "avg_return": -34.48,
+      "median_return": -54.72,
+      "avg_composite": 29.0
+    }
+  },
+  "scanner_comparison": {
+    "BREAKOUT": {
+      "n": 771,
+      "new_composite_r": 0.5828,
+      "old_conviction_r": 0.3199,
+      "improvement": 0.2629
+    },
+    "BREAKDOWN": {
+      "n": 219,
+      "new_composite_r": 0.3027,
+      "old_conviction_r": -0.3523,
+      "improvement": -0.0496
+    },
+    "CHEAP_OPTIONS": {
+      "n": 6996,
+      "new_composite_r": 0.2096,
+      "old_conviction_r": -0.0162,
+      "improvement": 0.1934
+    },
+    "UNUSUAL_VOLUME": {
+      "n": 6949,
+      "new_composite_r": 0.2094,
+      "old_conviction_r": -0.0158,
+      "improvement": 0.1937
+    },
+    "COMPRESSION_EXPANSION": {
+      "n": 538,
+      "new_composite_r": 0.1961,
+      "old_conviction_r": 0.1508,
+      "improvement": 0.0453
+    },
+    "REVALIDATION": {
+      "n": 29,
+      "new_composite_r": -0.1609,
+      "old_conviction_r": 0.2261,
+      "improvement": -0.0652
+    }
+  }
+}

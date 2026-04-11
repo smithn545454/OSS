@@ -1,0 +1,614 @@
+{
+  "pillars": [
+    {
+      "name": "Contract Quality",
+      "description": "Contract characteristics that predict outcomes",
+      "weight": 0.416,
+      "importance": 1.1767,
+      "n_subscores": 5,
+      "subscores": [
+        {
+          "feature": "option_type",
+          "display_name": "Option Type",
+          "weight": 0.365,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0.43,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "CALL": 10.0,
+            "PUT": 90.0
+          }
+        },
+        {
+          "feature": "entry_delta",
+          "display_name": "Entry Delta",
+          "weight": 0.361,
+          "direction": "lower_is_better",
+          "pearson_r": -0.2015,
+          "cohens_d": -0.4247,
+          "breakpoints": [
+            {
+              "value": -0.7488,
+              "score": 100,
+              "q_win_rate": 54.3,
+              "q_avg_return": 15.31
+            },
+            {
+              "value": -0.4042,
+              "score": 80,
+              "q_win_rate": 54.4,
+              "q_avg_return": 17.51
+            },
+            {
+              "value": 0.0161,
+              "score": 60,
+              "q_win_rate": 35.2,
+              "q_avg_return": -9.51
+            },
+            {
+              "value": 0.4191,
+              "score": 40,
+              "q_win_rate": 31.4,
+              "q_avg_return": -16.87
+            },
+            {
+              "value": 0.7482,
+              "score": 20,
+              "q_win_rate": 32.5,
+              "q_avg_return": -17.47
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        },
+        {
+          "feature": "dte_bucket",
+          "display_name": "Dte Bucket",
+          "weight": 0.138,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0.1619999999999999,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "D": 10.0,
+            "C": 36.7,
+            "B": 63.3,
+            "A": 90.0
+          }
+        },
+        {
+          "feature": "entry_iv",
+          "display_name": "Entry IV",
+          "weight": 0.108,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0559,
+          "cohens_d": -0.1269,
+          "breakpoints": [
+            {
+              "value": 0.1362,
+              "score": 100,
+              "q_win_rate": 40.9,
+              "q_avg_return": -3.29
+            },
+            {
+              "value": 0.3026,
+              "score": 80,
+              "q_win_rate": 46.0,
+              "q_avg_return": 4.91
+            },
+            {
+              "value": 0.3665,
+              "score": 60,
+              "q_win_rate": 46.1,
+              "q_avg_return": 3.31
+            },
+            {
+              "value": 0.4554,
+              "score": 40,
+              "q_win_rate": 41.0,
+              "q_avg_return": -3.44
+            },
+            {
+              "value": 1.0217,
+              "score": 20,
+              "q_win_rate": 33.8,
+              "q_avg_return": -12.54
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        },
+        {
+          "feature": "dte_at_entry",
+          "display_name": "DTE at Entry",
+          "weight": 0.028,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0463,
+          "cohens_d": -0.0331,
+          "breakpoints": [
+            {
+              "value": 12.5,
+              "score": 100,
+              "q_win_rate": 47.3,
+              "q_avg_return": 9.51
+            },
+            {
+              "value": 23.0,
+              "score": 80,
+              "q_win_rate": 37.9,
+              "q_avg_return": -6.55
+            },
+            {
+              "value": 36.0,
+              "score": 60,
+              "q_win_rate": 42.0,
+              "q_avg_return": -0.99
+            },
+            {
+              "value": 57.5,
+              "score": 40,
+              "q_win_rate": 38.8,
+              "q_avg_return": -7.64
+            },
+            {
+              "value": 95.5,
+              "score": 20,
+              "q_win_rate": 41.7,
+              "q_avg_return": -5.39
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        }
+      ]
+    },
+    {
+      "name": "Market Context",
+      "description": "Market environment and move feasibility at entry",
+      "weight": 0.303,
+      "importance": 0.8569,
+      "n_subscores": 7,
+      "subscores": [
+        {
+          "feature": "fvt_iv_regime",
+          "display_name": "Fvt Iv Regime",
+          "weight": 0.259,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0.22200000000000003,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "IV_TRENDING_DOWN": 10.0,
+            "IV_NEUTRAL_REGIME": 30.0,
+            "IV_HIGH_REGIME": 50.0,
+            "IV_LOW_REGIME": 70.0,
+            "IV_TRENDING_UP": 90.0
+          }
+        },
+        {
+          "feature": "fvt_spy_return_5d",
+          "display_name": "SPY Return 5d",
+          "weight": 0.181,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0839,
+          "cohens_d": 0.1547,
+          "breakpoints": [
+            {
+              "value": -2.6433,
+              "score": 20,
+              "q_win_rate": 40.6,
+              "q_avg_return": -4.37
+            },
+            {
+              "value": -1.166,
+              "score": 40,
+              "q_win_rate": 38.0,
+              "q_avg_return": -7.68
+            },
+            {
+              "value": -0.7344,
+              "score": 60,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.63
+            },
+            {
+              "value": 0.1026,
+              "score": 80,
+              "q_win_rate": 42.8,
+              "q_avg_return": -2.66
+            },
+            {
+              "value": 2.508,
+              "score": 100,
+              "q_win_rate": 47.1,
+              "q_avg_return": 7.26
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_rs_5d",
+          "display_name": "Rel Strength 5d",
+          "weight": 0.162,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0709,
+          "cohens_d": -0.1387,
+          "breakpoints": [
+            {
+              "value": -16.8246,
+              "score": 100,
+              "q_win_rate": 45.2,
+              "q_avg_return": 3.62
+            },
+            {
+              "value": -2.2516,
+              "score": 80,
+              "q_win_rate": 46.4,
+              "q_avg_return": 5.98
+            },
+            {
+              "value": 0.2037,
+              "score": 60,
+              "q_win_rate": 39.7,
+              "q_avg_return": -6.1
+            },
+            {
+              "value": 3.1978,
+              "score": 40,
+              "q_win_rate": 36.0,
+              "q_avg_return": -10.38
+            },
+            {
+              "value": 17.7858,
+              "score": 20,
+              "q_win_rate": 41.4,
+              "q_avg_return": -4.19
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_return_5d",
+          "display_name": "Return 5d",
+          "weight": 0.126,
+          "direction": "lower_is_better",
+          "pearson_r": -0.0545,
+          "cohens_d": -0.1082,
+          "breakpoints": [
+            {
+              "value": -18.4995,
+              "score": 100,
+              "q_win_rate": 44.0,
+              "q_avg_return": 1.63
+            },
+            {
+              "value": -2.7211,
+              "score": 80,
+              "q_win_rate": 45.0,
+              "q_avg_return": 2.62
+            },
+            {
+              "value": -0.088,
+              "score": 60,
+              "q_win_rate": 42.5,
+              "q_avg_return": -0.1
+            },
+            {
+              "value": 2.9517,
+              "score": 40,
+              "q_win_rate": 35.1,
+              "q_avg_return": -12.79
+            },
+            {
+              "value": 16.7892,
+              "score": 20,
+              "q_win_rate": 42.0,
+              "q_avg_return": -2.43
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_feasibility_ratio",
+          "display_name": "FVT Feasibility Ratio",
+          "weight": 0.12,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0404,
+          "cohens_d": 0.1028,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 20,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 40,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.2071,
+              "score": 60,
+              "q_win_rate": 49.9,
+              "q_avg_return": 8.33
+            },
+            {
+              "value": 0.5254,
+              "score": 80,
+              "q_win_rate": 44.1,
+              "q_avg_return": -1.08
+            },
+            {
+              "value": 1.2524,
+              "score": 100,
+              "q_win_rate": 43.3,
+              "q_avg_return": 0.56
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_time_adjusted_feasibility",
+          "display_name": "Time-Adj Feasibility",
+          "weight": 0.113,
+          "direction": "higher_is_better",
+          "pearson_r": 0.0452,
+          "cohens_d": 0.0972,
+          "breakpoints": [
+            {
+              "value": 0.0,
+              "score": 20,
+              "q_win_rate": 31.2,
+              "q_avg_return": -15.02
+            },
+            {
+              "value": 0.0,
+              "score": 40,
+              "q_win_rate": 40.2,
+              "q_avg_return": -3.85
+            },
+            {
+              "value": 0.1605,
+              "score": 60,
+              "q_win_rate": 50.1,
+              "q_avg_return": 7.68
+            },
+            {
+              "value": 0.4506,
+              "score": 80,
+              "q_win_rate": 43.5,
+              "q_avg_return": -2.02
+            },
+            {
+              "value": 0.9153,
+              "score": 100,
+              "q_win_rate": 43.6,
+              "q_avg_return": 2.15
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier2"
+        },
+        {
+          "feature": "fvt_iv_10d_change",
+          "display_name": "IV 10d Change",
+          "weight": 0.039,
+          "direction": "unclear",
+          "pearson_r": 0.0176,
+          "cohens_d": 0.0333,
+          "breakpoints": [
+            {
+              "value": -55.325,
+              "score": 20,
+              "q_win_rate": 35.9,
+              "q_avg_return": -11.28
+            },
+            {
+              "value": -8.605,
+              "score": 40,
+              "q_win_rate": 42.3,
+              "q_avg_return": -1.94
+            },
+            {
+              "value": -0.64,
+              "score": 60,
+              "q_win_rate": 43.7,
+              "q_avg_return": 0.82
+            },
+            {
+              "value": 8.04,
+              "score": 80,
+              "q_win_rate": 42.7,
+              "q_avg_return": 1.76
+            },
+            {
+              "value": 1089.53,
+              "score": 100,
+              "q_win_rate": 47.9,
+              "q_avg_return": 5.18
+            }
+          ],
+          "monotonic": "increasing",
+          "tier": "tier2"
+        }
+      ]
+    },
+    {
+      "name": "Signal Quality",
+      "description": "Signal source and system conviction indicators",
+      "weight": 0.28,
+      "importance": 0.7921,
+      "n_subscores": 3,
+      "subscores": [
+        {
+          "feature": "scanner_source",
+          "display_name": "Scanner Source",
+          "weight": 0.826,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0.654,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "BREAKOUT": 10.0,
+            "UNUSUAL_VOLUME": 26.0,
+            "COMPRESSION_EXPANSION": 42.0,
+            "CHEAP_OPTIONS": 58.0,
+            "BREAKDOWN": 74.0,
+            "REVALIDATION": 90.0
+          }
+        },
+        {
+          "feature": "verdict_at_entry",
+          "display_name": "Verdict At Entry",
+          "weight": 0.111,
+          "direction": "categorical",
+          "pearson_r": 0,
+          "cohens_d": 0.08800000000000012,
+          "breakpoints": [],
+          "monotonic": "categorical",
+          "tier": "tier1",
+          "is_categorical": true,
+          "category_score_map": {
+            "WATCH": 10.0,
+            "APPROVE": 90.0
+          }
+        },
+        {
+          "feature": "convergence_count",
+          "display_name": "Scanner Convergence",
+          "weight": 0.063,
+          "direction": "unclear",
+          "pearson_r": 0.0226,
+          "cohens_d": 0.0501,
+          "breakpoints": [
+            {
+              "value": 1.0,
+              "score": 20,
+              "q_win_rate": 38.5,
+              "q_avg_return": -8.13
+            },
+            {
+              "value": 1.0,
+              "score": 40,
+              "q_win_rate": 38.9,
+              "q_avg_return": -3.98
+            },
+            {
+              "value": 1.0,
+              "score": 60,
+              "q_win_rate": 42.0,
+              "q_avg_return": -2.47
+            },
+            {
+              "value": 1.0,
+              "score": 80,
+              "q_win_rate": 40.1,
+              "q_avg_return": -4.68
+            },
+            {
+              "value": 1.5,
+              "score": 100,
+              "q_win_rate": 48.1,
+              "q_avg_return": 7.98
+            }
+          ],
+          "monotonic": "none",
+          "tier": "tier1"
+        }
+      ]
+    }
+  ],
+  "tier2_recommendations": [
+    {
+      "feature": "fvt_adx_14",
+      "display_name": "ADX (14)",
+      "cohens_d": -0.4087,
+      "pearson_r": -0.2266,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_macd_histogram",
+      "display_name": "MACD Histogram",
+      "cohens_d": 0.3784,
+      "pearson_r": 0.124,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_minus_di",
+      "display_name": "-DI",
+      "cohens_d": 0.3001,
+      "pearson_r": 0.1686,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_spy_return_5d",
+      "display_name": "SPY Return 5d",
+      "cohens_d": 0.1547,
+      "pearson_r": 0.0839,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_rs_5d",
+      "display_name": "Rel Strength 5d",
+      "cohens_d": -0.1387,
+      "pearson_r": -0.0709,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_return_5d",
+      "display_name": "Return 5d",
+      "cohens_d": -0.1082,
+      "pearson_r": -0.0545,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_feasibility_ratio",
+      "display_name": "FVT Feasibility Ratio",
+      "cohens_d": 0.1028,
+      "pearson_r": 0.0404,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_time_adjusted_feasibility",
+      "display_name": "Time-Adj Feasibility",
+      "cohens_d": 0.0972,
+      "pearson_r": 0.0452,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_return_20d",
+      "display_name": "Return 20d",
+      "cohens_d": -0.0541,
+      "pearson_r": -0.0339,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    },
+    {
+      "feature": "fvt_iv_10d_change",
+      "display_name": "IV 10d Change",
+      "cohens_d": 0.0333,
+      "pearson_r": 0.0176,
+      "recommendation": "Denormalize onto PaperPosition for full-history analysis"
+    }
+  ],
+  "total_features_selected": 9,
+  "total_tier2_promising": 10
+}

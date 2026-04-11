@@ -1,0 +1,290 @@
+{
+  "new_composite": {
+    "pearson_r": 0.1553,
+    "p_value": 0.0,
+    "n": 15505
+  },
+  "new_pillar_correlations": {
+    "Premium Leverage": {
+      "pearson_r": 0.1407,
+      "p_value": 0.0,
+      "n": 15505
+    },
+    "Underlying Behavior": {
+      "pearson_r": 0.1156,
+      "p_value": 0.0,
+      "n": 15505
+    },
+    "Setup Quality": {
+      "pearson_r": 0.0918,
+      "p_value": 0.0,
+      "n": 15505
+    }
+  },
+  "old_pillar_correlations": {
+    "Directional": {
+      "pearson_r": -0.0296,
+      "p_value": 0.000224,
+      "n": 15505
+    },
+    "Volatility": {
+      "pearson_r": 0.0492,
+      "p_value": 0.0,
+      "n": 15505
+    },
+    "Structure": {
+      "pearson_r": 0.0005,
+      "p_value": 0.950095,
+      "n": 15505
+    },
+    "Conviction": {
+      "pearson_r": 0.0029,
+      "p_value": 0.714088,
+      "n": 15505
+    }
+  },
+  "composite_quintiles": [
+    {
+      "quintile": 1,
+      "range_low": 25.71,
+      "range_high": 50.43,
+      "n": 3101,
+      "win_rate": 30.1,
+      "avg_return": -18.61,
+      "median_return": -53.7
+    },
+    {
+      "quintile": 2,
+      "range_low": 50.44,
+      "range_high": 56.0,
+      "n": 3101,
+      "win_rate": 35.7,
+      "avg_return": -9.96,
+      "median_return": -52.14
+    },
+    {
+      "quintile": 3,
+      "range_low": 56.0,
+      "range_high": 62.14,
+      "n": 3101,
+      "win_rate": 41.0,
+      "avg_return": -2.26,
+      "median_return": -50.48
+    },
+    {
+      "quintile": 4,
+      "range_low": 62.14,
+      "range_high": 67.75,
+      "n": 3101,
+      "win_rate": 47.6,
+      "avg_return": 5.67,
+      "median_return": -50.0
+    },
+    {
+      "quintile": 5,
+      "range_low": 67.75,
+      "range_high": 84.5,
+      "n": 3101,
+      "win_rate": 54.2,
+      "avg_return": 14.09,
+      "median_return": 51.54
+    }
+  ],
+  "pillar_quintiles": {
+    "Premium Leverage": [
+      {
+        "quintile": 1,
+        "range_low": 10.03,
+        "range_high": 55.04,
+        "n": 3101,
+        "win_rate": 28.2,
+        "avg_return": -20.87,
+        "median_return": -53.49
+      },
+      {
+        "quintile": 2,
+        "range_low": 55.04,
+        "range_high": 62.87,
+        "n": 3101,
+        "win_rate": 40.1,
+        "avg_return": -4.89,
+        "median_return": -51.43
+      },
+      {
+        "quintile": 3,
+        "range_low": 62.87,
+        "range_high": 67.86,
+        "n": 3101,
+        "win_rate": 43.5,
+        "avg_return": 1.26,
+        "median_return": -50.54
+      },
+      {
+        "quintile": 4,
+        "range_low": 67.86,
+        "range_high": 73.05,
+        "n": 3101,
+        "win_rate": 48.9,
+        "avg_return": 6.19,
+        "median_return": -13.92
+      },
+      {
+        "quintile": 5,
+        "range_low": 73.05,
+        "range_high": 89.37,
+        "n": 3101,
+        "win_rate": 48.0,
+        "avg_return": 7.24,
+        "median_return": -12.35
+      }
+    ],
+    "Underlying Behavior": [
+      {
+        "quintile": 1,
+        "range_low": 15.62,
+        "range_high": 46.41,
+        "n": 3101,
+        "win_rate": 36.4,
+        "avg_return": -9.97,
+        "median_return": -52.52
+      },
+      {
+        "quintile": 2,
+        "range_low": 46.41,
+        "range_high": 52.97,
+        "n": 3101,
+        "win_rate": 32.6,
+        "avg_return": -12.95,
+        "median_return": -51.64
+      },
+      {
+        "quintile": 3,
+        "range_low": 52.97,
+        "range_high": 64.85,
+        "n": 3101,
+        "win_rate": 39.3,
+        "avg_return": -4.7,
+        "median_return": -51.9
+      },
+      {
+        "quintile": 4,
+        "range_low": 64.86,
+        "range_high": 71.7,
+        "n": 3101,
+        "win_rate": 47.5,
+        "avg_return": 5.14,
+        "median_return": -50.0
+      },
+      {
+        "quintile": 5,
+        "range_low": 71.7,
+        "range_high": 88.95,
+        "n": 3101,
+        "win_rate": 53.0,
+        "avg_return": 11.41,
+        "median_return": 50.9
+      }
+    ],
+    "Setup Quality": [
+      {
+        "quintile": 1,
+        "range_low": 12.95,
+        "range_high": 43.09,
+        "n": 3101,
+        "win_rate": 36.4,
+        "avg_return": -10.99,
+        "median_return": -52.36
+      },
+      {
+        "quintile": 2,
+        "range_low": 43.09,
+        "range_high": 49.08,
+        "n": 3101,
+        "win_rate": 38.0,
+        "avg_return": -8.55,
+        "median_return": -51.83
+      },
+      {
+        "quintile": 3,
+        "range_low": 49.08,
+        "range_high": 55.27,
+        "n": 3101,
+        "win_rate": 42.4,
+        "avg_return": -0.58,
+        "median_return": -50.88
+      },
+      {
+        "quintile": 4,
+        "range_low": 55.27,
+        "range_high": 63.38,
+        "n": 3101,
+        "win_rate": 43.6,
+        "avg_return": 2.01,
+        "median_return": -50.0
+      },
+      {
+        "quintile": 5,
+        "range_low": 63.38,
+        "range_high": 89.11,
+        "n": 3101,
+        "win_rate": 48.2,
+        "avg_return": 7.05,
+        "median_return": -17.18
+      }
+    ]
+  },
+  "decile_analysis": {
+    "top_10pct": {
+      "n": 1550,
+      "win_rate": 58.9,
+      "avg_return": 18.98,
+      "median_return": 52.96,
+      "avg_composite": 73.6
+    },
+    "bottom_10pct": {
+      "n": 1550,
+      "win_rate": 29.7,
+      "avg_return": -19.27,
+      "median_return": -53.8,
+      "avg_composite": 42.9
+    }
+  },
+  "scanner_comparison": {
+    "BREAKOUT": {
+      "n": 771,
+      "new_composite_r": 0.6995,
+      "old_conviction_r": 0.3199,
+      "improvement": 0.3797
+    },
+    "BREAKDOWN": {
+      "n": 219,
+      "new_composite_r": 0.2869,
+      "old_conviction_r": -0.3523,
+      "improvement": -0.0654
+    },
+    "CHEAP_OPTIONS": {
+      "n": 6996,
+      "new_composite_r": 0.1366,
+      "old_conviction_r": -0.0162,
+      "improvement": 0.1204
+    },
+    "UNUSUAL_VOLUME": {
+      "n": 6949,
+      "new_composite_r": 0.1145,
+      "old_conviction_r": -0.0158,
+      "improvement": 0.0987
+    },
+    "COMPRESSION_EXPANSION": {
+      "n": 538,
+      "new_composite_r": 0.0961,
+      "old_conviction_r": 0.1508,
+      "improvement": -0.0546
+    },
+    "REVALIDATION": {
+      "n": 29,
+      "new_composite_r": 0.5529,
+      "old_conviction_r": 0.2261,
+      "improvement": 0.3268
+    }
+  }
+}
