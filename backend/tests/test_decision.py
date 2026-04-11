@@ -205,13 +205,13 @@ class TestFinalScoreCalculation:
     """Test final score calculation from pillar scores."""
     
     def test_default_weights(self):
-        """Test final score with default weights (Policy v3.0.0: 0.375, 0.455, 0.170)."""
+        """Test final score with default weights (Policy v3.1.0: 0.25, 0.35, 0.40)."""
         calculator = DecisionCalculator()
 
-        # 0.375 * 80 + 0.455 * 70 + 0.170 * 90 = 30 + 31.85 + 15.3 = 77.15
+        # 0.25 * 80 + 0.35 * 70 + 0.40 * 90 = 20 + 24.5 + 36 = 80.5
         final = calculator.compute_final_score(80.0, 70.0, 90.0)
 
-        assert final == pytest.approx(77.15, rel=0.01)
+        assert final == pytest.approx(80.5, rel=0.01)
     
     def test_custom_weights(self):
         """Test final score with custom weights."""
@@ -426,23 +426,23 @@ class TestFullDecisionComputation:
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            premium_leverage=85.0,
+            premium_leverage=86.0,
             underlying_behavior=88.0,
-            setup_quality=82.0,
+            setup_quality=85.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
-        
+
         decision = compute_decision(
             evaluation=evaluation,
             pillar_results=pillar_results,
             gate_evaluation=gate_eval,
         )
-        
+
         assert decision.verdict == Verdict.APPROVE
         assert decision.quality_tier == QualityTier.TIER_1
         assert decision.primary_reason_code == "APPROVED_BY_SCORE"
         assert decision.failed_gates == []
-        # Final score: 0.35*85 + 0.35*88 + 0.30*82 = 29.75 + 30.8 + 24.6 = 85.15
+        # v3.1.0 final score: 0.25*86 + 0.35*88 + 0.40*85 = 21.5 + 30.8 + 34 = 86.3
         assert decision.final_score >= 85.0
     
     def test_approve_with_tier_3(self):

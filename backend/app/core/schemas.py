@@ -707,11 +707,18 @@ class GateConfig(OSSBaseModel):
 
 
 class PillarWeights(OSSBaseModel):
-    """Pillar weight configuration (Policy v3.0.0). Weights must sum to 1.0."""
+    """Pillar weight configuration (Policy v3.1.0). Weights must sum to 1.0.
 
-    premium_leverage: float = 0.375
-    underlying_behavior: float = 0.455
-    setup_quality: float = 0.170
+    Policy v3.1.0 defaults: Setup Pocket (semantically the renamed Setup Quality
+    pillar — schema field locked by migration shims) is promoted from 17% to 40%
+    so the conviction ranking concentrates in the home-run-bearing pockets.
+    Premium Leverage and Underlying Behavior retain a within-pocket quality
+    filtering role at reduced weights.
+    """
+
+    premium_leverage: float = 0.25
+    underlying_behavior: float = 0.35
+    setup_quality: float = 0.40
 
     @model_validator(mode="after")
     def _weights_must_sum_to_one(self) -> "PillarWeights":
@@ -849,9 +856,9 @@ def _load_default_pillar_configs() -> dict[str, Any]:
     # (rare in practice — the seed ships with the Lambda bundle).
     minimal = {
         "weights": {
-            "premium_leverage": 0.375,
-            "underlying_behavior": 0.455,
-            "setup_quality": 0.170,
+            "premium_leverage": 0.25,
+            "underlying_behavior": 0.35,
+            "setup_quality": 0.40,
         },
         "premium_leverage": {
             "pillar_id": "PREMIUM_LEVERAGE",

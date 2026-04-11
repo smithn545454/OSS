@@ -215,13 +215,15 @@ def compute_final_score(
 ) -> float:
     """Compute final weighted composite score from pillar scores.
 
-    Policy v3.0.0 default weights:
-        composite = 0.375 × premium_leverage
-                  + 0.455 × underlying_behavior
-                  + 0.170 × setup_quality
+    Policy v3.1.0 default weights:
+        composite = 0.25 × premium_leverage
+                  + 0.35 × underlying_behavior
+                  + 0.40 × setup_quality (Setup Pocket)
 
-    Weights come from `PillarConfig.weights` and are empirically derived
-    from the sum of |Cohen's d| effect sizes of each pillar's subscores.
+    Weights come from `PillarConfig.weights`. v3.1.0 promotes Setup Pocket
+    to the dominant pillar so that the conviction ranking concentrates in the
+    pockets where clean home runs occur, while Premium Leverage / Underlying
+    Behavior continue to filter trade quality within each pocket.
 
     Args:
         premium_leverage: Pillar score (0-100)
