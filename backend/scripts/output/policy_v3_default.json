@@ -1,0 +1,400 @@
+{
+  "config": {
+    "pillars": {
+      "weights": {
+        "premium_leverage": 0.2601,
+        "underlying_behavior": 0.5391,
+        "setup_quality": 0.2008
+      },
+      "premium_leverage": {
+        "pillar_id": "PREMIUM_LEVERAGE",
+        "display_name": "Premium Leverage",
+        "description": "How cheap and asymmetric the contract is. Far-OTM (low |delta|) contracts with low implied volatility offer the best risk/reward profile. Direction-agnostic: works for both calls and puts.",
+        "numeric_subscores": [
+          {
+            "subscore_id": "iv",
+            "display_name": "Implied Volatility",
+            "feature_field": "iv",
+            "weight": 0.5161,
+            "breakpoints": [
+              {
+                "value": 0.134,
+                "score": 67.9
+              },
+              {
+                "value": 0.2972,
+                "score": 90.0
+              },
+              {
+                "value": 0.3618,
+                "score": 86.1
+              },
+              {
+                "value": 0.456,
+                "score": 73.1
+              },
+              {
+                "value": 1.0237,
+                "score": 10.0
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "abs_delta",
+            "display_name": "|Entry Delta|",
+            "feature_field": "abs_delta",
+            "weight": 0.2748,
+            "breakpoints": [
+              {
+                "value": 0.1701,
+                "score": 10.0
+              },
+              {
+                "value": 0.3782,
+                "score": 55.5
+              },
+              {
+                "value": 0.4617,
+                "score": 71.1
+              },
+              {
+                "value": 0.5544,
+                "score": 36.8
+              },
+              {
+                "value": 0.8058,
+                "score": 90.0
+              }
+            ],
+            "source_tier": "tier1"
+          },
+          {
+            "subscore_id": "iv_percentile",
+            "display_name": "IV Percentile",
+            "feature_field": "iv_percentile",
+            "weight": 0.1449,
+            "breakpoints": [
+              {
+                "value": 5.555,
+                "score": 90.0
+              },
+              {
+                "value": 21.18,
+                "score": 47.6
+              },
+              {
+                "value": 40.25,
+                "score": 10.0
+              },
+              {
+                "value": 59.24,
+                "score": 33.5
+              },
+              {
+                "value": 77.115,
+                "score": 35.8
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "iv_rv_ratio",
+            "display_name": "IV/RV Ratio",
+            "feature_field": "iv_rv_ratio",
+            "weight": 0.0642,
+            "breakpoints": [
+              {
+                "value": 0.3678,
+                "score": 63.9
+              },
+              {
+                "value": 0.7961,
+                "score": 34.0
+              },
+              {
+                "value": 0.9141,
+                "score": 90.0
+              },
+              {
+                "value": 1.0418,
+                "score": 10.0
+              },
+              {
+                "value": 3.7591,
+                "score": 10.8
+              }
+            ],
+            "source_tier": "tier2"
+          }
+        ],
+        "categorical_subscores": []
+      },
+      "underlying_behavior": {
+        "pillar_id": "UNDERLYING_BEHAVIOR",
+        "display_name": "Underlying Behavior",
+        "description": "How the underlying stock is behaving and whether the required move is realistic. Captures volatility context, trend strength (ADX), and feasibility of reaching profit targets within DTE. Direction-agnostic structural measures.",
+        "numeric_subscores": [
+          {
+            "subscore_id": "adx_14",
+            "display_name": "ADX (14)",
+            "feature_field": "adx_14",
+            "weight": 0.4556,
+            "breakpoints": [
+              {
+                "value": 11.6582,
+                "score": 90.0
+              },
+              {
+                "value": 15.8619,
+                "score": 84.7
+              },
+              {
+                "value": 19.1364,
+                "score": 10.0
+              },
+              {
+                "value": 23.0479,
+                "score": 58.9
+              },
+              {
+                "value": 45.8886,
+                "score": 40.5
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "rv20",
+            "display_name": "Realized Volatility (20d)",
+            "feature_field": "rv20",
+            "weight": 0.214,
+            "breakpoints": [
+              {
+                "value": 0.1531,
+                "score": 56.0
+              },
+              {
+                "value": 0.3201,
+                "score": 69.0
+              },
+              {
+                "value": 0.4034,
+                "score": 90.0
+              },
+              {
+                "value": 0.5286,
+                "score": 70.9
+              },
+              {
+                "value": 1.2389,
+                "score": 10.0
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "feasibility_ratio",
+            "display_name": "Feasibility Ratio",
+            "feature_field": "feasibility_ratio",
+            "weight": 0.1146,
+            "breakpoints": [
+              {
+                "value": 0.0,
+                "score": 10.0
+              },
+              {
+                "value": 0.0,
+                "score": 48.3
+              },
+              {
+                "value": 0.2071,
+                "score": 90.0
+              },
+              {
+                "value": 0.5254,
+                "score": 57.8
+              },
+              {
+                "value": 1.2524,
+                "score": 63.4
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "time_adjusted_feasibility",
+            "display_name": "Time-Adjusted Feasibility",
+            "feature_field": "time_adjusted_feasibility",
+            "weight": 0.1084,
+            "breakpoints": [
+              {
+                "value": 0.0,
+                "score": 10.0
+              },
+              {
+                "value": 0.0,
+                "score": 49.4
+              },
+              {
+                "value": 0.1605,
+                "score": 90.0
+              },
+              {
+                "value": 0.4506,
+                "score": 55.8
+              },
+              {
+                "value": 0.9153,
+                "score": 70.5
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "atr14_pct",
+            "display_name": "ATR % (14)",
+            "feature_field": "atr14_pct",
+            "weight": 0.1074,
+            "breakpoints": [
+              {
+                "value": 1.4479,
+                "score": 41.6
+              },
+              {
+                "value": 2.9684,
+                "score": 86.1
+              },
+              {
+                "value": 3.6037,
+                "score": 90.0
+              },
+              {
+                "value": 4.4884,
+                "score": 77.1
+              },
+              {
+                "value": 13.5904,
+                "score": 10.0
+              }
+            ],
+            "source_tier": "tier2"
+          }
+        ],
+        "categorical_subscores": []
+      },
+      "setup_quality": {
+        "pillar_id": "SETUP_QUALITY",
+        "display_name": "Setup Quality",
+        "description": "Meta-indicators of a high-quality entry: scanner convergence, DTE bucket suitability, and contrarian liquidity (lower volume / open interest has historically predicted better outcomes within the already-filtered opportunity set).",
+        "numeric_subscores": [
+          {
+            "subscore_id": "volume",
+            "display_name": "Volume",
+            "feature_field": "volume",
+            "weight": 0.3454,
+            "breakpoints": [
+              {
+                "value": 88.0,
+                "score": 61.7
+              },
+              {
+                "value": 173.0,
+                "score": 90.0
+              },
+              {
+                "value": 319.0,
+                "score": 76.4
+              },
+              {
+                "value": 696.5,
+                "score": 42.0
+              },
+              {
+                "value": 37536.0,
+                "score": 10.0
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "open_interest",
+            "display_name": "Open Interest",
+            "feature_field": "open_interest",
+            "weight": 0.2514,
+            "breakpoints": [
+              {
+                "value": 295.5,
+                "score": 90.0
+              },
+              {
+                "value": 792.5,
+                "score": 31.9
+              },
+              {
+                "value": 1534.0,
+                "score": 69.3
+              },
+              {
+                "value": 3350.5,
+                "score": 61.9
+              },
+              {
+                "value": 91380.0,
+                "score": 10.0
+              }
+            ],
+            "source_tier": "tier2"
+          },
+          {
+            "subscore_id": "convergence_count",
+            "display_name": "Scanner Convergence",
+            "feature_field": "convergence_count",
+            "weight": 0.1499,
+            "breakpoints": [
+              {
+                "value": 1.0,
+                "score": 10.0
+              },
+              {
+                "value": 1.0,
+                "score": 30.6
+              },
+              {
+                "value": 1.0,
+                "score": 38.1
+              },
+              {
+                "value": 1.0,
+                "score": 27.1
+              },
+              {
+                "value": 1.5,
+                "score": 90.0
+              }
+            ],
+            "source_tier": "tier1"
+          }
+        ],
+        "categorical_subscores": [
+          {
+            "subscore_id": "dte_bucket",
+            "display_name": "DTE Bucket",
+            "feature_field": "dte_bucket",
+            "weight": 0.2533,
+            "category_scores": {
+              "B": 68.3,
+              "C": 29.8,
+              "D": 10.0,
+              "A": 90.0
+            },
+            "default_score": 50.0
+          }
+        ]
+      }
+    }
+  },
+  "created_by": "feature_outcome_analysis/build_policy_v3_default.py",
+  "version": "3.0.0",
+  "changelog_entry": "Initial seed of Policy v3.0.0 with empirically-derived pillar system (Premium Leverage, Underlying Behavior, Setup Quality). Breakpoints from 15,505-position backtest analysis; composite correlation with outcomes r=+0.232 (vs r=+0.003 on v2.x). See scripts/output/feature_analysis_report.md for full details."
+}

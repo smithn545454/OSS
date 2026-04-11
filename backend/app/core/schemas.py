@@ -60,11 +60,11 @@ class DTEBucket(str, Enum):
 
 
 class PillarId(str, Enum):
-    """Scoring pillar identifiers."""
+    """Scoring pillar identifiers (Policy v3.0.0)."""
 
-    DIRECTIONAL = "DIRECTIONAL"
-    VOLATILITY = "VOLATILITY"
-    STRUCTURE = "STRUCTURE"
+    PREMIUM_LEVERAGE = "PREMIUM_LEVERAGE"
+    UNDERLYING_BEHAVIOR = "UNDERLYING_BEHAVIOR"
+    SETUP_QUALITY = "SETUP_QUALITY"
 
 
 class Verdict(str, Enum):
@@ -354,15 +354,15 @@ class GateResult(OSSBaseModel):
 
 
 class Decision(OSSBaseModel):
-    """Final decision for an evaluation."""
+    """Final decision for an evaluation (Policy v3.0.0 pillars)."""
 
     evaluation_id: str
     verdict: Verdict
     quality_tier: Optional[QualityTier] = None
     final_score: float
-    directional_score: float
-    volatility_score: float
-    structure_score: float
+    premium_leverage_score: float
+    underlying_behavior_score: float
+    setup_quality_score: float
     primary_reason_code: str
     supporting_reason_codes: list[str]
     failed_gates: list[str]
@@ -413,9 +413,9 @@ class PaperPosition(OSSBaseModel):
     scanner_list: Optional[list[str]] = None  # All scanners that fired (for confluence)
     convergence_count: Optional[int] = None
     conviction_score: Optional[float] = None
-    pillar_directional: Optional[float] = None
-    pillar_volatility: Optional[float] = None
-    pillar_structure: Optional[float] = None
+    pillar_premium_leverage: Optional[float] = None
+    pillar_underlying_behavior: Optional[float] = None
+    pillar_setup_quality: Optional[float] = None
     strike: Optional[float] = None
     option_type: Optional[str] = None
     expiration_date: Optional[str] = None
@@ -657,182 +657,258 @@ class GateConfig(OSSBaseModel):
 
 
 class PillarWeights(OSSBaseModel):
-    """Pillar weight configuration. Weights must sum to 1.0."""
+    """Pillar weight configuration (Policy v3.0.0). Weights must sum to 1.0."""
 
-    directional: float = 0.35
-    volatility: float = 0.35
-    structure: float = 0.30
+    premium_leverage: float = 0.375
+    underlying_behavior: float = 0.455
+    setup_quality: float = 0.170
 
     @model_validator(mode="after")
     def _weights_must_sum_to_one(self) -> "PillarWeights":
-        total = self.directional + self.volatility + self.structure
+        total = self.premium_leverage + self.underlying_behavior + self.setup_quality
         if abs(total - 1.0) > 1e-4:
             raise ValueError(
                 f"Pillar weights must sum to 1.0, got {total:.6f} "
-                f"(directional={self.directional}, volatility={self.volatility}, "
-                f"structure={self.structure})"
+                f"(premium_leverage={self.premium_leverage}, "
+                f"underlying_behavior={self.underlying_behavior}, "
+                f"setup_quality={self.setup_quality})"
             )
         return self
 
 
-class DirectionalPillarConfig(OSSBaseModel):
-    """Directional pillar subscore weights (Section 14.2).
+class SubscoreBreakpoint(OSSBaseModel):
+    """Single (value, score) breakpoint for piecewise-linear scoring.
 
-    Weights must sum to 1.0. Field names kept for backward compatibility
-    with existing Policy records in DynamoDB.
+    A subscore is defined by a list of these breakpoints sorted by value.
+    Scoring uses linear interpolation between adjacent points. Below the
+    first or above the last breakpoint, the value is clamped to the
+    corresponding score (no extrapolation).
+
+    Breakpoints are derived empirically from quintile analysis where each
+    quintile's score corresponds to its average PnL outcome. This allows
+    non-monotonic features (e.g. implied volatility, realized volatility)
+    to be scored correctly — a sweet-spot middle quintile can receive a
+    higher score than either extreme.
     """
 
-    # Subscore weights (6 subscores)
-    trend_alignment_weight: float = 0.25  # EMA alignment (was 0.30 with SMA)
-    momentum_weight: float = 0.25  # RSI + MACD + returns composite
-    trend_strength_weight: float = 0.15  # NEW: ADX with +DI/-DI
-    signal_confirmation_weight: float = 0.15  # Scanner triggers (was 0.20)
-    relative_strength_weight: float = 0.10  # RS vs SPY + OBV (was 0.15)
-    catalyst_weight: float = 0.10  # Earnings + SEC filings
+    value: float
+    score: float = Field(ge=0, le=100)
 
-    # DTE bucket momentum blending weights (return_5d weight, return_20d is 1 - this)
-    momentum_blend_bucket_a: float = 0.70  # 7-21 DTE: 70% 5d, 30% 20d
-    momentum_blend_bucket_b: float = 0.50  # 22-45 DTE: 50% each
-    momentum_blend_bucket_c: float = 0.30  # 46-75 DTE: 30% 5d, 70% 20d
-    momentum_blend_bucket_d: float = 0.20  # 76-120 DTE: 20% 5d, 80% 20d
 
-    # Momentum sub-blending weights (RSI, MACD, returns components)
-    momentum_rsi_blend: float = 0.35
-    momentum_macd_blend: float = 0.25
-    momentum_returns_blend: float = 0.40
+class NumericSubscoreConfig(OSSBaseModel):
+    """Configuration for one numeric subscore within a pillar."""
 
-    # Relative strength sub-blending weights (RS performance, OBV confirmation)
-    rs_performance_blend: float = 0.70
-    rs_obv_blend: float = 0.30
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_add_trend_strength(cls, data: Any) -> Any:
-        """Migrate policies created before trend_strength_weight existed.
-
-        Old policies have 5 weights summing to 1.0. When trend_strength_weight
-        (default 0.15) is injected by Pydantic, the total becomes 1.15. Fix by
-        scaling the old weights down proportionally to free up 0.15 for the new
-        field. Only applies when old weights sum to ~1.0 (valid pre-migration).
-        """
-        if isinstance(data, dict) and "trend_strength_weight" not in data:
-            old_keys = [
-                "trend_alignment_weight", "momentum_weight",
-                "signal_confirmation_weight", "relative_strength_weight",
-                "catalyst_weight",
-            ]
-            old_total = sum(data.get(k, 0) for k in old_keys if k in data)
-            if abs(old_total - 1.0) < 1e-4:
-                new_weight = 0.15
-                scale = (1.0 - new_weight) / old_total
-                for k in old_keys:
-                    if k in data:
-                        data[k] = round(data[k] * scale, 6)
-                data["trend_strength_weight"] = new_weight
-        return data
+    subscore_id: str
+    display_name: str
+    feature_field: str  # FeatureSet attribute name (e.g. "adx_14", "entry_delta")
+    weight: float = Field(ge=0, le=1)
+    breakpoints: list[SubscoreBreakpoint]
+    source_tier: str = "tier1"  # "tier1" | "tier2" for observability
 
     @model_validator(mode="after")
-    def _subscore_weights_must_sum_to_one(self) -> "DirectionalPillarConfig":
-        total = (
-            self.trend_alignment_weight + self.momentum_weight
-            + self.trend_strength_weight
-            + self.signal_confirmation_weight + self.relative_strength_weight
-            + self.catalyst_weight
-        )
-        if abs(total - 1.0) > 1e-4:
+    def _validate_breakpoints(self) -> "NumericSubscoreConfig":
+        if len(self.breakpoints) < 2:
             raise ValueError(
-                f"Directional subscore weights must sum to 1.0, got {total:.6f}"
+                f"Subscore {self.subscore_id} requires at least 2 breakpoints, "
+                f"got {len(self.breakpoints)}"
             )
         return self
 
 
-class VolatilityPillarConfig(OSSBaseModel):
-    """Volatility pillar subscore weights (Section 14.3).
-    
-    Weights must sum to 1.0.
+class CategoricalSubscoreConfig(OSSBaseModel):
+    """Configuration for one categorical subscore within a pillar."""
+
+    subscore_id: str
+    display_name: str
+    feature_field: str  # FeatureSet attribute name or position attribute
+    weight: float = Field(ge=0, le=1)
+    category_scores: dict[str, float]  # e.g. {"A": 90.0, "B": 68.3, "C": 29.8, "D": 10.0}
+    default_score: float = 50.0  # Score used for unknown/None categories
+
+    @model_validator(mode="after")
+    def _validate_scores(self) -> "CategoricalSubscoreConfig":
+        for cat, score in self.category_scores.items():
+            if not 0 <= score <= 100:
+                raise ValueError(
+                    f"Category {cat} score {score} out of range [0, 100]"
+                )
+        return self
+
+
+class PillarConfigV2(OSSBaseModel):
+    """A single pillar's configuration (Policy v3.0.0).
+
+    Each pillar contains numeric and/or categorical subscores. Within-pillar
+    weights should sum to 1.0 (validated). If a subscore's feature is missing
+    at scoring time, its weight is redistributed proportionally among the
+    available subscores so the pillar still produces a valid 0-100 score.
     """
 
-    # Subscore weights
-    iv_vs_rv_weight: float = 0.44
-    iv_percentile_weight: float = 0.31
-    iv_regime_weight: float = 0.25
-    theta_adjusted_edge_weight: float = 0.00
+    pillar_id: PillarId
+    display_name: str
+    description: str
+    numeric_subscores: list[NumericSubscoreConfig] = Field(default_factory=list)
+    categorical_subscores: list[CategoricalSubscoreConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _subscore_weights_must_sum_to_one(self) -> "VolatilityPillarConfig":
-        total = (
-            self.iv_vs_rv_weight + self.iv_percentile_weight
-            + self.iv_regime_weight + self.theta_adjusted_edge_weight
+    def _validate_subscore_weights(self) -> "PillarConfigV2":
+        total = sum(s.weight for s in self.numeric_subscores) + sum(
+            s.weight for s in self.categorical_subscores
         )
-        if abs(total - 1.0) > 1e-4:
+        if abs(total - 1.0) > 1e-3:
             raise ValueError(
-                f"Volatility subscore weights must sum to 1.0, got {total:.6f}"
+                f"Pillar {self.pillar_id} subscore weights must sum to 1.0, "
+                f"got {total:.6f}"
             )
+        if not self.numeric_subscores and not self.categorical_subscores:
+            raise ValueError(f"Pillar {self.pillar_id} has no subscores")
         return self
 
 
-class StructurePillarConfig(OSSBaseModel):
-    """Entry Quality pillar subscore weights (stored as 'structure' for backward compat).
+def _load_default_pillar_configs() -> dict[str, Any]:
+    """Load the seeded Policy v3.0.0 pillar configs from the JSON file.
 
-    Scores entry characteristics that predict trade outcomes:
-    - Delta/Moneyness: far OTM = better asymmetry (strongest predictor)
-    - Raw IV Level: lower IV = cheaper premium
-    - DTE Appropriateness: enough time for thesis
+    The seed file is produced by `backend/scripts/build_policy_v3_default.py`
+    from the analytical design in `scripts/output/final_pillar_design.json`.
+    It is committed to the repo and bundled with the Lambda deployment so
+    the schema defaults are always available without a DynamoDB read.
 
-    Weights must sum to 1.0.
+    Returns a dict with keys `weights`, `premium_leverage`, `underlying_behavior`,
+    `setup_quality`, ready to be splatted into `PillarConfig.model_validate`.
+    Falls back to minimal stubs if the seed file cannot be loaded (e.g. in
+    environments where the repo layout differs).
     """
+    import os as _os
+    from pathlib import Path as _Path
 
-    # Entry Quality subscore weights
-    delta_moneyness_weight: float = 0.50
-    raw_iv_weight: float = 0.25
-    dte_appropriateness_weight: float = 0.25
-    premium_leverage_weight: float = 0.0  # Rewards cheap premium; 0 = disabled (backward compat)
+    candidates = [
+        _Path(__file__).resolve().parent.parent.parent / "scripts" / "output" / "policy_v3_default.json",
+        _Path(_os.getcwd()) / "scripts" / "output" / "policy_v3_default.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path) as f:
+                    payload = json.load(f)
+                return payload["config"]["pillars"]
+            except Exception:
+                continue
 
-    # Interaction bonus: awarded when both delta and IV are in the sweet spot
-    interaction_bonus: float = 8.0              # Points added to pillar score (0 = disabled)
-    interaction_delta_threshold: float = 0.15   # abs(delta) must be <= this
-    interaction_iv_threshold: float = 0.35      # IV must be <= this
+    # Fallback: minimal stub configs with one breakpoint each. This keeps
+    # PolicyConfig() working in environments where the seed file is missing
+    # (rare in practice — the seed ships with the Lambda bundle).
+    minimal = {
+        "weights": {
+            "premium_leverage": 0.375,
+            "underlying_behavior": 0.455,
+            "setup_quality": 0.170,
+        },
+        "premium_leverage": {
+            "pillar_id": "PREMIUM_LEVERAGE",
+            "display_name": "Premium Leverage",
+            "description": "Stub — seed file missing.",
+            "numeric_subscores": [
+                {
+                    "subscore_id": "iv",
+                    "display_name": "IV",
+                    "feature_field": "iv",
+                    "weight": 1.0,
+                    "source_tier": "tier2",
+                    "breakpoints": [
+                        {"value": 0.0, "score": 50},
+                        {"value": 1.0, "score": 50},
+                    ],
+                }
+            ],
+            "categorical_subscores": [],
+        },
+        "underlying_behavior": {
+            "pillar_id": "UNDERLYING_BEHAVIOR",
+            "display_name": "Underlying Behavior",
+            "description": "Stub — seed file missing.",
+            "numeric_subscores": [
+                {
+                    "subscore_id": "rv20",
+                    "display_name": "RV20",
+                    "feature_field": "rv20",
+                    "weight": 1.0,
+                    "source_tier": "tier2",
+                    "breakpoints": [
+                        {"value": 0.0, "score": 50},
+                        {"value": 1.0, "score": 50},
+                    ],
+                }
+            ],
+            "categorical_subscores": [],
+        },
+        "setup_quality": {
+            "pillar_id": "SETUP_QUALITY",
+            "display_name": "Setup Quality",
+            "description": "Stub — seed file missing.",
+            "numeric_subscores": [
+                {
+                    "subscore_id": "convergence_count",
+                    "display_name": "Scanner Convergence",
+                    "feature_field": "convergence_count",
+                    "weight": 1.0,
+                    "source_tier": "tier1",
+                    "breakpoints": [
+                        {"value": 0.0, "score": 50},
+                        {"value": 5.0, "score": 50},
+                    ],
+                }
+            ],
+            "categorical_subscores": [],
+        },
+    }
+    return minimal
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_old_fields(cls, data: Any) -> Any:
-        """Migrate old structure pillar fields to new entry quality fields."""
-        if isinstance(data, dict):
-            old_fields = {
-                "spread_weight", "open_interest_weight", "volume_weight",
-                "theta_burden_weight", "liquidity_trend_weight",
-            }
-            if any(f in data for f in old_fields):
-                for f in old_fields:
-                    data.pop(f, None)
-                data.setdefault("delta_moneyness_weight", 0.50)
-                data.setdefault("raw_iv_weight", 0.25)
-                data.setdefault("dte_appropriateness_weight", 0.25)
-        return data
 
-    @model_validator(mode="after")
-    def _subscore_weights_must_sum_to_one(self) -> "StructurePillarConfig":
-        total = (
-            self.delta_moneyness_weight + self.raw_iv_weight
-            + self.dte_appropriateness_weight + self.premium_leverage_weight
-        )
-        if abs(total - 1.0) > 1e-4:
-            raise ValueError(
-                f"Entry Quality subscore weights must sum to 1.0, got {total:.6f}"
-            )
-        return self
+def _default_pillar_config_v2(pillar_key: str) -> Any:
+    """Return a default PillarConfigV2 for the given key (for Field factories)."""
+    data = _load_default_pillar_configs()
+    return PillarConfigV2.model_validate(data[pillar_key])
 
 
 class PillarConfig(OSSBaseModel):
-    """Complete pillar scoring configuration (Section 14)."""
+    """Complete pillar scoring configuration (Policy v3.0.0).
 
-    # Final score weights
+    Uses return-based empirically-derived breakpoint scoring. Defaults
+    for all pillars are loaded from `scripts/output/policy_v3_default.json`
+    via `_load_default_pillar_configs()`, so `PillarConfig()` produces a
+    fully-valid instance in environments where the seed file is available.
+    Production code should always load the active policy from DynamoDB.
+    """
+
     weights: PillarWeights = Field(default_factory=PillarWeights)
-    
-    # Individual pillar configs
-    directional: DirectionalPillarConfig = Field(default_factory=DirectionalPillarConfig)
-    volatility: VolatilityPillarConfig = Field(default_factory=VolatilityPillarConfig)
-    structure: StructurePillarConfig = Field(default_factory=StructurePillarConfig)
+    premium_leverage: PillarConfigV2 = Field(
+        default_factory=lambda: _default_pillar_config_v2("premium_leverage")
+    )
+    underlying_behavior: PillarConfigV2 = Field(
+        default_factory=lambda: _default_pillar_config_v2("underlying_behavior")
+    )
+    setup_quality: PillarConfigV2 = Field(
+        default_factory=lambda: _default_pillar_config_v2("setup_quality")
+    )
+
+    @model_validator(mode="after")
+    def _validate_pillar_ids(self) -> "PillarConfig":
+        if self.premium_leverage.pillar_id != PillarId.PREMIUM_LEVERAGE:
+            raise ValueError(
+                f"premium_leverage must have pillar_id=PREMIUM_LEVERAGE, "
+                f"got {self.premium_leverage.pillar_id}"
+            )
+        if self.underlying_behavior.pillar_id != PillarId.UNDERLYING_BEHAVIOR:
+            raise ValueError(
+                f"underlying_behavior must have pillar_id=UNDERLYING_BEHAVIOR, "
+                f"got {self.underlying_behavior.pillar_id}"
+            )
+        if self.setup_quality.pillar_id != PillarId.SETUP_QUALITY:
+            raise ValueError(
+                f"setup_quality must have pillar_id=SETUP_QUALITY, "
+                f"got {self.setup_quality.pillar_id}"
+            )
+        return self
 
 
 class DecisionConfig(OSSBaseModel):
@@ -909,7 +985,7 @@ class ThesisConfig(OSSBaseModel):
 
 
 class PolicyConfig(OSSBaseModel):
-    """Complete policy configuration."""
+    """Complete policy configuration (Policy v3.0.0)."""
 
     scanner: ScannerConfig = Field(default_factory=ScannerConfig)
     underlying_filter: UnderlyingFilterConfig = Field(default_factory=UnderlyingFilterConfig)
@@ -917,7 +993,6 @@ class PolicyConfig(OSSBaseModel):
     features: FeatureConfig = Field(default_factory=FeatureConfig)
     gates: GateConfig = Field(default_factory=GateConfig)
     pillars: PillarConfig = Field(default_factory=PillarConfig)
-    pillar_weights: PillarWeights = Field(default_factory=PillarWeights)  # Kept for backward compatibility
     decision: DecisionConfig = Field(default_factory=DecisionConfig)
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
@@ -1528,9 +1603,9 @@ class EvaluationSnapshot(OSSBaseModel):
     verdict: str
     quality_tier: Optional[str] = None
     final_score: float
-    directional_score: float
-    volatility_score: float
-    structure_score: float
+    premium_leverage_score: float
+    underlying_behavior_score: float
+    setup_quality_score: float
     primary_reason_code: str
     supporting_reason_codes: list[str]
     failed_gates: list[str]
