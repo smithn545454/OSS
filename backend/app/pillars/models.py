@@ -85,53 +85,60 @@ class PillarResult:
 @dataclass
 class ScoringContext:
     """Context for pillar scoring.
-    
+
     Contains all the data needed to score an evaluation,
     including the evaluation itself, features, and opportunity.
     """
-    
+
     evaluation_id: str
     underlying_ticker: str
     option_type: str  # "CALL" or "PUT"
     dte_bucket: str  # "A", "B", "C", or "D"
-    
+
     # Scanner trigger info (for signal confirmation)
     scanner_triggers: list[str] = field(default_factory=list)
     direction_hint: str = "NONE"  # "CALL", "PUT", or "NONE"
-    
+    convergence_count: int = 0  # Number of scanners that fired for this ticker
+
     # Category A: Underlying Technical Features
     close: Optional[float] = None
     sma20: Optional[float] = None
     sma50: Optional[float] = None
+    atr14: Optional[float] = None
+    atr14_pct: Optional[float] = None
     return_5d: Optional[float] = None
     return_20d: Optional[float] = None
     trend_aligned_bullish: bool = False
     trend_aligned_bearish: bool = False
-    
+
     # Category B: Relative Strength Features
     rs_5d: Optional[float] = None
     rs_20d: Optional[float] = None
-    
+
     # Category C: Volatility Features
     rv20: Optional[float] = None
     iv: float = 0.0
     iv_rv_ratio: Optional[float] = None
     iv_percentile: Optional[float] = None
     iv_regime: str = "IV_NEUTRAL_REGIME"
-    
+
     # Category D: Contract Features
     mid: float = 0.0
     spread_pct: float = 0.0
     theta_pct: float = 0.0
     theta_adjusted_edge: Optional[float] = None
+    required_move_pct: float = 0.0
+    expected_move_pct: float = 0.0
+    feasibility_ratio: float = 0.0
+    time_adjusted_feasibility: float = 0.0
     delta: float = 0.0
     dte: int = 0
-    
+
     # Category E: Liquidity Features
     open_interest: int = 0
     volume: int = 0
     oi_5d_change_pct: Optional[float] = None
-    
+
     # Category F: Catalyst Features
     days_to_earnings: Optional[int] = None
     recent_sec_filing: bool = False
@@ -153,6 +160,22 @@ class ScoringContext:
     def is_call(self) -> bool:
         """Check if this is a CALL contract."""
         return self.option_type == "CALL"
+
+    @property
+    def abs_delta(self) -> Optional[float]:
+        """Absolute value of delta for direction-agnostic scoring.
+
+        Used by Premium Leverage pillar so CALL and PUT contracts are
+        scored on the same curve (far OTM = low |delta|, ITM = high |delta|).
+        Avoids encoding any put/call bias from a sample that may have been
+        dominated by one direction.
+        """
+        if self.delta is None:
+            return None
+        try:
+            return abs(float(self.delta))
+        except (TypeError, ValueError):
+            return None
     
     @classmethod
     def from_position_and_features(
@@ -181,22 +204,25 @@ class ScoringContext:
             dte_bucket=str(position.dte_bucket or "B"),
             scanner_triggers=scanner_triggers,
             direction_hint="NONE",
+            convergence_count=position.convergence_count or 0,
             # Category A
             close=feature_set.close if feature_set else (position.entry_underlying_price or 0.0),
             sma20=feature_set.sma20 if feature_set else None,
             sma50=feature_set.sma50 if feature_set else None,
+            atr14=feature_set.atr14 if feature_set else None,
+            atr14_pct=feature_set.atr14_pct if feature_set else (position.entry_atr14_pct or None),
             return_5d=feature_set.return_5d if feature_set else None,
             return_20d=feature_set.return_20d if feature_set else None,
             trend_aligned_bullish=feature_set.trend_aligned_bullish if feature_set else False,
             trend_aligned_bearish=feature_set.trend_aligned_bearish if feature_set else False,
             # Category B
             rs_5d=feature_set.rs_5d if feature_set else None,
-            rs_20d=feature_set.rs_20d if feature_set else None,
+            rs_20d=feature_set.rs_20d if feature_set else (position.entry_rs_20d or None),
             # Category C
-            rv20=feature_set.rv20 if feature_set else None,
+            rv20=feature_set.rv20 if feature_set else (position.entry_rv20 or None),
             iv=feature_set.iv if feature_set else (position.entry_iv or 0.0),
-            iv_rv_ratio=feature_set.iv_rv_ratio if feature_set else None,
-            iv_percentile=feature_set.iv_percentile if feature_set else None,
+            iv_rv_ratio=feature_set.iv_rv_ratio if feature_set else (position.entry_iv_rv_ratio or None),
+            iv_percentile=feature_set.iv_percentile if feature_set else (position.entry_iv_percentile or None),
             iv_regime=(
                 str(feature_set.iv_regime) if feature_set and feature_set.iv_regime
                 else "IV_NEUTRAL_REGIME"
@@ -205,7 +231,11 @@ class ScoringContext:
             mid=feature_set.mid if feature_set else (position.entry_price or 0.0),
             spread_pct=feature_set.spread_pct if feature_set else (position.entry_spread_pct or 0.0),
             theta_pct=feature_set.theta_pct if feature_set else 0.0,
-            theta_adjusted_edge=feature_set.theta_adjusted_edge if feature_set else None,
+            theta_adjusted_edge=feature_set.theta_adjusted_edge if feature_set else (position.entry_theta_adjusted_edge or None),
+            required_move_pct=feature_set.required_move_pct if feature_set else 0.0,
+            expected_move_pct=feature_set.expected_move_pct if feature_set else 0.0,
+            feasibility_ratio=feature_set.feasibility_ratio if feature_set else (position.entry_feasibility_ratio or 0.0),
+            time_adjusted_feasibility=feature_set.time_adjusted_feasibility if feature_set else 0.0,
             delta=position.entry_delta or 0.0,
             dte=position.dte_at_entry or 0,
             # Category E
@@ -213,7 +243,7 @@ class ScoringContext:
             volume=feature_set.volume if feature_set else (position.entry_volume or 0),
             oi_5d_change_pct=feature_set.oi_5d_change_pct if feature_set else None,
             # Category F
-            days_to_earnings=feature_set.days_to_earnings if feature_set else None,
+            days_to_earnings=feature_set.days_to_earnings if feature_set else (position.entry_days_to_earnings or None),
             recent_sec_filing=feature_set.recent_sec_filing if feature_set else False,
             # Category G
             ema_9=feature_set.ema_9 if feature_set else None,
@@ -255,6 +285,8 @@ class ScoringContext:
                 scanner_triggers.append(trigger.scanner_type)
             direction_hint = opportunity.direction_hint
         
+        convergence_count = len(scanner_triggers)
+
         return cls(
             evaluation_id=evaluation.evaluation_id,
             underlying_ticker=evaluation.underlying_ticker,
@@ -262,10 +294,13 @@ class ScoringContext:
             dte_bucket=evaluation.dte_bucket,
             scanner_triggers=scanner_triggers,
             direction_hint=str(direction_hint),
+            convergence_count=convergence_count,
             # Category A
             close=feature_set.close if feature_set else evaluation.underlying_price,
             sma20=feature_set.sma20 if feature_set else None,
             sma50=feature_set.sma50 if feature_set else None,
+            atr14=feature_set.atr14 if feature_set else None,
+            atr14_pct=feature_set.atr14_pct if feature_set else None,
             return_5d=feature_set.return_5d if feature_set else None,
             return_20d=feature_set.return_20d if feature_set else None,
             trend_aligned_bullish=feature_set.trend_aligned_bullish if feature_set else False,
@@ -284,6 +319,10 @@ class ScoringContext:
             spread_pct=feature_set.spread_pct if feature_set else evaluation.spread_pct,
             theta_pct=feature_set.theta_pct if feature_set else 0.0,
             theta_adjusted_edge=feature_set.theta_adjusted_edge if feature_set else None,
+            required_move_pct=feature_set.required_move_pct if feature_set else evaluation.required_move_pct,
+            expected_move_pct=feature_set.expected_move_pct if feature_set else evaluation.expected_move_pct,
+            feasibility_ratio=feature_set.feasibility_ratio if feature_set else evaluation.feasibility_ratio,
+            time_adjusted_feasibility=feature_set.time_adjusted_feasibility if feature_set else evaluation.time_adjusted_feasibility,
             delta=evaluation.delta,
             dte=evaluation.dte,
             # Category E

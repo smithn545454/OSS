@@ -25,29 +25,32 @@ logger = logging.getLogger(__name__)
 
 
 class PillarScoringStage:
-    """Stage 5: Pillar Scoring.
-    
-    Takes Evaluations and FeatureSets from Stage 4 and computes
-    three pillar scores (Directional, Volatility, Structure) for each.
-    
+    """Stage 5: Pillar Scoring (Policy v3.0.0).
+
+    Takes Evaluations and FeatureSets from Stage 4 and computes three
+    pillar scores (Premium Leverage, Underlying Behavior, Setup Quality)
+    for each.
+
     Pillars never reject - they only score. Rejection is handled by
     hard gates in Stage 6.
     """
-    
+
     def __init__(
         self,
         orchestrator: PipelineOrchestrator,
         config: Optional[PillarConfig] = None,
     ) -> None:
         """Initialize the pillar scoring stage.
-        
+
         Args:
-            orchestrator: Pipeline orchestrator for event tracking
-            config: Pillar scoring configuration
+            orchestrator: Pipeline orchestrator for event tracking.
+            config: Pillar scoring configuration. If omitted, uses
+                `PillarConfig()` which loads Policy v3.0.0 defaults from
+                the seed JSON.
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = config or PillarConfig()
-        self._calculator = PillarCalculator(config)
+        self._calculator = PillarCalculator(self._config)
     
     async def execute(
         self,
@@ -196,29 +199,32 @@ async def run_pillar_scoring(
 def extract_pillar_scores_for_decision(
     results: dict[str, list[PillarResult]],
 ) -> dict[str, dict[str, float]]:
-    """Extract pillar scores in format needed for decision logic.
-    
+    """Extract pillar scores in format needed for decision logic (v3.0.0).
+
     Args:
         results: Dict mapping evaluation_id to PillarResults
-        
+
     Returns:
-        Dict mapping evaluation_id to dict with directional/volatility/structure scores
+        Dict mapping evaluation_id to dict with new pillar keys:
+        `premium_leverage`, `underlying_behavior`, `setup_quality`.
     """
     scores: dict[str, dict[str, float]] = {}
-    
+
     for evaluation_id, pillar_results in results.items():
         eval_scores = {
-            "directional": 50.0,
-            "volatility": 50.0,
-            "structure": 50.0,
+            "premium_leverage": 50.0,
+            "underlying_behavior": 50.0,
+            "setup_quality": 50.0,
         }
-        
+
         for pr in pillar_results:
-            pillar_name = str(pr.pillar_id).lower()
-            if hasattr(pr.pillar_id, 'value'):
-                pillar_name = pr.pillar_id.value.lower()
-            eval_scores[pillar_name] = pr.score
-        
+            pillar_name = str(pr.pillar_id)
+            if hasattr(pr.pillar_id, "value"):
+                pillar_name = pr.pillar_id.value
+            key = pillar_name.lower()
+            if key in eval_scores:
+                eval_scores[key] = pr.score
+
         scores[evaluation_id] = eval_scores
-    
+
     return scores
