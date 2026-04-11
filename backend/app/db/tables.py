@@ -1004,6 +1004,30 @@ class PillarScoreTable:
             batch = items[i : i + 25]
             await db.batch_write(PillarScoreTable.TABLE, batch)
 
+    # Legacy v2 → v3 pillar_id migration map. Old PillarScore records in
+    # DynamoDB have pillar_ids from the v2 enum (DIRECTIONAL/VOLATILITY/
+    # STRUCTURE) which the v3 schema rejects. These records are not
+    # semantically comparable to v3 scores (different subscore composition,
+    # different weights), so we drop them on read rather than remap.
+    _LEGACY_PILLAR_IDS = {"DIRECTIONAL", "VOLATILITY", "STRUCTURE"}
+
+    @staticmethod
+    def _coerce_pillar_score(item: dict[str, Any]) -> Optional[PillarScore]:
+        """Construct a PillarScore from a DynamoDB item, returning None for
+        legacy v2 records that can't be represented in the v3 schema.
+        """
+        raw_pid = item.get("pillar_id")
+        if raw_pid in PillarScoreTable._LEGACY_PILLAR_IDS:
+            return None
+        try:
+            return PillarScore(**item)
+        except Exception as e:
+            logger.debug(
+                f"Skipping unparseable PillarScore item: "
+                f"eval={item.get('evaluation_id')} pillar_id={raw_pid} err={e}"
+            )
+            return None
+
     @staticmethod
     async def get(evaluation_id: str, pillar_id: str) -> Optional[PillarScore]:
         """Get a specific pillar score."""
@@ -1016,23 +1040,30 @@ class PillarScoreTable:
         if item:
             item.pop("PK", None)
             item.pop("SK", None)
-            return PillarScore(**item)
+            return PillarScoreTable._coerce_pillar_score(item)
         return None
 
     @staticmethod
     async def list_by_evaluation(evaluation_id: str) -> list[PillarScore]:
-        """List all pillar scores for an evaluation."""
+        """List all pillar scores for an evaluation.
+
+        Legacy v2 records (DIRECTIONAL/VOLATILITY/STRUCTURE) are filtered
+        out silently — they refer to a different pillar system and can't
+        be remapped to the v3 schema.
+        """
         db = get_dynamodb()
         items = await db.query(
             PillarScoreTable.TABLE,
             f"EVAL#{evaluation_id}",
             scan_forward=True,
         )
-        scores = []
+        scores: list[PillarScore] = []
         for item in items:
             item.pop("PK", None)
             item.pop("SK", None)
-            scores.append(PillarScore(**item))
+            parsed = PillarScoreTable._coerce_pillar_score(item)
+            if parsed is not None:
+                scores.append(parsed)
         return scores
 
 

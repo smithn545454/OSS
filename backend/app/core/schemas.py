@@ -326,6 +326,26 @@ class PillarScore(OSSBaseModel):
     contributors: list[PillarContributor]
     tags: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_pillar_id(cls, data: Any) -> Any:
+        """Skip legacy v2 PillarScore records on load.
+
+        Historical PillarScore records use the v2 enum values
+        (DIRECTIONAL/VOLATILITY/STRUCTURE) which don't exist in the v3
+        schema. These records contain subscore compositions and weights
+        that cannot be faithfully remapped to v3 pillars, so they are
+        rejected here. Callers should handle ValueError by skipping.
+        """
+        if isinstance(data, dict):
+            pid = data.get("pillar_id")
+            if pid in ("DIRECTIONAL", "VOLATILITY", "STRUCTURE"):
+                raise ValueError(
+                    f"Legacy v2 PillarScore (pillar_id={pid}) cannot be "
+                    f"represented in the v3 schema; rescore required"
+                )
+        return data
+
 
 # ============================================================================
 # Gate Result (Section 8.4)
@@ -371,6 +391,36 @@ class Decision(OSSBaseModel):
     decided_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_pillar_fields(cls, data: Any) -> Any:
+        """Migrate v2 pillar score field names on load.
+
+        Historical Decision records in DynamoDB use directional_score,
+        volatility_score, and structure_score. Rename them to the v3
+        equivalents on load so existing evaluations/positions can still
+        be deserialized. New records are always written with v3 names.
+
+        The v2 pillars and v3 pillars are not semantically equivalent,
+        but preserving the score values at least lets the record load
+        without error — callers that need accurate v3 scores should use
+        the rescore script to recompute from FeatureValueTable.
+        """
+        if isinstance(data, dict):
+            if "directional_score" in data and "premium_leverage_score" not in data:
+                data["premium_leverage_score"] = data.pop("directional_score")
+            else:
+                data.pop("directional_score", None)
+            if "volatility_score" in data and "underlying_behavior_score" not in data:
+                data["underlying_behavior_score"] = data.pop("volatility_score")
+            else:
+                data.pop("volatility_score", None)
+            if "structure_score" in data and "setup_quality_score" not in data:
+                data["setup_quality_score"] = data.pop("structure_score")
+            else:
+                data.pop("structure_score", None)
+        return data
 
 
 # ============================================================================
@@ -1610,6 +1660,25 @@ class EvaluationSnapshot(OSSBaseModel):
     supporting_reason_codes: list[str]
     failed_gates: list[str]
     concentration_warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_pillar_fields(cls, data: Any) -> Any:
+        """Migrate v2 pillar score field names on load (see Decision shim)."""
+        if isinstance(data, dict):
+            if "directional_score" in data and "premium_leverage_score" not in data:
+                data["premium_leverage_score"] = data.pop("directional_score")
+            else:
+                data.pop("directional_score", None)
+            if "volatility_score" in data and "underlying_behavior_score" not in data:
+                data["underlying_behavior_score"] = data.pop("volatility_score")
+            else:
+                data.pop("volatility_score", None)
+            if "structure_score" in data and "setup_quality_score" not in data:
+                data["setup_quality_score"] = data.pop("structure_score")
+            else:
+                data.pop("structure_score", None)
+        return data
 
     # Pillar scores (full contributor detail)
     pillar_scores: list[dict[str, Any]]
