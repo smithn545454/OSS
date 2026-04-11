@@ -524,11 +524,11 @@ class TestPipelineBugRegressions:
         """Bug 5: Small floating-point drift should be tolerated."""
         from app.core.schemas import PillarWeights
 
-        # Simulate Decimal→float roundtrip drift within 1e-4
+        # Simulate Decimal→float roundtrip drift within 1e-4 (v3.1.0 defaults)
         pw = PillarWeights(
-            premium_leverage=0.375001,
-            underlying_behavior=0.455001,
-            setup_quality=0.169998,
+            premium_leverage=0.250001,
+            underlying_behavior=0.350001,
+            setup_quality=0.399998,
         )
         total = pw.premium_leverage + pw.underlying_behavior + pw.setup_quality
         assert abs(total - 1.0) < 1e-4

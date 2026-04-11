@@ -565,15 +565,16 @@ class TestPolicyCoherence:
     """Invariants: policy configuration must be internally consistent."""
 
     def test_default_policy_config_is_valid(self):
-        """The default PolicyConfig must pass all validators (Policy v3.0.0)."""
+        """The default PolicyConfig must pass all validators (Policy v3.1.0)."""
         from app.core.schemas import PolicyConfig
 
         config = PolicyConfig()
         assert config is not None
-        # All weight sums validated by model_validators
-        assert config.pillars.weights.premium_leverage == 0.375
-        assert config.pillars.weights.underlying_behavior == 0.455
-        assert config.pillars.weights.setup_quality == 0.170
+        # All weight sums validated by model_validators.
+        # Policy v3.1.0 promotes Setup Pocket from 17% to 40%.
+        assert config.pillars.weights.premium_leverage == 0.25
+        assert config.pillars.weights.underlying_behavior == 0.35
+        assert config.pillars.weights.setup_quality == 0.40
 
     def test_gate_thresholds_coherent(self):
         """Gate thresholds must be in sensible ranges."""

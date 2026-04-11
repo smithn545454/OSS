@@ -212,10 +212,11 @@ class TestPolicyConfigDefaults:
         assert cfg.tier_2_min_pillar == 55
 
     def test_pillar_weights_defaults(self):
+        # Policy v3.1.0 defaults: Setup Pocket dominates (0.40), PL/UB filter quality.
         cfg = PillarWeights()
-        assert cfg.premium_leverage == 0.375
-        assert cfg.underlying_behavior == 0.455
-        assert cfg.setup_quality == 0.170
+        assert cfg.premium_leverage == 0.25
+        assert cfg.underlying_behavior == 0.35
+        assert cfg.setup_quality == 0.40
         total = cfg.premium_leverage + cfg.underlying_behavior + cfg.setup_quality
         assert abs(total - 1.0) < 1e-9
 

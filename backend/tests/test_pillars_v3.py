@@ -278,12 +278,12 @@ class TestPillarCalculatorIntegration:
 
 
 class TestFinalScoreFormula:
-    def test_uses_v3_default_weights(self, v3_pillar_config):
-        # v3 defaults: 0.375 / 0.455 / 0.170
-        # 0.375 * 80 + 0.455 * 70 + 0.170 * 90
-        # = 30 + 31.85 + 15.3 = 77.15
+    def test_uses_v31_default_weights(self, v3_pillar_config):
+        # v3.1.0 defaults: 0.25 / 0.35 / 0.40
+        # 0.25 * 80 + 0.35 * 70 + 0.40 * 90
+        # = 20 + 24.5 + 36 = 80.5
         final = compute_final_score(80.0, 70.0, 90.0, v3_pillar_config)
-        assert final == pytest.approx(77.15, abs=0.01)
+        assert final == pytest.approx(80.5, abs=0.01)
 
     def test_clamps_to_0_100(self, v3_pillar_config):
         assert compute_final_score(150.0, 150.0, 150.0, v3_pillar_config) == 100.0

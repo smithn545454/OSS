@@ -134,6 +134,12 @@ class ScoringContext:
     delta: float = 0.0
     dte: int = 0
 
+    # Setup Pocket pillar features (Policy v3.1.0)
+    # entry_price: contract mid at evaluation time (== position.entry_price post-fill)
+    # scanner_source: primary scanner that triggered the opportunity (categorical)
+    entry_price: float = 0.0
+    scanner_source: Optional[str] = None
+
     # Category E: Liquidity Features
     open_interest: int = 0
     volume: int = 0
@@ -196,6 +202,11 @@ class ScoringContext:
             ScoringContext populated with all data.
         """
         scanner_triggers = position.scanner_list or []
+        # scanner_source is denormalized at position creation; fall back to
+        # first trigger so older positions without the field still score.
+        scanner_source = getattr(position, "scanner_source", None) or (
+            scanner_triggers[0] if scanner_triggers else None
+        )
 
         return cls(
             evaluation_id=position.evaluation_id,
@@ -203,8 +214,10 @@ class ScoringContext:
             option_type=str(position.option_type or "CALL"),
             dte_bucket=str(position.dte_bucket or "B"),
             scanner_triggers=scanner_triggers,
+            scanner_source=scanner_source,
             direction_hint="NONE",
             convergence_count=position.convergence_count or 0,
+            entry_price=float(position.entry_price or 0.0),
             # Category A
             close=feature_set.close if feature_set else (position.entry_underlying_price or 0.0),
             sma20=feature_set.sma20 if feature_set else None,
@@ -277,15 +290,23 @@ class ScoringContext:
             ScoringContext populated with all data
         """
         # Extract scanner types from triggers
-        scanner_triggers = []
+        scanner_triggers: list[str] = []
         direction_hint = "NONE"
-        
+
         if opportunity:
             for trigger in opportunity.scanner_triggers:
-                scanner_triggers.append(trigger.scanner_type)
+                scanner_triggers.append(str(trigger.scanner_type))
             direction_hint = opportunity.direction_hint
-        
+
         convergence_count = len(scanner_triggers)
+        scanner_source = scanner_triggers[0] if scanner_triggers else None
+        # entry_price is the contract mid at evaluation time, which becomes
+        # position.entry_price when a paper trade is opened from this eval.
+        entry_price = float(
+            (feature_set.mid if feature_set and feature_set.mid else None)
+            or getattr(evaluation, "mid", None)
+            or 0.0
+        )
 
         return cls(
             evaluation_id=evaluation.evaluation_id,
@@ -293,8 +314,10 @@ class ScoringContext:
             option_type=evaluation.option_type,
             dte_bucket=evaluation.dte_bucket,
             scanner_triggers=scanner_triggers,
+            scanner_source=scanner_source,
             direction_hint=str(direction_hint),
             convergence_count=convergence_count,
+            entry_price=entry_price,
             # Category A
             close=feature_set.close if feature_set else evaluation.underlying_price,
             sma20=feature_set.sma20 if feature_set else None,
