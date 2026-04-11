@@ -28,9 +28,9 @@ def _decision(**overrides):
     """Helper to build decision dict with defaults."""
     base = {
         "final_score": 80.0,
-        "directional_score": 75.0,
-        "volatility_score": 70.0,
-        "structure_score": 65.0,
+        "premium_leverage_score": 75.0,
+        "underlying_behavior_score": 70.0,
+        "setup_quality_score": 65.0,
     }
     base.update(overrides)
     return base
@@ -132,7 +132,7 @@ class TestMatchesRule:
         assert matches_rule(
             {"pillar_directional_min": 70},
             _eval(),
-            _decision(directional_score=75),
+            _decision(premium_leverage_score=75),
             [],
         )
 
@@ -140,7 +140,7 @@ class TestMatchesRule:
         assert not matches_rule(
             {"pillar_directional_min": 80},
             _eval(),
-            _decision(directional_score=75),
+            _decision(premium_leverage_score=75),
             [],
         )
 
@@ -148,7 +148,7 @@ class TestMatchesRule:
         assert matches_rule(
             {"pillar_volatility_min": 65},
             _eval(),
-            _decision(volatility_score=70),
+            _decision(underlying_behavior_score=70),
             [],
         )
 
@@ -156,7 +156,7 @@ class TestMatchesRule:
         assert matches_rule(
             {"pillar_structure_min": 60},
             _eval(),
-            _decision(structure_score=65),
+            _decision(setup_quality_score=65),
             [],
         )
 
@@ -204,7 +204,7 @@ class TestMatchesRule:
         assert matches_rule(
             criteria,
             _eval(option_type="PUT", dte=30),
-            _decision(final_score=80, directional_score=78),
+            _decision(final_score=80, premium_leverage_score=78),
             ["BREAKOUT"],
         )
 
@@ -870,9 +870,9 @@ class TestBuildDictsFromPosition:
             "entry_feasibility_ratio": 0.75,
             "entry_days_to_earnings": 12,
             "conviction_score": 82.0,
-            "pillar_directional": 78.0,
-            "pillar_volatility": 72.0,
-            "pillar_structure": 68.0,
+            "pillar_premium_leverage": 78.0,
+            "pillar_underlying_behavior": 72.0,
+            "pillar_setup_quality": 68.0,
             "scanner_list": ["BREAKOUT", "COMPRESSION"],
         }
         defaults.update(overrides)
@@ -901,9 +901,9 @@ class TestBuildDictsFromPosition:
         assert eval_dict["days_to_earnings"] == 12
 
         assert decision_dict["final_score"] == 82.0
-        assert decision_dict["directional_score"] == 78.0
-        assert decision_dict["volatility_score"] == 72.0
-        assert decision_dict["structure_score"] == 68.0
+        assert decision_dict["premium_leverage_score"] == 78.0
+        assert decision_dict["underlying_behavior_score"] == 72.0
+        assert decision_dict["setup_quality_score"] == 68.0
 
         assert scanners == ["BREAKOUT", "COMPRESSION"]
 

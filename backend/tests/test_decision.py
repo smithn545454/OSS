@@ -89,41 +89,41 @@ def make_evaluation(
 
 def make_pillar_results(
     evaluation_id: str,
-    directional: float = 75.0,
-    volatility: float = 80.0,
-    structure: float = 70.0,
+    premium_leverage: float = 75.0,
+    underlying_behavior: float = 80.0,
+    setup_quality: float = 70.0,
 ) -> list[PillarResult]:
-    """Create test PillarResult list."""
+    """Create test PillarResult list (Policy v3.0.0)."""
     return [
         PillarResult(
-            pillar_id="DIRECTIONAL",
+            pillar_id="PREMIUM_LEVERAGE",
             evaluation_id=evaluation_id,
-            score=directional,
+            score=premium_leverage,
             subscores=[
-                Subscore(name="trend_alignment", raw_value=1, score=90.0, weight=0.30),
-                Subscore(name="momentum", raw_value=5.2, score=70.0, weight=0.25),
+                Subscore(name="abs_delta", raw_value=0.12, score=90.0, weight=0.28),
+                Subscore(name="iv", raw_value=0.30, score=85.0, weight=0.52),
             ],
-            tags=["BULLISH_TREND"] if directional >= 70 else [],
+            tags=["DELTA_FAR_OTM"] if premium_leverage >= 70 else [],
         ),
         PillarResult(
-            pillar_id="VOLATILITY",
+            pillar_id="UNDERLYING_BEHAVIOR",
             evaluation_id=evaluation_id,
-            score=volatility,
+            score=underlying_behavior,
             subscores=[
-                Subscore(name="iv_vs_rv", raw_value=0.95, score=85.0, weight=0.35),
-                Subscore(name="iv_percentile", raw_value=35.0, score=75.0, weight=0.25),
+                Subscore(name="adx_14", raw_value=16.0, score=85.0, weight=0.46),
+                Subscore(name="rv20", raw_value=0.40, score=80.0, weight=0.21),
             ],
-            tags=["IV_LOW"] if volatility >= 70 else [],
+            tags=["ADX_MODERATE_TREND"] if underlying_behavior >= 70 else [],
         ),
         PillarResult(
-            pillar_id="STRUCTURE",
+            pillar_id="SETUP_QUALITY",
             evaluation_id=evaluation_id,
-            score=structure,
+            score=setup_quality,
             subscores=[
-                Subscore(name="spread", raw_value=3.0, score=80.0, weight=0.30),
-                Subscore(name="open_interest", raw_value=1500, score=75.0, weight=0.25),
+                Subscore(name="dte_bucket", raw_value="A", score=90.0, weight=0.25),
+                Subscore(name="convergence_count", raw_value=2, score=90.0, weight=0.15),
             ],
-            tags=["TIGHT_SPREAD"] if structure >= 70 else [],
+            tags=["SCANNER_CONVERGENCE"] if setup_quality >= 70 else [],
         ),
     ]
 
@@ -205,17 +205,17 @@ class TestFinalScoreCalculation:
     """Test final score calculation from pillar scores."""
     
     def test_default_weights(self):
-        """Test final score with default weights (0.35, 0.35, 0.30)."""
+        """Test final score with default weights (Policy v3.0.0: 0.375, 0.455, 0.170)."""
         calculator = DecisionCalculator()
-        
-        # 0.35 * 80 + 0.35 * 70 + 0.30 * 90 = 28 + 24.5 + 27 = 79.5
+
+        # 0.375 * 80 + 0.455 * 70 + 0.170 * 90 = 30 + 31.85 + 15.3 = 77.15
         final = calculator.compute_final_score(80.0, 70.0, 90.0)
-        
-        assert final == pytest.approx(79.5, rel=0.01)
+
+        assert final == pytest.approx(77.15, rel=0.01)
     
     def test_custom_weights(self):
         """Test final score with custom weights."""
-        weights = PillarWeights(directional=0.40, volatility=0.40, structure=0.20)
+        weights = PillarWeights(premium_leverage=0.40, underlying_behavior=0.40, setup_quality=0.20)
         calculator = DecisionCalculator(pillar_weights=weights)
         
         # 0.40 * 80 + 0.40 * 70 + 0.20 * 90 = 32 + 28 + 18 = 78
@@ -320,9 +320,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=87.0,
-            directional=75.0,
-            volatility=80.0,
-            structure=72.0,
+            premium_leverage=75.0,
+            underlying_behavior=80.0,
+            setup_quality=72.0,
             spread_pct=4.0,
         )
         
@@ -334,9 +334,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=82.0,  # Below 85
-            directional=75.0,
-            volatility=80.0,
-            structure=72.0,
+            premium_leverage=75.0,
+            underlying_behavior=80.0,
+            setup_quality=72.0,
             spread_pct=4.0,
         )
         
@@ -348,9 +348,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=87.0,
-            directional=75.0,
-            volatility=80.0,
-            structure=65.0,  # Below 70
+            premium_leverage=75.0,
+            underlying_behavior=80.0,
+            setup_quality=65.0,  # Below 70
             spread_pct=4.0,
         )
         
@@ -362,9 +362,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=87.0,
-            directional=75.0,
-            volatility=80.0,
-            structure=72.0,
+            premium_leverage=75.0,
+            underlying_behavior=80.0,
+            setup_quality=72.0,
             spread_pct=6.0,  # Above 5%
         )
         
@@ -376,9 +376,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=78.0,
-            directional=60.0,
-            volatility=65.0,
-            structure=58.0,
+            premium_leverage=60.0,
+            underlying_behavior=65.0,
+            setup_quality=58.0,
             spread_pct=7.0,
         )
         
@@ -390,9 +390,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=76.0,
-            directional=50.0,  # Below 55
-            volatility=85.0,
-            structure=80.0,
+            premium_leverage=50.0,  # Below 55
+            underlying_behavior=85.0,
+            setup_quality=80.0,
             spread_pct=3.0,
         )
         
@@ -404,9 +404,9 @@ class TestQualityTierAssignment:
         
         tier = calculator.assign_quality_tier(
             final_score=70.0,  # Below 75
-            directional=80.0,
-            volatility=80.0,
-            structure=80.0,
+            premium_leverage=80.0,
+            underlying_behavior=80.0,
+            setup_quality=80.0,
             spread_pct=3.0,
         )
         
@@ -426,9 +426,9 @@ class TestFullDecisionComputation:
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=85.0,
-            volatility=88.0,
-            structure=82.0,
+            premium_leverage=85.0,
+            underlying_behavior=88.0,
+            setup_quality=82.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
         
@@ -452,9 +452,9 @@ class TestFullDecisionComputation:
         # But directional < 55 means TIER_3
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=52.0,  # Weak (below 55)
-            volatility=95.0,
-            structure=90.0,
+            premium_leverage=52.0,  # Weak (below 55)
+            underlying_behavior=95.0,
+            setup_quality=90.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
         
@@ -466,16 +466,16 @@ class TestFullDecisionComputation:
         
         assert decision.verdict == Verdict.APPROVE
         assert decision.quality_tier == QualityTier.TIER_3
-        assert "WEAK_DIRECTIONAL" in decision.supporting_reason_codes
+        assert "WEAK_PREMIUM_LEVERAGE" in decision.supporting_reason_codes
     
     def test_watch_verdict(self):
         """Test WATCH verdict."""
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=70.0,
-            volatility=68.0,
-            structure=65.0,
+            premium_leverage=70.0,
+            underlying_behavior=68.0,
+            setup_quality=65.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
         
@@ -495,9 +495,9 @@ class TestFullDecisionComputation:
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=90.0,
-            volatility=90.0,
-            structure=90.0,
+            premium_leverage=90.0,
+            underlying_behavior=90.0,
+            setup_quality=90.0,
         )
         gate_eval = make_gate_evaluation(
             evaluation.evaluation_id,
@@ -521,9 +521,9 @@ class TestFullDecisionComputation:
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=50.0,
-            volatility=55.0,
-            structure=45.0,
+            premium_leverage=50.0,
+            underlying_behavior=55.0,
+            setup_quality=45.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
         
@@ -557,25 +557,25 @@ class TestTickerConcentration:
         decisions = {
             "eval-1": Decision(
                 evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-2": Decision(
                 evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-3": Decision(
                 evaluation_id="eval-3", verdict=Verdict.WATCH, quality_tier=None,
-                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                final_score=70.0, premium_leverage_score=65.0, underlying_behavior_score=70.0, setup_quality_score=75.0,
                 primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-4": Decision(
                 evaluation_id="eval-4", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
@@ -596,7 +596,7 @@ class TestTickerConcentration:
         decisions = {
             f"eval-{i}": Decision(
                 evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             )
@@ -620,25 +620,25 @@ class TestTickerConcentration:
         decisions = {
             "eval-1": Decision(
                 evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-2": Decision(
                 evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-3": Decision(
                 evaluation_id="eval-3", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-4": Decision(
                 evaluation_id="eval-4", verdict=Verdict.REJECT, quality_tier=None,
-                final_score=50.0, directional_score=45.0, volatility_score=50.0, structure_score=55.0,
+                final_score=50.0, premium_leverage_score=45.0, underlying_behavior_score=50.0, setup_quality_score=55.0,
                 primary_reason_code="REJECTED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
@@ -663,7 +663,7 @@ class TestDirectionalConcentration:
         decisions = {
             f"eval-{i}": Decision(
                 evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             )
@@ -686,7 +686,7 @@ class TestDirectionalConcentration:
         decisions = {
             f"eval-{i}": Decision(
                 evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             )
@@ -711,7 +711,7 @@ class TestDirectionalConcentration:
         decisions = {
             f"eval-{i}": Decision(
                 evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             )
@@ -735,25 +735,25 @@ class TestDirectionalConcentration:
         decisions = {
             "eval-1": Decision(
                 evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-2": Decision(
                 evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-3": Decision(
                 evaluation_id="eval-3", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-4": Decision(
                 evaluation_id="eval-4", verdict=Verdict.WATCH, quality_tier=None,
-                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                final_score=70.0, premium_leverage_score=65.0, underlying_behavior_score=70.0, setup_quality_score=75.0,
                 primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
@@ -779,7 +779,7 @@ class TestCombinedConcentration:
         decisions = {
             f"eval-{i}": Decision(
                 evaluation_id=f"eval-{i}", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             )
@@ -805,11 +805,11 @@ class TestUpdateDecisionsWithWarnings:
             verdict=Verdict.APPROVE,
             quality_tier=QualityTier.TIER_1,
             final_score=87.5,
-            directional_score=85.0,
-            volatility_score=88.0,
-            structure_score=90.0,
+            premium_leverage_score=85.0,
+            underlying_behavior_score=88.0,
+            setup_quality_score=90.0,
             primary_reason_code="APPROVED_BY_SCORE",
-            supporting_reason_codes=["STRONG_DIRECTIONAL", "STRONG_VOLATILITY"],
+            supporting_reason_codes=["STRONG_PREMIUM_LEVERAGE", "STRONG_UNDERLYING_BEHAVIOR"],
             failed_gates=[],
             concentration_warnings=[],
             policy_version="v2.0.0",
@@ -823,7 +823,7 @@ class TestUpdateDecisionsWithWarnings:
         assert new_decision.verdict == original.verdict
         assert new_decision.quality_tier == original.quality_tier
         assert new_decision.final_score == original.final_score
-        assert new_decision.directional_score == original.directional_score
+        assert new_decision.premium_leverage_score == original.premium_leverage_score
         assert new_decision.primary_reason_code == original.primary_reason_code
         assert "WARN_CONCENTRATION_SAME_TICKER:AAPL:4" in new_decision.concentration_warnings
 
@@ -841,9 +841,9 @@ class TestDecisionContext:
         evaluation = make_evaluation()
         pillar_results = make_pillar_results(
             evaluation.evaluation_id,
-            directional=78.0,
-            volatility=82.0,
-            structure=75.0,
+            premium_leverage=78.0,
+            underlying_behavior=82.0,
+            setup_quality=75.0,
         )
         gate_eval = make_gate_evaluation(evaluation.evaluation_id, all_passed=True)
         
@@ -857,9 +857,9 @@ class TestDecisionContext:
         assert ctx.underlying_ticker == "AAPL"
         assert ctx.option_type == "CALL"
         assert ctx.spread_pct == 3.0
-        assert ctx.directional_score == 78.0
-        assert ctx.volatility_score == 82.0
-        assert ctx.structure_score == 75.0
+        assert ctx.premium_leverage_score == 78.0
+        assert ctx.underlying_behavior_score == 82.0
+        assert ctx.setup_quality_score == 75.0
         assert ctx.all_gates_passed is True
         assert ctx.failed_gates == []
     
@@ -946,9 +946,9 @@ class TestConvenienceFunctions:
         """Test standalone assign_quality_tier function."""
         tier = assign_quality_tier(
             final_score=87.0,
-            directional=75.0,
-            volatility=80.0,
-            structure=72.0,
+            premium_leverage=75.0,
+            underlying_behavior=80.0,
+            setup_quality=72.0,
             spread_pct=4.0,
         )
         assert tier == QualityTier.TIER_1
@@ -973,25 +973,25 @@ class TestConcentrationAnalysis:
         decisions = {
             "eval-1": Decision(
                 evaluation_id="eval-1", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-2": Decision(
                 evaluation_id="eval-2", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=80.0, directional_score=75.0, volatility_score=80.0, structure_score=85.0,
+                final_score=80.0, premium_leverage_score=75.0, underlying_behavior_score=80.0, setup_quality_score=85.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-3": Decision(
                 evaluation_id="eval-3", verdict=Verdict.WATCH, quality_tier=None,
-                final_score=70.0, directional_score=65.0, volatility_score=70.0, structure_score=75.0,
+                final_score=70.0, premium_leverage_score=65.0, underlying_behavior_score=70.0, setup_quality_score=75.0,
                 primary_reason_code="WATCH_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),
             "eval-4": Decision(
                 evaluation_id="eval-4", verdict=Verdict.APPROVE, quality_tier=QualityTier.TIER_2,
-                final_score=78.0, directional_score=72.0, volatility_score=78.0, structure_score=82.0,
+                final_score=78.0, premium_leverage_score=72.0, underlying_behavior_score=78.0, setup_quality_score=82.0,
                 primary_reason_code="APPROVED_BY_SCORE", supporting_reason_codes=[],
                 failed_gates=[], concentration_warnings=[], policy_version="v2.0.0",
             ),

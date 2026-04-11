@@ -181,9 +181,9 @@ class TestPolicyTableIntegration:
         await PolicyTable.put(policy)
 
         retrieved = await PolicyTable.get("v1.0.0")
-        assert retrieved.config.pillar_weights.directional == config.pillar_weights.directional
-        assert retrieved.config.pillar_weights.volatility == config.pillar_weights.volatility
-        assert retrieved.config.pillar_weights.structure == config.pillar_weights.structure
+        assert retrieved.config.pillars.weights.premium_leverage == config.pillars.weights.premium_leverage
+        assert retrieved.config.pillars.weights.underlying_behavior == config.pillars.weights.underlying_behavior
+        assert retrieved.config.pillars.weights.setup_quality == config.pillars.weights.setup_quality
         assert retrieved.config.decision.approve_threshold == config.decision.approve_threshold
 
 
@@ -313,14 +313,14 @@ class TestEvaluationTableIntegration:
             verdict=Verdict.APPROVE,
             quality_tier=QualityTier.TIER_2,
             final_score=82.0,
-            directional_score=78.0,
-            volatility_score=85.0,
-            structure_score=80.0,
+            premium_leverage_score=78.0,
+            underlying_behavior_score=85.0,
+            setup_quality_score=80.0,
             primary_reason_code="ALL_GATES_PASSED",
-            supporting_reason_codes=["STRONG_VOLATILITY"],
+            supporting_reason_codes=["STRONG_UNDERLYING_BEHAVIOR"],
             failed_gates=[],
             concentration_warnings=[],
-            policy_version="v2.0.0",
+            policy_version="v3.0.0",
         )
 
     @pytest.mark.asyncio
@@ -1034,9 +1034,9 @@ class TestFeatureValueTableIntegration:
 
 class TestPillarScoreTableIntegration:
 
-    def _make_score(self, eval_id="eval-001", pillar_id=PillarId.DIRECTIONAL, score=78):
+    def _make_score(self, eval_id="eval-001", pillar_id=PillarId.PREMIUM_LEVERAGE, score=78):
         contributor = PillarContributor(
-            feature_name="trend_alignment",
+            feature_name="entry_delta",
             subscore=80.0,
             weight=0.30,
             weighted_contribution=24.0,
@@ -1053,9 +1053,9 @@ class TestPillarScoreTableIntegration:
     @pytest.mark.asyncio
     async def test_put_batch_and_list(self, fresh_dynamodb_client):
         scores = [
-            self._make_score(pillar_id=PillarId.DIRECTIONAL, score=78),
-            self._make_score(pillar_id=PillarId.VOLATILITY, score=85),
-            self._make_score(pillar_id=PillarId.STRUCTURE, score=80),
+            self._make_score(pillar_id=PillarId.PREMIUM_LEVERAGE, score=78),
+            self._make_score(pillar_id=PillarId.UNDERLYING_BEHAVIOR, score=85),
+            self._make_score(pillar_id=PillarId.SETUP_QUALITY, score=80),
         ]
         await PillarScoreTable.put_batch(scores)
 
@@ -1064,9 +1064,9 @@ class TestPillarScoreTableIntegration:
 
     @pytest.mark.asyncio
     async def test_get_specific_pillar(self, fresh_dynamodb_client):
-        score = self._make_score(pillar_id=PillarId.VOLATILITY, score=85)
+        score = self._make_score(pillar_id=PillarId.UNDERLYING_BEHAVIOR, score=85)
         await PillarScoreTable.put(score)
 
-        retrieved = await PillarScoreTable.get("eval-001", "VOLATILITY")
+        retrieved = await PillarScoreTable.get("eval-001", "UNDERLYING_BEHAVIOR")
         assert retrieved is not None
         assert retrieved.score == 85

@@ -154,8 +154,8 @@ class TestHelperFunctions:
             "eval-reject": Decision(
                 evaluation_id="eval-reject",
                 verdict=Verdict.REJECT,
-                final_score=50.0, directional_score=50.0,
-                volatility_score=50.0, structure_score=50.0,
+                final_score=50.0, premium_leverage_score=50.0,
+                underlying_behavior_score=50.0, setup_quality_score=50.0,
                 primary_reason_code="REJECTED",
                 supporting_reason_codes=[], failed_gates=["GATE_1"],
                 concentration_warnings=[], policy_version="v2.0.0",

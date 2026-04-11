@@ -89,47 +89,47 @@ def sample_contract():
 def sample_scores():
     return ScoresData(
         final=82.5,
-        directional=85.0,
-        volatility=78.0,
-        structure=84.0,
+        premium_leverage=85.0,
+        underlying_behavior=78.0,
+        setup_quality=84.0,
     )
 
 
 @pytest.fixture
 def sample_pillar_contributors():
     return {
-        "directional": [
+        "premium_leverage": [
             PillarContributorData(
-                feature_name="trend_alignment",
+                feature_name="entry_delta",
                 subscore=90,
+                weight=0.58,
+                weighted_contribution=52.2,
+                raw_value=-0.42,
+            ),
+            PillarContributorData(
+                feature_name="iv",
+                subscore=85,
                 weight=0.30,
-                weighted_contribution=27.0,
-                raw_value="STRONG_UPTREND",
-            ),
-            PillarContributorData(
-                feature_name="momentum",
-                subscore=80,
-                weight=0.25,
-                weighted_contribution=20.0,
-                raw_value=2.5,
+                weighted_contribution=25.5,
+                raw_value=0.30,
             ),
         ],
-        "volatility": [
+        "underlying_behavior": [
             PillarContributorData(
-                feature_name="iv_percentile",
-                subscore=75,
-                weight=0.25,
-                weighted_contribution=18.75,
-                raw_value=35,
-            ),
-        ],
-        "structure": [
-            PillarContributorData(
-                feature_name="spread_score",
+                feature_name="adx_14",
                 subscore=88,
-                weight=0.30,
-                weighted_contribution=26.4,
-                raw_value=3.5,
+                weight=0.46,
+                weighted_contribution=40.48,
+                raw_value=16.0,
+            ),
+        ],
+        "setup_quality": [
+            PillarContributorData(
+                feature_name="dte_bucket",
+                subscore=90,
+                weight=0.25,
+                weighted_contribution=22.5,
+                raw_value="A",
             ),
         ],
     }
@@ -210,9 +210,9 @@ def sample_decision():
         verdict=Verdict.APPROVE,
         quality_tier=QualityTier.TIER_1,
         final_score=82.5,
-        directional_score=85.0,
-        volatility_score=78.0,
-        structure_score=84.0,
+        premium_leverage_score=85.0,
+        underlying_behavior_score=78.0,
+        setup_quality_score=84.0,
         primary_reason_code="APPROVED_TIER_1",
         supporting_reason_codes=["STRONG_TREND", "LOW_IV"],
         failed_gates=[],
@@ -226,7 +226,7 @@ def sample_pillar_scores():
     return [
         PillarScore(
             evaluation_id="eval-123",
-            pillar_id=PillarId.DIRECTIONAL,
+            pillar_id=PillarId.PREMIUM_LEVERAGE,
             score=85,
             contributors=[
                 PillarContributor(
@@ -242,7 +242,7 @@ def sample_pillar_scores():
         ),
         PillarScore(
             evaluation_id="eval-123",
-            pillar_id=PillarId.VOLATILITY,
+            pillar_id=PillarId.UNDERLYING_BEHAVIOR,
             score=78,
             contributors=[
                 PillarContributor(
@@ -258,7 +258,7 @@ def sample_pillar_scores():
         ),
         PillarScore(
             evaluation_id="eval-123",
-            pillar_id=PillarId.STRUCTURE,
+            pillar_id=PillarId.SETUP_QUALITY,
             score=84,
             contributors=[
                 PillarContributor(
@@ -318,7 +318,7 @@ class TestThesisInputModel:
         assert data["contract"]["type"] == "CALL"
         assert data["contract"]["strike"] == 180.0
         assert data["scores"]["final"] == 82.5
-        assert len(data["pillar_contributors"]["directional"]) == 2
+        assert len(data["pillar_contributors"]["premium_leverage"]) == 2
         assert len(data["scanner_triggers"]) == 1
         assert data["policy_version"] == "v2.1.0"
         assert data["quality_tier"] == "TIER_1"
@@ -326,13 +326,13 @@ class TestThesisInputModel:
     def test_pillar_contributors_format(self, sample_thesis_input):
         """Test pillar contributors are formatted correctly."""
         data = sample_thesis_input.to_dict()
-        
-        directional_contrib = data["pillar_contributors"]["directional"][0]
-        assert directional_contrib["feature"] == "trend_alignment"
-        assert directional_contrib["subscore"] == 90
-        assert directional_contrib["weight"] == 0.30
-        assert directional_contrib["contribution"] == 27.0
-        assert directional_contrib["value"] == "STRONG_UPTREND"
+
+        contrib = data["pillar_contributors"]["premium_leverage"][0]
+        assert contrib["feature"] == "entry_delta"
+        assert contrib["subscore"] == 90
+        assert contrib["weight"] == 0.58
+        assert contrib["contribution"] == 52.2
+        assert contrib["value"] == -0.42
 
     def test_scanner_triggers_format(self, sample_thesis_input):
         """Test scanner triggers are formatted correctly."""
@@ -411,7 +411,7 @@ class TestPromptBuilding:
         assert "CALL" in prompt
         assert "180" in prompt  # Strike
         assert "82.5" in prompt  # Final score
-        assert "trend_alignment" in prompt
+        assert "entry_delta" in prompt
         assert "BREAKOUT" in prompt
         assert "v2.1.0" in prompt
 
@@ -603,9 +603,9 @@ class TestThesisGenerator:
             verdict=Verdict.WATCH,
             quality_tier=None,
             final_score=68.0,
-            directional_score=70.0,
-            volatility_score=65.0,
-            structure_score=69.0,
+            premium_leverage_score=70.0,
+            underlying_behavior_score=65.0,
+            setup_quality_score=69.0,
             primary_reason_code="WATCH_SCORE",
             supporting_reason_codes=[],
             failed_gates=[],

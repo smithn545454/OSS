@@ -21,18 +21,14 @@ import pytest
 
 from app.core.schemas import (
     DecisionConfig,
-    DirectionalPillarConfig,
     GateConfig,
     GateOperator,
     GateResult,
     OptionType,
     PillarId,
     PillarWeights,
-    PolicyConfig,
     QualityTier,
-    StructurePillarConfig,
     Verdict,
-    VolatilityPillarConfig,
     ContractSelectionConfig,
 )
 from app.decision.calculator import DecisionCalculator, determine_verdict
@@ -75,68 +71,19 @@ class TestScoreInvariants:
         """INV-5: PillarWeights validator enforces sum == 1.0."""
         # Defaults work
         pw = PillarWeights()
-        assert abs(pw.directional + pw.volatility + pw.structure - 1.0) < 1e-9
+        assert abs(pw.premium_leverage + pw.underlying_behavior + pw.setup_quality - 1.0) < 1e-9
 
         # Invalid weights rejected
         with pytest.raises(ValueError, match="must sum to 1.0"):
-            PillarWeights(directional=0.5, volatility=0.5, structure=0.5)
+            PillarWeights(premium_leverage=0.5, underlying_behavior=0.5, setup_quality=0.5)
 
     def test_pillar_weights_reject_near_miss(self):
-        """Weights summing to 0.99 or 1.01 must be rejected."""
+        """Weights summing to 0.99 or 1.01 must be rejected (Policy v3.0.0)."""
         with pytest.raises(ValueError, match="must sum to 1.0"):
-            PillarWeights(directional=0.33, volatility=0.33, structure=0.33)
-
-    def test_directional_subscore_weights_sum_to_one(self):
-        """INV-6: Directional subscore weights must sum to 1.0."""
-        cfg = DirectionalPillarConfig()
-        total = (
-            cfg.trend_alignment_weight + cfg.momentum_weight
-            + cfg.trend_strength_weight
-            + cfg.signal_confirmation_weight + cfg.relative_strength_weight
-            + cfg.catalyst_weight
-        )
-        assert abs(total - 1.0) < 1e-9
-
-        with pytest.raises(ValueError, match="must sum to 1.0"):
-            DirectionalPillarConfig(
-                trend_alignment_weight=0.5,
-                momentum_weight=0.5,
-                signal_confirmation_weight=0.5,
-                relative_strength_weight=0.5,
-                catalyst_weight=0.5,
-            )
-
-    def test_volatility_subscore_weights_sum_to_one(self):
-        """INV-7: Volatility subscore weights must sum to 1.0."""
-        cfg = VolatilityPillarConfig()
-        total = (
-            cfg.iv_vs_rv_weight + cfg.iv_percentile_weight
-            + cfg.iv_regime_weight + cfg.theta_adjusted_edge_weight
-        )
-        assert abs(total - 1.0) < 1e-9
-
-        with pytest.raises(ValueError, match="must sum to 1.0"):
-            VolatilityPillarConfig(
-                iv_vs_rv_weight=0.5,
-                iv_percentile_weight=0.5,
-                iv_regime_weight=0.5,
-                theta_adjusted_edge_weight=0.5,
-            )
-
-    def test_structure_subscore_weights_sum_to_one(self):
-        """INV-8: Entry Quality subscore weights must sum to 1.0."""
-        cfg = StructurePillarConfig()
-        total = (
-            cfg.delta_moneyness_weight + cfg.raw_iv_weight
-            + cfg.dte_appropriateness_weight
-        )
-        assert abs(total - 1.0) < 1e-9
-
-        with pytest.raises(ValueError, match="must sum to 1.0"):
-            StructurePillarConfig(
-                delta_moneyness_weight=0.10,
-                raw_iv_weight=0.10,
-                dte_appropriateness_weight=0.10,
+            PillarWeights(
+                premium_leverage=0.33,
+                underlying_behavior=0.33,
+                setup_quality=0.33,
             )
 
     def test_ranking_weights_sum_to_one(self):
@@ -151,12 +98,12 @@ class TestScoreInvariants:
 
         with pytest.raises(ValueError):
             PillarScore(
-                evaluation_id="test", pillar_id=PillarId.DIRECTIONAL,
+                evaluation_id="test", pillar_id=PillarId.PREMIUM_LEVERAGE,
                 score=101, contributors=[],
             )
         with pytest.raises(ValueError):
             PillarScore(
-                evaluation_id="test", pillar_id=PillarId.DIRECTIONAL,
+                evaluation_id="test", pillar_id=PillarId.PREMIUM_LEVERAGE,
                 score=-1, contributors=[],
             )
 
@@ -523,9 +470,9 @@ class TestConcentrationInvariants:
                 evaluation_id=f"eval-{i}",
                 verdict=Verdict.REJECT,
                 final_score=50.0,
-                directional_score=50.0,
-                volatility_score=50.0,
-                structure_score=50.0,
+                premium_leverage_score=50.0,
+                underlying_behavior_score=50.0,
+                setup_quality_score=50.0,
                 primary_reason_code="REJECTED",
                 supporting_reason_codes=[],
                 failed_gates=["GATE_MIN_VOLUME"],
@@ -555,9 +502,9 @@ class TestConcentrationInvariants:
                 evaluation_id=f"eval-{i}",
                 verdict=Verdict.WATCH,
                 final_score=70.0,
-                directional_score=70.0,
-                volatility_score=70.0,
-                structure_score=70.0,
+                premium_leverage_score=70.0,
+                underlying_behavior_score=70.0,
+                setup_quality_score=70.0,
                 primary_reason_code="WATCH_BY_SCORE",
                 supporting_reason_codes=[],
                 failed_gates=[],
@@ -618,11 +565,15 @@ class TestPolicyCoherence:
     """Invariants: policy configuration must be internally consistent."""
 
     def test_default_policy_config_is_valid(self):
-        """The default PolicyConfig must pass all validators."""
+        """The default PolicyConfig must pass all validators (Policy v3.0.0)."""
+        from app.core.schemas import PolicyConfig
+
         config = PolicyConfig()
         assert config is not None
         # All weight sums validated by model_validators
-        assert config.pillars.weights.directional == 0.35
+        assert config.pillars.weights.premium_leverage == 0.375
+        assert config.pillars.weights.underlying_behavior == 0.455
+        assert config.pillars.weights.setup_quality == 0.170
 
     def test_gate_thresholds_coherent(self):
         """Gate thresholds must be in sensible ranges."""

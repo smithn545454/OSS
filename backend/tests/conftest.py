@@ -6,10 +6,12 @@ duplication and ensure consistent test data.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -61,7 +63,11 @@ from app.features.models import FeatureSet
 
 @pytest.fixture
 def default_policy_config() -> PolicyConfig:
-    """Default PolicyConfig with all standard defaults."""
+    """Default PolicyConfig for tests (Policy v3.0.0).
+
+    PolicyConfig() loads pillar defaults from the seed JSON automatically
+    via PillarConfig's default_factory. See app/core/schemas.py.
+    """
     return PolicyConfig()
 
 
@@ -69,7 +75,7 @@ def default_policy_config() -> PolicyConfig:
 def default_policy(default_policy_config: PolicyConfig) -> Policy:
     """A complete Policy object with default config."""
     return Policy(
-        version="v2.0.0",
+        version="v3.0.0",
         policy_hash=Policy.compute_hash(default_policy_config),
         config=default_policy_config,
         created_by="test",
@@ -81,7 +87,7 @@ def default_policy(default_policy_config: PolicyConfig) -> Policy:
 def mock_policy(default_policy_config: PolicyConfig) -> MagicMock:
     """A MagicMock policy (used where full Policy construction isn't needed)."""
     policy = MagicMock()
-    policy.version = "v2.0.0"
+    policy.version = "v3.0.0"
     policy.config = default_policy_config
     policy.is_active = True
     policy.policy_hash = "test-hash"
@@ -159,14 +165,14 @@ def sample_decision() -> Decision:
         verdict=Verdict.APPROVE,
         quality_tier=QualityTier.TIER_2,
         final_score=82.0,
-        directional_score=78.0,
-        volatility_score=85.0,
-        structure_score=80.0,
+        premium_leverage_score=78.0,
+        underlying_behavior_score=85.0,
+        setup_quality_score=80.0,
         primary_reason_code="ALL_GATES_PASSED",
-        supporting_reason_codes=["STRONG_VOLATILITY", "GOOD_STRUCTURE"],
+        supporting_reason_codes=["STRONG_UNDERLYING_BEHAVIOR", "GOOD_SETUP_QUALITY"],
         failed_gates=[],
         concentration_warnings=[],
-        policy_version="v2.0.0",
+        policy_version="v3.0.0",
     )
 
 

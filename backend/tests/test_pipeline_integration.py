@@ -517,7 +517,8 @@ class TestPipelineBugRegressions:
 
         # Should not raise
         pw = PillarWeights()
-        assert abs(pw.directional + pw.volatility + pw.structure - 1.0) < 1e-4
+        total = pw.premium_leverage + pw.underlying_behavior + pw.setup_quality
+        assert abs(total - 1.0) < 1e-4
 
     def test_pillar_weights_tiny_drift_passes(self):
         """Bug 5: Small floating-point drift should be tolerated."""
@@ -525,11 +526,11 @@ class TestPipelineBugRegressions:
 
         # Simulate Decimal→float roundtrip drift within 1e-4
         pw = PillarWeights(
-            directional=0.350001,
-            volatility=0.350001,
-            structure=0.299998,
+            premium_leverage=0.375001,
+            underlying_behavior=0.455001,
+            setup_quality=0.169998,
         )
-        total = pw.directional + pw.volatility + pw.structure
+        total = pw.premium_leverage + pw.underlying_behavior + pw.setup_quality
         assert abs(total - 1.0) < 1e-4
 
     def test_pillar_weights_large_drift_fails(self):
@@ -538,7 +539,7 @@ class TestPipelineBugRegressions:
         import pydantic
 
         with pytest.raises(pydantic.ValidationError):
-            PillarWeights(directional=0.40, volatility=0.40, structure=0.30)
+            PillarWeights(premium_leverage=0.40, underlying_behavior=0.40, setup_quality=0.30)
 
 
 if __name__ == "__main__":

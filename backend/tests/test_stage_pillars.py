@@ -124,19 +124,19 @@ class TestHelperFunctions:
     """Test helper functions in pillar stage."""
 
     def test_extract_pillar_scores_for_decision(self):
-        """extract_pillar_scores_for_decision should return {eval_id: {pillar_id: score}}."""
+        """extract_pillar_scores_for_decision should return {eval_id: {pillar_id: score}} (v3.0.0)."""
         results = {
             "eval-001": [
-                PillarResult(pillar_id="DIRECTIONAL", evaluation_id="eval-001", score=80, subscores=[], tags=[]),
-                PillarResult(pillar_id="VOLATILITY", evaluation_id="eval-001", score=75, subscores=[], tags=[]),
-                PillarResult(pillar_id="STRUCTURE", evaluation_id="eval-001", score=70, subscores=[], tags=[]),
+                PillarResult(pillar_id="PREMIUM_LEVERAGE", evaluation_id="eval-001", score=80, subscores=[], tags=[]),
+                PillarResult(pillar_id="UNDERLYING_BEHAVIOR", evaluation_id="eval-001", score=75, subscores=[], tags=[]),
+                PillarResult(pillar_id="SETUP_QUALITY", evaluation_id="eval-001", score=70, subscores=[], tags=[]),
             ]
         }
         extracted = extract_pillar_scores_for_decision(results)
         assert "eval-001" in extracted
-        assert extracted["eval-001"]["directional"] == 80
-        assert extracted["eval-001"]["volatility"] == 75
-        assert extracted["eval-001"]["structure"] == 70
+        assert extracted["eval-001"]["premium_leverage"] == 80
+        assert extracted["eval-001"]["underlying_behavior"] == 75
+        assert extracted["eval-001"]["setup_quality"] == 70
 
     def test_extract_empty_results(self):
         """Empty results should produce empty dict."""

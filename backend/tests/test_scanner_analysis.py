@@ -43,9 +43,9 @@ class MockPosition:
     entry_delta: Optional[float] = 0.35
     entry_theta: Optional[float] = -0.08
     dte_at_entry: Optional[int] = 21
-    pillar_directional: Optional[float] = 62.0
-    pillar_volatility: Optional[float] = 55.0
-    pillar_structure: Optional[float] = 70.0
+    pillar_premium_leverage: Optional[float] = 62.0
+    pillar_underlying_behavior: Optional[float] = 55.0
+    pillar_setup_quality: Optional[float] = 70.0
     strike: Optional[float] = 150.0
     expiration_date: Optional[str] = "2026-04-01"
     matched_rule_ids: Optional[list] = None

@@ -60,11 +60,15 @@ def _make_gate_eval(eval_id: str, all_pass: bool = True) -> GateEvaluation:
 
 
 def _make_pillar_results(eval_id: str, d=80, v=80, s=80):
-    """Create pillar results for an evaluation."""
+    """Create pillar results for an evaluation (Policy v3.0.0).
+
+    The d/v/s parameter names are kept for test backward compat and map to
+    premium_leverage/underlying_behavior/setup_quality respectively.
+    """
     return [
-        PillarResult(pillar_id="DIRECTIONAL", evaluation_id=eval_id, score=d, subscores=[], tags=[]),
-        PillarResult(pillar_id="VOLATILITY", evaluation_id=eval_id, score=v, subscores=[], tags=[]),
-        PillarResult(pillar_id="STRUCTURE", evaluation_id=eval_id, score=s, subscores=[], tags=[]),
+        PillarResult(pillar_id="PREMIUM_LEVERAGE", evaluation_id=eval_id, score=d, subscores=[], tags=[]),
+        PillarResult(pillar_id="UNDERLYING_BEHAVIOR", evaluation_id=eval_id, score=v, subscores=[], tags=[]),
+        PillarResult(pillar_id="SETUP_QUALITY", evaluation_id=eval_id, score=s, subscores=[], tags=[]),
     ]
 
 
@@ -159,8 +163,8 @@ class TestDecisionHelpers:
             "eval-approve": Decision(
                 evaluation_id="eval-approve",
                 verdict=Verdict.APPROVE,
-                final_score=85.0, directional_score=80.0,
-                volatility_score=85.0, structure_score=80.0,
+                final_score=85.0, premium_leverage_score=80.0,
+                underlying_behavior_score=85.0, setup_quality_score=80.0,
                 primary_reason_code="APPROVED",
                 supporting_reason_codes=[], failed_gates=[],
                 concentration_warnings=[], policy_version="v2.0.0",
@@ -168,8 +172,8 @@ class TestDecisionHelpers:
             "eval-watch": Decision(
                 evaluation_id="eval-watch",
                 verdict=Verdict.WATCH,
-                final_score=70.0, directional_score=70.0,
-                volatility_score=70.0, structure_score=70.0,
+                final_score=70.0, premium_leverage_score=70.0,
+                underlying_behavior_score=70.0, setup_quality_score=70.0,
                 primary_reason_code="WATCH_BY_SCORE",
                 supporting_reason_codes=[], failed_gates=[],
                 concentration_warnings=[], policy_version="v2.0.0",
@@ -177,8 +181,8 @@ class TestDecisionHelpers:
             "eval-reject": Decision(
                 evaluation_id="eval-reject",
                 verdict=Verdict.REJECT,
-                final_score=50.0, directional_score=50.0,
-                volatility_score=50.0, structure_score=50.0,
+                final_score=50.0, premium_leverage_score=50.0,
+                underlying_behavior_score=50.0, setup_quality_score=50.0,
                 primary_reason_code="REJECTED_BY_SCORE",
                 supporting_reason_codes=[], failed_gates=[],
                 concentration_warnings=[], policy_version="v2.0.0",

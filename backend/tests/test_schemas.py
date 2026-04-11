@@ -98,9 +98,9 @@ class TestEnumStability:
 
     def test_pillar_id_members(self):
         assert set(PillarId) == {
-            PillarId.DIRECTIONAL,
-            PillarId.VOLATILITY,
-            PillarId.STRUCTURE,
+            PillarId.PREMIUM_LEVERAGE,
+            PillarId.UNDERLYING_BEHAVIOR,
+            PillarId.SETUP_QUALITY,
         }
 
     def test_verdict_members(self):
@@ -213,11 +213,11 @@ class TestPolicyConfigDefaults:
 
     def test_pillar_weights_defaults(self):
         cfg = PillarWeights()
-        assert cfg.directional == 0.35
-        assert cfg.volatility == 0.35
-        assert cfg.structure == 0.30
-        # Weights must sum to 1.0
-        assert abs(cfg.directional + cfg.volatility + cfg.structure - 1.0) < 1e-9
+        assert cfg.premium_leverage == 0.375
+        assert cfg.underlying_behavior == 0.455
+        assert cfg.setup_quality == 0.170
+        total = cfg.premium_leverage + cfg.underlying_behavior + cfg.setup_quality
+        assert abs(total - 1.0) < 1e-9
 
     def test_tracking_config_defaults(self):
         cfg = TrackingConfig()
@@ -292,8 +292,8 @@ class TestPolicyConfigDefaults:
 class TestSerializationRoundTrips:
     """Verify models serialize and deserialize without data loss."""
 
-    def test_policy_config_roundtrip(self):
-        original = PolicyConfig()
+    def test_policy_config_roundtrip(self, default_policy_config):
+        original = default_policy_config
         dumped = original.model_dump(mode="json")
         restored = PolicyConfig(**dumped)
         assert original == restored
@@ -323,16 +323,20 @@ class TestSerializationRoundTrips:
         assert restored.position_id == sample_paper_position.position_id
         assert restored.entry_price == sample_paper_position.entry_price
 
-    def test_policy_hash_stability(self):
+    def test_policy_hash_stability(self, default_policy_config):
         """Same config must always produce the same hash."""
-        config1 = PolicyConfig()
-        config2 = PolicyConfig()
+        # Serialize then restore to get two independent instances of the same config
+        dumped = default_policy_config.model_dump(mode="json")
+        config1 = PolicyConfig(**dumped)
+        config2 = PolicyConfig(**dumped)
         assert Policy.compute_hash(config1) == Policy.compute_hash(config2)
 
-    def test_policy_hash_sensitivity(self):
+    def test_policy_hash_sensitivity(self, default_policy_config):
         """Different configs must produce different hashes."""
-        config1 = PolicyConfig()
-        config2 = PolicyConfig(decision=DecisionConfig(approve_threshold=80))
+        config1 = default_policy_config
+        dumped = config1.model_dump(mode="json")
+        dumped["decision"]["approve_threshold"] = 80
+        config2 = PolicyConfig(**dumped)
         assert Policy.compute_hash(config1) != Policy.compute_hash(config2)
 
 
@@ -358,10 +362,10 @@ class TestDynamoDBConversion:
         assert item["underlying_ticker"] == "AAPL"
         assert "evaluation_id" in item
 
-    def test_nested_config_to_dynamodb(self):
+    def test_nested_config_to_dynamodb(self, default_policy_config):
         from decimal import Decimal
 
-        config = PolicyConfig()
+        config = default_policy_config
         item = config.to_dynamodb_item()
         assert isinstance(item["gates"]["max_spread_pct"], Decimal)
 
@@ -393,7 +397,7 @@ class TestRequiredFields:
         fields = Decision.model_fields
         required_fields = [
             "evaluation_id", "verdict", "final_score",
-            "directional_score", "volatility_score", "structure_score",
+            "premium_leverage_score", "underlying_behavior_score", "setup_quality_score",
             "primary_reason_code", "supporting_reason_codes",
             "failed_gates", "concentration_warnings", "policy_version",
         ]
@@ -435,7 +439,7 @@ class TestRequiredFields:
         with pytest.raises(ValueError):
             PillarScore(
                 evaluation_id="test",
-                pillar_id=PillarId.DIRECTIONAL,
+                pillar_id=PillarId.PREMIUM_LEVERAGE,
                 score=101,  # Invalid
                 contributors=[],
             )

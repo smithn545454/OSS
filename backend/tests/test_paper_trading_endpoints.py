@@ -128,9 +128,9 @@ class TestAnalyzePositionReturnsText:
                 "decision": {
                     "final_score": 82.0,
                     "verdict": "APPROVE",
-                    "directional_score": 78.0,
-                    "volatility_score": 85.0,
-                    "structure_score": 80.0,
+                    "premium_leverage_score": 78.0,
+                    "underlying_behavior_score": 85.0,
+                    "setup_quality_score": 80.0,
                 }
             },
         ), patch(

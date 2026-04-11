@@ -65,33 +65,33 @@ class TestScoringProperties:
     """Property: scoring functions must always produce valid results."""
 
     @given(
-        directional=any_score,
-        volatility=any_score,
-        structure=any_score,
+        premium_leverage=any_score,
+        underlying_behavior=any_score,
+        setup_quality=any_score,
     )
     @settings(max_examples=500)
-    def test_final_score_always_in_0_100(self, directional, volatility, structure):
+    def test_final_score_always_in_0_100(self, premium_leverage, underlying_behavior, setup_quality):
         """No combination of pillar scores can produce a score outside [0, 100]."""
         calc = DecisionCalculator()
-        score = calc.compute_final_score(directional, volatility, structure)
+        score = calc.compute_final_score(premium_leverage, underlying_behavior, setup_quality)
         assert 0.0 <= score <= 100.0, (
             f"Score {score} out of range for inputs "
-            f"({directional}, {volatility}, {structure})"
+            f"({premium_leverage}, {underlying_behavior}, {setup_quality})"
         )
 
     @given(
-        directional=valid_score,
-        volatility=valid_score,
-        structure=valid_score,
+        premium_leverage=valid_score,
+        underlying_behavior=valid_score,
+        setup_quality=valid_score,
     )
     @settings(max_examples=500)
-    def test_final_score_weighted_average_within_inputs(self, directional, volatility, structure):
+    def test_final_score_weighted_average_within_inputs(self, premium_leverage, underlying_behavior, setup_quality):
         """When inputs are in [0, 100], score is a weighted average of them."""
         calc = DecisionCalculator()
-        score = calc.compute_final_score(directional, volatility, structure)
+        score = calc.compute_final_score(premium_leverage, underlying_behavior, setup_quality)
         # Weighted average must be between min and max input
-        lo = min(directional, volatility, structure)
-        hi = max(directional, volatility, structure)
+        lo = min(premium_leverage, underlying_behavior, setup_quality)
+        hi = max(premium_leverage, underlying_behavior, setup_quality)
         assert lo <= score + 1e-6  # Small epsilon for float imprecision
         assert score <= hi + 1e-6
 
@@ -117,16 +117,16 @@ class TestScoringProperties:
         assert reason == "REJECTED_BY_GATES"
 
     @given(
-        directional=valid_score,
-        volatility=valid_score,
-        structure=valid_score,
+        premium_leverage=valid_score,
+        underlying_behavior=valid_score,
+        setup_quality=valid_score,
     )
     @settings(max_examples=200)
-    def test_score_deterministic(self, directional, volatility, structure):
+    def test_score_deterministic(self, premium_leverage, underlying_behavior, setup_quality):
         """Same inputs must always produce the same score."""
         calc = DecisionCalculator()
-        s1 = calc.compute_final_score(directional, volatility, structure)
-        s2 = calc.compute_final_score(directional, volatility, structure)
+        s1 = calc.compute_final_score(premium_leverage, underlying_behavior, setup_quality)
+        s2 = calc.compute_final_score(premium_leverage, underlying_behavior, setup_quality)
         assert s1 == s2
 
 
@@ -275,46 +275,24 @@ class TestEvaluationBuilderProperties:
 
 
 class TestPillarScoringProperties:
-    """Property: pillar scoring must always produce valid scores."""
-
-    @given(
-        trend=valid_score,
-        momentum=valid_score,
-        signal=valid_score,
-        rs=valid_score,
-        catalyst=valid_score,
-    )
-    @settings(max_examples=300)
-    def test_directional_subscore_weighted_average(self, trend, momentum, signal, rs, catalyst):
-        """Weighted average of subscores in [0,100] must be in [0,100]."""
-        from app.core.schemas import DirectionalPillarConfig
-
-        cfg = DirectionalPillarConfig()
-        total = (
-            trend * cfg.trend_alignment_weight
-            + momentum * cfg.momentum_weight
-            + signal * cfg.signal_confirmation_weight
-            + rs * cfg.relative_strength_weight
-            + catalyst * cfg.catalyst_weight
-        )
-        # Must be in [0, 100] since weights sum to 1.0 and inputs are in [0, 100]
-        assert -1e-6 <= total <= 100.0 + 1e-6, (
-            f"Weighted total {total} out of [0, 100] range"
-        )
+    """Property: pillar scoring must always produce valid scores (Policy v3.0.0)."""
 
     @given(
         w1=st.floats(min_value=0.01, max_value=0.98, allow_nan=False),
         w2=st.floats(min_value=0.01, max_value=0.98, allow_nan=False),
     )
     @settings(max_examples=200)
-    def test_invalid_pillar_weights_rejected(self, w1, w2):
-        """Random weight combinations that don't sum to 1.0 must be rejected."""
+    def test_valid_pillar_weights_accepted(self, w1, w2):
+        """Random weight combinations that sum to 1.0 must be accepted."""
         w3 = 1.0 - w1 - w2
-        if abs(w1 + w2 + w3 - 1.0) > 1e-6 or w3 <= 0:
-            # These should be rejected (w3 might be negative or sum doesn't work)
-            if w3 <= 0:
-                return  # Skip: negative weight is separately invalid
-        # If they sum to 1.0, it should work
-        if abs(w1 + w2 + w3 - 1.0) <= 1e-6 and w3 > 0:
-            pw = PillarWeights(directional=w1, volatility=w2, structure=w3)
-            assert abs(pw.directional + pw.volatility + pw.structure - 1.0) < 1e-5
+        if w3 <= 0:
+            return  # Skip: negative weight is separately invalid
+        if abs(w1 + w2 + w3 - 1.0) <= 1e-6:
+            pw = PillarWeights(
+                premium_leverage=w1,
+                underlying_behavior=w2,
+                setup_quality=w3,
+            )
+            assert abs(
+                pw.premium_leverage + pw.underlying_behavior + pw.setup_quality - 1.0
+            ) < 1e-5

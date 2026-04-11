@@ -313,7 +313,7 @@ class TestPillarScoreTable:
     @pytest.mark.asyncio
     async def test_get_returns_none(self, mock_db):
         from app.db.tables import PillarScoreTable
-        result = await PillarScoreTable.get("eval-1", "DIRECTIONAL")
+        result = await PillarScoreTable.get("eval-1", "PREMIUM_LEVERAGE")
         assert result is None
 
     @pytest.mark.asyncio
@@ -325,8 +325,8 @@ class TestPillarScoreTable:
     @pytest.mark.asyncio
     async def test_put_batch_uses_batch_write(self, mock_db):
         from app.db.tables import PillarScoreTable
-        s1 = PillarScore(evaluation_id="e1", pillar_id="DIRECTIONAL", score=75.0, contributors=[])
-        s2 = PillarScore(evaluation_id="e1", pillar_id="VOLATILITY", score=60.0, contributors=[])
+        s1 = PillarScore(evaluation_id="e1", pillar_id="PREMIUM_LEVERAGE", score=75.0, contributors=[])
+        s2 = PillarScore(evaluation_id="e1", pillar_id="UNDERLYING_BEHAVIOR", score=60.0, contributors=[])
         await PillarScoreTable.put_batch([s1, s2])
         mock_db.batch_write.assert_called_once()
 

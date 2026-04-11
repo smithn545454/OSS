@@ -296,11 +296,11 @@ class TestMarketDataFailures:
 
 
 class TestDegradedFeatures:
-    """Test pillar scoring when features are missing (None values)."""
+    """Test pillar scoring when features are missing (Policy v3.0.0)."""
 
-    def test_directional_pillar_with_all_none_features(self):
-        """Directional pillar should handle all-None features gracefully."""
-        from app.pillars.directional import compute_directional_pillar
+    def test_premium_leverage_pillar_with_all_none_features(self, default_policy_config):
+        """Premium Leverage pillar should handle all-None features gracefully."""
+        from app.pillars.premium_leverage import compute_premium_leverage_pillar
         from app.pillars.models import ScoringContext
 
         ctx = ScoringContext(
@@ -308,15 +308,17 @@ class TestDegradedFeatures:
             underlying_ticker="TEST",
             option_type="CALL",
             dte_bucket="C",
-            # All optional features left as None/default
+            delta=0.0,  # Triggers neutral scoring
         )
-        result = compute_directional_pillar(ctx)
+        result = compute_premium_leverage_pillar(
+            ctx, default_policy_config.pillars.premium_leverage
+        )
         assert result is not None
         assert 0 <= result.score <= 100
 
-    def test_volatility_pillar_with_none_iv_data(self):
-        """Volatility pillar should handle None IV data."""
-        from app.pillars.volatility import compute_volatility_pillar
+    def test_underlying_behavior_pillar_with_none_features(self, default_policy_config):
+        """Underlying Behavior pillar should handle None feature values."""
+        from app.pillars.underlying_behavior import compute_underlying_behavior_pillar
         from app.pillars.models import ScoringContext
 
         ctx = ScoringContext(
@@ -325,15 +327,17 @@ class TestDegradedFeatures:
             option_type="CALL",
             dte_bucket="C",
             iv=0.30,
-            # All vol features left as None
+            # ADX, RV, feasibility all None — weight should redistribute
         )
-        result = compute_volatility_pillar(ctx)
+        result = compute_underlying_behavior_pillar(
+            ctx, default_policy_config.pillars.underlying_behavior
+        )
         assert result is not None
         assert 0 <= result.score <= 100
 
-    def test_structure_pillar_with_zero_values(self):
-        """Structure pillar should handle zero liquidity."""
-        from app.pillars.structure import compute_structure_pillar
+    def test_setup_quality_pillar_with_zero_values(self, default_policy_config):
+        """Setup Quality pillar should handle zero liquidity."""
+        from app.pillars.setup_quality import compute_setup_quality_pillar
         from app.pillars.models import ScoringContext
 
         ctx = ScoringContext(
@@ -344,7 +348,10 @@ class TestDegradedFeatures:
             spread_pct=999.0,
             open_interest=0,
             volume=0,
+            convergence_count=1,
         )
-        result = compute_structure_pillar(ctx)
+        result = compute_setup_quality_pillar(
+            ctx, default_policy_config.pillars.setup_quality
+        )
         assert result is not None
         assert 0 <= result.score <= 100
