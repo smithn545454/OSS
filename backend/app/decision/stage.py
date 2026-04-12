@@ -56,20 +56,24 @@ class DecisionStage:
         decision_config: Optional[DecisionConfig] = None,
         pillar_weights: Optional[PillarWeights] = None,
         thesis_config: Optional[ThesisConfig] = None,
+        pillar_config: Optional[PillarConfig] = None,
     ) -> None:
         """Initialize the decision stage.
-        
+
         Args:
             orchestrator: Pipeline orchestrator for event tracking
             decision_config: Decision threshold configuration
             pillar_weights: Weights for combining pillar scores
             thesis_config: LLM thesis generation configuration
+            pillar_config: Full PillarConfig for per-scanner weight lookup
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = decision_config or DecisionConfig()
         self._weights = pillar_weights or PillarWeights()
         self._thesis_config = thesis_config or ThesisConfig()
-        self._calculator = DecisionCalculator(decision_config, pillar_weights)
+        self._calculator = DecisionCalculator(
+            decision_config, pillar_weights, pillar_config=pillar_config
+        )
         self._thesis_generator = None  # Lazy init to avoid import if not needed
     
     async def execute(
@@ -473,9 +477,10 @@ async def run_decision_logic(
     persist_decisions: bool = True,
     check_concentration: bool = True,
     generate_theses: bool = True,
+    pillar_config: Optional[PillarConfig] = None,
 ) -> tuple[dict[str, Decision], list[TradeThesis]]:
     """Convenience function to run decision logic stage.
-    
+
     Args:
         run_id: Pipeline run ID
         evaluations: Evaluations from Stage 3
@@ -490,7 +495,8 @@ async def run_decision_logic(
         persist_decisions: Whether to save to DynamoDB
         check_concentration: Whether to check concentration warnings
         generate_theses: Whether to generate LLM theses for APPROVE verdicts
-        
+        pillar_config: Full PillarConfig for per-scanner weight lookup
+
     Returns:
         Tuple of (Dict mapping evaluation_id to Decision, List of TradeThesis)
     """
@@ -499,6 +505,7 @@ async def run_decision_logic(
         decision_config=decision_config,
         pillar_weights=pillar_weights,
         thesis_config=thesis_config,
+        pillar_config=pillar_config,
     )
     return await stage.execute(
         run_id=run_id,

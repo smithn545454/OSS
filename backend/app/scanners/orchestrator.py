@@ -831,6 +831,7 @@ class ScannerOrchestrator:
                             persist_decisions=True,
                             check_concentration=True,
                             generate_theses=False,
+                            pillar_config=policy_config.pillars,
                         )
 
                         # Count verdicts
@@ -1233,6 +1234,7 @@ class ScannerOrchestrator:
                         persist_decisions=False,
                         check_concentration=False,
                         generate_theses=False,  # No LLM in backtest
+                        pillar_config=policy_config.pillars,
                     )
 
                     # Collect verdict counts

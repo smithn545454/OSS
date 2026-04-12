@@ -287,6 +287,7 @@ def score_position_v31(
         scores.get("v31_pillar_underlying_behavior", 50),
         scores.get("v31_pillar_setup_quality", 50),
         pillar_config,
+        scanner_source=ctx.scanner_source,
     )
     scores["v31_conviction_score"] = round(composite, 2)
     return scores

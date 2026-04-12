@@ -293,3 +293,110 @@ class TestFinalScoreFormula:
         """compute_final_score(...) without a config should still work."""
         final = compute_final_score(80.0, 70.0, 90.0)
         assert 0.0 <= final <= 100.0
+
+
+# ============================================================================
+# Per-scanner weights (PillarConfig.scanner_weights)
+# ============================================================================
+
+
+class TestPerScannerWeights:
+    def test_scanner_specific_weights(self):
+        """BREAKOUT scanner uses UB-heavy weights when configured."""
+        from app.core.schemas import PillarWeights
+
+        config = PillarConfig(
+            scanner_weights={
+                "BREAKOUT": PillarWeights(
+                    premium_leverage=0.15,
+                    underlying_behavior=0.80,
+                    setup_quality=0.05,
+                ),
+            }
+        )
+        # Global: 0.25*80 + 0.35*70 + 0.40*90 = 80.5
+        global_score = compute_final_score(80.0, 70.0, 90.0, config)
+        assert global_score == pytest.approx(80.5, abs=0.01)
+
+        # BREAKOUT: 0.15*80 + 0.80*70 + 0.05*90 = 12+56+4.5 = 72.5
+        breakout_score = compute_final_score(
+            80.0, 70.0, 90.0, config, scanner_source="BREAKOUT"
+        )
+        assert breakout_score == pytest.approx(72.5, abs=0.01)
+
+    def test_scanner_suffix_stripped(self):
+        """Scanner names with _SCANNER suffix are normalised."""
+        from app.core.schemas import PillarWeights
+
+        config = PillarConfig(
+            scanner_weights={
+                "UNUSUAL_VOLUME": PillarWeights(
+                    premium_leverage=0.45,
+                    underlying_behavior=0.15,
+                    setup_quality=0.40,
+                ),
+            }
+        )
+        score = compute_final_score(
+            80.0, 70.0, 90.0, config, scanner_source="UNUSUAL_VOLUME_SCANNER"
+        )
+        # 0.45*80 + 0.15*70 + 0.40*90 = 36+10.5+36 = 82.5
+        assert score == pytest.approx(82.5, abs=0.01)
+
+    def test_unknown_scanner_falls_back_to_global(self):
+        """Unknown scanner → global weights."""
+        from app.core.schemas import PillarWeights
+
+        config = PillarConfig(
+            scanner_weights={
+                "BREAKOUT": PillarWeights(
+                    premium_leverage=0.15,
+                    underlying_behavior=0.80,
+                    setup_quality=0.05,
+                ),
+            }
+        )
+        score = compute_final_score(
+            80.0, 70.0, 90.0, config, scanner_source="SOME_NEW_SCANNER"
+        )
+        # Falls back to global: 0.25*80 + 0.35*70 + 0.40*90 = 80.5
+        assert score == pytest.approx(80.5, abs=0.01)
+
+    def test_none_scanner_uses_global(self):
+        """None scanner_source → global weights."""
+        from app.core.schemas import PillarWeights
+
+        config = PillarConfig(
+            scanner_weights={
+                "BREAKOUT": PillarWeights(
+                    premium_leverage=0.15,
+                    underlying_behavior=0.80,
+                    setup_quality=0.05,
+                ),
+            }
+        )
+        score = compute_final_score(80.0, 70.0, 90.0, config, scanner_source=None)
+        assert score == pytest.approx(80.5, abs=0.01)
+
+    def test_scanner_weights_validation(self):
+        """scanner_weights entries must sum to 1.0."""
+        from app.core.schemas import PillarWeights
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PillarConfig(
+                scanner_weights={
+                    "BREAKOUT": PillarWeights(
+                        premium_leverage=0.50,
+                        underlying_behavior=0.80,
+                        setup_quality=0.05,
+                    ),
+                }
+            )
+
+    def test_scanner_weights_none_deserializes(self):
+        """PillarConfig with scanner_weights=None deserializes correctly."""
+        config = PillarConfig(scanner_weights=None)
+        assert config.scanner_weights is None
+        # get_weights still returns global
+        assert config.get_weights("BREAKOUT") is config.weights

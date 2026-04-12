@@ -938,6 +938,7 @@ class PillarConfig(OSSBaseModel):
     """
 
     weights: PillarWeights = Field(default_factory=PillarWeights)
+    scanner_weights: Optional[dict[str, PillarWeights]] = None
     premium_leverage: PillarConfigV2 = Field(
         default_factory=lambda: _default_pillar_config_v2("premium_leverage")
     )
@@ -947,6 +948,17 @@ class PillarConfig(OSSBaseModel):
     setup_quality: PillarConfigV2 = Field(
         default_factory=lambda: _default_pillar_config_v2("setup_quality")
     )
+
+    def get_weights(self, scanner_source: Optional[str] = None) -> PillarWeights:
+        """Return per-scanner weights if available, else global weights.
+
+        Scanner keys are normalized: uppercase, with trailing '_SCANNER' stripped.
+        """
+        if scanner_source and self.scanner_weights:
+            key = scanner_source.upper().removesuffix("_SCANNER")
+            if key in self.scanner_weights:
+                return self.scanner_weights[key]
+        return self.weights
 
     @model_validator(mode="after")
     def _validate_pillar_ids(self) -> "PillarConfig":

@@ -235,6 +235,72 @@ class TestFinalScoreCalculation:
         assert final == 0.0
 
 
+class TestPerScannerWeightsDecision:
+    """Test per-scanner weight selection in DecisionCalculator."""
+
+    def test_per_scanner_weights_via_pillar_config(self):
+        """DecisionCalculator with pillar_config uses scanner-specific weights."""
+        from app.core.schemas import PillarConfig
+
+        config = PillarConfig(
+            scanner_weights={
+                "BREAKOUT": PillarWeights(
+                    premium_leverage=0.15,
+                    underlying_behavior=0.80,
+                    setup_quality=0.05,
+                ),
+            }
+        )
+        calculator = DecisionCalculator(pillar_config=config)
+
+        # Global weights: 0.25*80+0.35*70+0.40*90=80.5
+        global_score = calculator.compute_final_score(80.0, 70.0, 90.0)
+        assert global_score == pytest.approx(80.5, abs=0.01)
+
+        # BREAKOUT weights: 0.15*80+0.80*70+0.05*90=72.5
+        breakout_score = calculator.compute_final_score(
+            80.0, 70.0, 90.0, scanner_source="BREAKOUT"
+        )
+        assert breakout_score == pytest.approx(72.5, abs=0.01)
+
+    def test_decision_context_populates_scanner_source(self):
+        """from_evaluation_and_results sets scanner_source from evaluation."""
+        eval_obj = make_evaluation(scanner_source="BREAKOUT")
+        ctx = DecisionContext.from_evaluation_and_results(eval_obj, [])
+        assert ctx.scanner_source == "BREAKOUT"
+
+    def test_compute_decision_uses_scanner_source(self):
+        """compute_decision uses ctx.scanner_source for weight selection."""
+        from app.core.schemas import PillarConfig
+        from app.decision.calculator import DecisionContext
+
+        config = PillarConfig(
+            scanner_weights={
+                "UNUSUAL_VOLUME": PillarWeights(
+                    premium_leverage=0.45,
+                    underlying_behavior=0.15,
+                    setup_quality=0.40,
+                ),
+            }
+        )
+        calculator = DecisionCalculator(pillar_config=config)
+
+        ctx = DecisionContext(
+            evaluation_id="test-001",
+            underlying_ticker="AAPL",
+            option_type="CALL",
+            spread_pct=3.0,
+            policy_version="3.1.0",
+            premium_leverage_score=80.0,
+            underlying_behavior_score=70.0,
+            setup_quality_score=90.0,
+            scanner_source="UNUSUAL_VOLUME",
+        )
+        decision = calculator.compute_decision(ctx)
+        # 0.45*80+0.15*70+0.40*90=82.5
+        assert decision.final_score == pytest.approx(82.5, abs=0.01)
+
+
 # =============================================================================
 # Test DecisionCalculator - Verdict Determination
 # =============================================================================

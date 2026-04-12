@@ -270,11 +270,15 @@ def score_one_position(
             scores["pillar_underlying_behavior"] = round(r.score, 2)
         elif pid == "SETUP_QUALITY":
             scores["pillar_setup_quality"] = round(r.score, 2)
+    p = decimal_to_python(position)
+    scanner_list = p.get("scanner_list") or []
+    scanner_source = p.get("scanner_source") or (scanner_list[0] if scanner_list else None)
     composite = compute_final_score(
         scores.get("pillar_premium_leverage", 50),
         scores.get("pillar_underlying_behavior", 50),
         scores.get("pillar_setup_quality", 50),
         pillar_config,
+        scanner_source=scanner_source,
     )
     scores["conviction_score"] = round(composite, 2)
     return scores

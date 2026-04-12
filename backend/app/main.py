@@ -502,6 +502,7 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
                 thesis_config=policy_config.thesis,
                 persist_decisions=True,
                 check_concentration=True,
+                pillar_config=policy_config.pillars,
                 generate_theses=False,
             )
 

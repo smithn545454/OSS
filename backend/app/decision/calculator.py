@@ -50,6 +50,9 @@ class DecisionContext:
     all_gates_passed: bool = True
     failed_gates: list[str] = field(default_factory=list)
 
+    # Scanner source for per-scanner weight lookup
+    scanner_source: Optional[str] = None
+
     @classmethod
     def from_evaluation_and_results(
         cls,
@@ -95,6 +98,7 @@ class DecisionContext:
             setup_quality_score=sq_score,
             all_gates_passed=all_gates_passed,
             failed_gates=failed_gates,
+            scanner_source=evaluation.scanner_source,
         )
 
 
@@ -105,33 +109,43 @@ class DecisionCalculator:
         self,
         decision_config: Optional[DecisionConfig] = None,
         pillar_weights: Optional[PillarWeights] = None,
+        pillar_config: Optional["PillarConfig"] = None,
     ) -> None:
         """Initialize the decision calculator.
 
         Args:
             decision_config: Decision threshold configuration
             pillar_weights: Weights for combining pillar scores. If None,
-                uses PillarWeights defaults (0.375 / 0.455 / 0.170).
+                uses PillarWeights defaults.
+            pillar_config: Full PillarConfig for per-scanner weight lookup.
+                When provided, scanner_source on DecisionContext selects
+                the appropriate weights. Falls back to pillar_weights/global.
         """
         self._config = decision_config or DecisionConfig()
         self._weights = pillar_weights or PillarWeights()
+        self._pillar_config = pillar_config
 
     def compute_final_score(
         self,
         premium_leverage: float,
         underlying_behavior: float,
         setup_quality: float,
+        scanner_source: Optional[str] = None,
     ) -> float:
-        """Compute final weighted composite score (Policy v3.0.0).
+        """Compute final weighted composite score.
 
-        composite = w_pl × premium_leverage
-                  + w_ub × underlying_behavior
-                  + w_sq × setup_quality
+        When pillar_config has per-scanner overrides and scanner_source is
+        provided, uses scanner-specific weights. Otherwise falls back to
+        the global weights passed at init.
         """
+        if self._pillar_config:
+            weights = self._pillar_config.get_weights(scanner_source)
+        else:
+            weights = self._weights
         final = (
-            self._weights.premium_leverage * premium_leverage
-            + self._weights.underlying_behavior * underlying_behavior
-            + self._weights.setup_quality * setup_quality
+            weights.premium_leverage * premium_leverage
+            + weights.underlying_behavior * underlying_behavior
+            + weights.setup_quality * setup_quality
         )
         return max(0.0, min(100.0, final))
 
@@ -254,6 +268,7 @@ class DecisionCalculator:
             ctx.premium_leverage_score,
             ctx.underlying_behavior_score,
             ctx.setup_quality_score,
+            scanner_source=ctx.scanner_source,
         )
 
         verdict, primary_reason = self.determine_verdict(

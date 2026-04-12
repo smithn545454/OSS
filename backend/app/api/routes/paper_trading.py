@@ -2122,7 +2122,10 @@ async def rescore_paper_positions(
             new_ub = round(underlying_behavior.score, 2)
             new_sq = round(setup_quality.score, 2)
             new_final = round(
-                compute_final_score(new_pl, new_ub, new_sq, pillar_config), 2
+                compute_final_score(
+                    new_pl, new_ub, new_sq, pillar_config,
+                    scanner_source=pos.scanner_source,
+                ), 2
             )
 
             # Collect before/after samples

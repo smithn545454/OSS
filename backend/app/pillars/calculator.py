@@ -212,31 +212,27 @@ def compute_final_score(
     underlying_behavior: float,
     setup_quality: float,
     config: Optional[PillarConfig] = None,
+    scanner_source: Optional[str] = None,
 ) -> float:
     """Compute final weighted composite score from pillar scores.
 
-    Policy v3.1.0 default weights:
-        composite = 0.25 × premium_leverage
-                  + 0.35 × underlying_behavior
-                  + 0.40 × setup_quality (Setup Pocket)
-
-    Weights come from `PillarConfig.weights`. v3.1.0 promotes Setup Pocket
-    to the dominant pillar so that the conviction ranking concentrates in the
-    pockets where clean home runs occur, while Premium Leverage / Underlying
-    Behavior continue to filter trade quality within each pocket.
+    When ``scanner_source`` is provided and the config contains per-scanner
+    weight overrides, those override the global weights. This lets each
+    scanner emphasise the pillars that matter most for its signal type.
 
     Args:
         premium_leverage: Pillar score (0-100)
         underlying_behavior: Pillar score (0-100)
         setup_quality: Pillar score (0-100)
         config: PillarConfig with weight configuration
+        scanner_source: Scanner name for per-scanner weight lookup
 
     Returns:
         Final weighted composite score (0-100)
     """
     if config is None:
         config = PillarConfig()
-    weights = config.weights
+    weights = config.get_weights(scanner_source)
 
     final = (
         weights.premium_leverage * premium_leverage
