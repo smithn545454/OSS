@@ -204,6 +204,7 @@ async def create_position_from_evaluation(
                 "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
                 "days_to_earnings", "atr14_pct", "rs_20d",
                 "feasibility_ratio", "rv20",
+                "adx_14", "plus_di", "minus_di",
             ):
                 if fv.value is not None:
                     vol_features[fv.feature_name] = fv.value
@@ -233,6 +234,9 @@ async def create_position_from_evaluation(
     position.entry_atr14_pct = vol_features.get("atr14_pct")
     position.entry_rs_20d = vol_features.get("rs_20d")
     position.entry_feasibility_ratio = vol_features.get("feasibility_ratio")
+    position.entry_adx_14 = vol_features.get("adx_14")
+    position.entry_plus_di = vol_features.get("plus_di")
+    position.entry_minus_di = vol_features.get("minus_di")
 
     # Match setup rules at position creation time
     try:

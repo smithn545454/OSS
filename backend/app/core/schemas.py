@@ -490,6 +490,9 @@ class PaperPosition(OSSBaseModel):
     entry_atr14_pct: Optional[float] = None
     entry_rs_20d: Optional[float] = None
     entry_feasibility_ratio: Optional[float] = None
+    entry_adx_14: Optional[float] = None
+    entry_plus_di: Optional[float] = None
+    entry_minus_di: Optional[float] = None
 
     # Thesis-driven exit thresholds (applied when thesis is generated)
     thesis_tp1_pct: Optional[float] = None
