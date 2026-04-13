@@ -2034,12 +2034,9 @@ async def _fire_slack_alerts(
 
         # Compute theta-adjusted EV
         theta_ev = calculate_theta_adjusted_ev(
-            delta=ev.delta or 0,
             theta=ev.theta or 0,
-            mid=ev.mid or 0,
             iv=ev.iv or 0,
-            underlying_price=ev.underlying_price or 0,
-            dte=ev.dte or 0,
+            rv20=getattr(ev, "rv20", None),
         )
 
         # Compute conviction score
