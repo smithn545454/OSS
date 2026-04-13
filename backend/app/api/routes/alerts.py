@@ -28,6 +28,10 @@ class AlertConfigUpdate(BaseModel):
     setup_rule_filter_ids: Optional[list[str]] = None
     verdicts: Optional[list[str]] = None
     tier_1_bypass: Optional[bool] = None
+    max_premium: Optional[float] = None
+    cheap_gem_enabled: Optional[bool] = None
+    cheap_gem_threshold: Optional[int] = None
+    cheap_gem_max_premium: Optional[float] = None
     per_scanner_thresholds: Optional[dict[str, int]] = None
     excluded_scanners: Optional[list[str]] = None
 
