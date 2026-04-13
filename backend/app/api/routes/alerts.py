@@ -28,6 +28,8 @@ class AlertConfigUpdate(BaseModel):
     setup_rule_filter_ids: Optional[list[str]] = None
     verdicts: Optional[list[str]] = None
     tier_1_bypass: Optional[bool] = None
+    per_scanner_thresholds: Optional[dict[str, int]] = None
+    excluded_scanners: Optional[list[str]] = None
 
 
 class TestAlertRequest(BaseModel):
@@ -72,6 +74,30 @@ async def update_alert_config(update: AlertConfigUpdate) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="daily_cap must be >= 1")
     if merged.get("cooldown_minutes", 30) < 1:
         raise HTTPException(status_code=400, detail="cooldown_minutes must be >= 1")
+
+    # Validate per-scanner thresholds
+    valid_scanners = {
+        "BREAKOUT", "BREAKDOWN", "UNUSUAL_VOLUME",
+        "CHEAP_OPTIONS", "COMPRESSION_EXPANSION",
+    }
+    per_scanner = merged.get("per_scanner_thresholds", {})
+    for scanner, thresh in per_scanner.items():
+        if scanner not in valid_scanners:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid scanner '{scanner}'. Valid: {sorted(valid_scanners)}",
+            )
+        if not 0 <= thresh <= 100:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Threshold for {scanner} must be 0-100, got {thresh}",
+            )
+    for scanner in merged.get("excluded_scanners", []):
+        if scanner not in valid_scanners:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid excluded scanner '{scanner}'. Valid: {sorted(valid_scanners)}",
+            )
 
     # Save to DynamoDB
     saved = await save_alert_config(merged)

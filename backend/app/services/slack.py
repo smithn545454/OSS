@@ -43,6 +43,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "cheap_gem_threshold": 60,
     "cheap_gem_max_premium": 1.50,
     "tier_1_bypass": True,
+    "per_scanner_thresholds": {},
+    "excluded_scanners": [],
 }
 
 
@@ -249,6 +251,7 @@ class SlackAlertService:
         matched_rule_ids: list[str] | None = None,
         premium: float = 0,
         quality_tier: str | None = None,
+        scanners: list[str] | None = None,
     ) -> tuple[bool, str | None]:
         """Determine if an alert should be sent.
 
@@ -294,8 +297,20 @@ class SlackAlertService:
 
         # --- Soft checks (skipped for Tier 1) ---
 
-        # Check score threshold (with cheap gem fallback)
+        # Check excluded scanners
+        excluded = config.get("excluded_scanners", [])
+        if scanners and excluded:
+            if all(s in excluded for s in scanners):
+                return False, f"Scanner(s) {scanners} excluded from alerts"
+
+        # Check score threshold (with per-scanner overrides and cheap gem fallback)
         threshold = config.get("score_threshold", 75)
+        per_scanner = config.get("per_scanner_thresholds", {})
+        if scanners and per_scanner:
+            overrides = [per_scanner[s] for s in scanners if s in per_scanner]
+            if overrides:
+                threshold = min(overrides)
+
         is_cheap_gem = False
         if conviction_score < threshold:
             # Check if qualifies as a cheap gem (lower threshold for cheap options)
@@ -547,6 +562,7 @@ class SlackAlertService:
             matched_rule_ids=matched_rule_ids,
             premium=premium,
             quality_tier=quality_tier,
+            scanners=scanners,
         )
 
         if not should_send:

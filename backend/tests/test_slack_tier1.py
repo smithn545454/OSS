@@ -195,3 +195,115 @@ class TestNonTier1Unchanged:
             )
         assert result is True
         assert reason is None
+
+
+class TestPerScannerThresholds:
+    """Tests for per-scanner threshold overrides and excluded scanners."""
+
+    @pytest.mark.asyncio
+    async def test_per_scanner_threshold_overrides_global(self):
+        """BREAKOUT at 72 passes when per_scanner has BREAKOUT:70, global is 75."""
+        svc = _make_service(_make_config(
+            score_threshold=75,
+            per_scanner_thresholds={"BREAKOUT": 70},
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=72, urgency="patient", convergence=1,
+                contract_id="AAPL-C-200", scanners=["BREAKOUT"],
+            )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_per_scanner_threshold_falls_back_to_global(self):
+        """UV at 72 fails when only BREAKOUT has override, global is 75."""
+        svc = _make_service(_make_config(
+            score_threshold=75,
+            per_scanner_thresholds={"BREAKOUT": 70},
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=72, urgency="patient", convergence=1,
+                contract_id="AAPL-C-200", scanners=["UNUSUAL_VOLUME"],
+            )
+        assert result is False
+        assert "Score" in reason
+
+    @pytest.mark.asyncio
+    async def test_excluded_scanner_blocked(self):
+        """COMPRESSION_EXPANSION blocked when in excluded_scanners."""
+        svc = _make_service(_make_config(
+            score_threshold=50,
+            excluded_scanners=["COMPRESSION_EXPANSION"],
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=90, urgency="act_now", convergence=3,
+                contract_id="AAPL-C-200", scanners=["COMPRESSION_EXPANSION"],
+            )
+        assert result is False
+        assert "excluded" in reason
+
+    @pytest.mark.asyncio
+    async def test_multi_scanner_uses_lowest_threshold(self):
+        """Convergent BREAKOUT+UV uses BREAKOUT's lower threshold."""
+        svc = _make_service(_make_config(
+            score_threshold=80,
+            per_scanner_thresholds={"BREAKOUT": 65, "UNUSUAL_VOLUME": 75},
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=68, urgency="patient", convergence=2,
+                contract_id="AAPL-C-200", scanners=["BREAKOUT", "UNUSUAL_VOLUME"],
+            )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_excluded_scanner_not_blocked_when_other_scanner_present(self):
+        """Convergent BREAKOUT+COMP passes when only COMP is excluded."""
+        svc = _make_service(_make_config(
+            score_threshold=70,
+            excluded_scanners=["COMPRESSION_EXPANSION"],
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=75, urgency="patient", convergence=2,
+                contract_id="AAPL-C-200", scanners=["BREAKOUT", "COMPRESSION_EXPANSION"],
+            )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_tier1_still_bypasses_with_per_scanner(self):
+        """Tier 1 bypass still works even when per-scanner thresholds are set."""
+        svc = _make_service(_make_config(
+            score_threshold=90,
+            per_scanner_thresholds={"BREAKOUT": 80},
+        ))
+        result, reason = await svc.should_alert(
+            conviction_score=60, urgency="patient", convergence=1,
+            contract_id="AAPL-C-200", quality_tier="TIER_1",
+            scanners=["BREAKOUT"],
+        )
+        assert result is True
+        assert reason == "tier_1"
+
+    @pytest.mark.asyncio
+    async def test_no_scanners_uses_global_threshold(self):
+        """When scanners is None, global threshold applies."""
+        svc = _make_service(_make_config(
+            score_threshold=75,
+            per_scanner_thresholds={"BREAKOUT": 60},
+            require_urgency_or_convergence=False,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                conviction_score=72, urgency="patient", convergence=1,
+                contract_id="AAPL-C-200", scanners=None,
+            )
+        assert result is False
+        assert "Score" in reason

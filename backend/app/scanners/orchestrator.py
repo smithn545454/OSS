@@ -1933,7 +1933,12 @@ async def _fire_slack_alerts(
     # Build lookup: opportunity_id → scanner types
     opp_scanners: dict[str, list[str]] = {}
     for opp in filtered_opportunities:
-        scanner_types = [t.scanner_type.value for t in opp.scanner_triggers]
+        scanner_types = [
+                t.scanner_type.value
+                if hasattr(t.scanner_type, "value")
+                else str(t.scanner_type)
+                for t in opp.scanner_triggers
+            ]
         opp_scanners[opp.opportunity_id] = scanner_types
 
     # Build lookup: evaluation_id → trade thesis text
