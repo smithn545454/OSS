@@ -3,11 +3,12 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEdgeBriefing } from '@/hooks/useApi'
 import type { DimensionStats, EdgeInsight } from '@/lib/types'
 import clsx from 'clsx'
-import { Brain, TrendingUp, TrendingDown, Zap, Target, Layers, Clock, Lightbulb, BarChart3 } from 'lucide-react'
+import { Brain, TrendingUp, TrendingDown, Zap, Target, Layers, Clock, Lightbulb, BarChart3, BookOpen } from 'lucide-react'
 import ScannerAnalysisPanel from '@/components/ScannerAnalysisPanel'
 import FeatureImportance from '@/components/calibration/FeatureImportance'
+import DiaryPanel from '@/components/DiaryPanel'
 
-type IntelTab = 'edge-briefing' | 'feature-importance'
+type IntelTab = 'edge-briefing' | 'feature-importance' | 'diary'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -493,6 +494,7 @@ export default function Intelligence() {
   const tabs: { id: IntelTab; label: string; icon: React.ElementType }[] = [
     { id: 'edge-briefing', label: 'Edge Briefing', icon: Brain },
     { id: 'feature-importance', label: 'Feature Importance', icon: BarChart3 },
+    { id: 'diary', label: 'Diary', icon: BookOpen },
   ]
 
   return (
@@ -537,6 +539,9 @@ export default function Intelligence() {
 
       {/* Feature Importance Tab */}
       {tab === 'feature-importance' && <FeatureImportance />}
+
+      {/* Diary Tab — Phase 1 Nightly Scribe */}
+      {tab === 'diary' && <DiaryPanel />}
 
       {/* Edge Briefing Tab */}
       {tab === 'edge-briefing' && <>

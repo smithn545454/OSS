@@ -477,6 +477,56 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
+        # 19. Diary table (Phase 1 — Nightly Scribe intelligence artifacts)
+        # PK=DATE#YYYY-MM-DD, SK=ENTRY#{entry_type}
+        # GSI1: ENTRY_TYPE#{entry_type} + date, for date-ordered listing by type
+        self.diary_table = dynamodb.Table(
+            self,
+            "DiaryTable",
+            table_name=f"{self.table_prefix}-diary",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.diary_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
+        # ============================================================
+        # Intelligence S3 Bucket (Phase 1+ narrative markdown artifacts)
+        # ============================================================
+        self.intelligence_bucket = s3.Bucket(
+            self,
+            "IntelligenceBucket",
+            bucket_name=f"{self.table_prefix}-intelligence-{self.account}",
+            removal_policy=removal_policy,
+            auto_delete_objects=env_name != "prod",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            versioned=True,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    transitions=[
+                        s3.Transition(
+                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
+                            transition_after=Duration.days(90),
+                        )
+                    ]
+                )
+            ],
+        )
+
         # Collect all tables for permissions
         self.all_tables = [
             self.policies_table,
@@ -499,6 +549,7 @@ class DatabaseStack(Stack):
             self.calibration_reports_table,
             self.real_trades_table,
             self.stock_summaries_table,
+            self.diary_table,
         ]
 
         # Outputs
@@ -516,4 +567,12 @@ class DatabaseStack(Stack):
             value=self.backtest_bucket.bucket_name,
             description="Backtest data S3 bucket name",
             export_name=f"{project_name}-{env_name}-backtest-bucket",
+        )
+
+        CfnOutput(
+            self,
+            "IntelligenceBucketName",
+            value=self.intelligence_bucket.bucket_name,
+            description="Intelligence narrative S3 bucket name",
+            export_name=f"{project_name}-{env_name}-intelligence-bucket",
         )

@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from app.core.schemas import (
     Decision,
+    DiaryEntry,
     Evaluation,
     FeatureValue,
     GateResult,
@@ -48,6 +49,7 @@ SCAN_STATUS_TABLE = "scan-status"
 SP500_TICKERS_TABLE = "sp500-tickers"
 REAL_TRADES_TABLE = "real-trades"
 STOCK_SUMMARIES_TABLE = "stock-summaries"
+DIARY_TABLE = "diary"
 
 
 class PolicyTable:
@@ -2310,3 +2312,87 @@ class StockSummaryTable:
             item.pop("SK", None)
             return StockSummary(**item)
         return None
+
+
+class DiaryTable:
+    """Operations for the diary table (Phase 1 — Nightly Scribe).
+
+    Layout:
+      PK    = DATE#{YYYY-MM-DD}       (the market date the entry covers)
+      SK    = ENTRY#{entry_type}      (e.g. ENTRY#nightly)
+      GSI1PK = ENTRY_TYPE#{entry_type}
+      GSI1SK = {YYYY-MM-DD}           (so entries of a type list in date order)
+    """
+
+    TABLE = DIARY_TABLE
+
+    @staticmethod
+    async def put(entry: DiaryEntry) -> None:
+        db = get_dynamodb()
+        item = entry.to_dynamodb_item()
+        item["PK"] = f"DATE#{entry.date}"
+        item["SK"] = f"ENTRY#{entry.entry_type}"
+        item["GSI1PK"] = f"ENTRY_TYPE#{entry.entry_type}"
+        item["GSI1SK"] = entry.date
+        await db.put_item(DiaryTable.TABLE, item)
+
+    @staticmethod
+    async def get(date: str, entry_type: str = "nightly") -> Optional[DiaryEntry]:
+        db = get_dynamodb()
+        item = await db.get_item(
+            DiaryTable.TABLE,
+            f"DATE#{date}",
+            f"ENTRY#{entry_type}",
+        )
+        if not item:
+            return None
+        for key in ("PK", "SK", "GSI1PK", "GSI1SK"):
+            item.pop(key, None)
+        return DiaryEntry(**item)
+
+    @staticmethod
+    async def list_by_type(
+        entry_type: str = "nightly", limit: int = 30
+    ) -> list[DiaryEntry]:
+        """List entries of a given type in reverse-chronological order."""
+        db = get_dynamodb()
+        items = await db.query(
+            DiaryTable.TABLE,
+            f"ENTRY_TYPE#{entry_type}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        entries: list[DiaryEntry] = []
+        for item in items:
+            for key in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(key, None)
+            entries.append(DiaryEntry(**item))
+        return entries
+
+    @staticmethod
+    async def list_by_date_range(
+        start_date: str,
+        end_date: str,
+        entry_type: str = "nightly",
+        limit: int = 100,
+    ) -> list[DiaryEntry]:
+        """List entries of a given type between start_date and end_date (inclusive).
+
+        Dates are YYYY-MM-DD strings. Uses GSI1 BETWEEN on GSI1SK.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            DiaryTable.TABLE,
+            f"ENTRY_TYPE#{entry_type}",
+            sk_condition={"between": (start_date, end_date)},
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        entries: list[DiaryEntry] = []
+        for item in items:
+            for key in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(key, None)
+            entries.append(DiaryEntry(**item))
+        return entries

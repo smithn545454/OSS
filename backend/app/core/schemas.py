@@ -575,6 +575,32 @@ class PipelineRunCreate(BaseModel):
 
 
 # ============================================================================
+# Diary Entry (Phase 1 — Nightly Scribe intelligence artifact)
+# ============================================================================
+
+
+class DiaryEntry(OSSBaseModel):
+    """Index row for an intelligence narrative stored as markdown in S3.
+
+    The full narrative lives at ``s3_key`` in the intelligence bucket; this
+    model is the Dynamo-side pointer + structured metrics for quick listing.
+    """
+
+    model_config = ConfigDict(frozen=False, use_enum_values=True)
+
+    date: str  # YYYY-MM-DD (market date the entry describes)
+    entry_type: str = "nightly"  # future: "weekly_summary", etc.
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    summary: str  # <=200 char headline
+    s3_key: str  # e.g. "diary/2026-04-14/nightly.md"
+    metrics: dict[str, int] = Field(default_factory=dict)
+    policy_version: Optional[str] = None
+    regime_tag: Optional[str] = None  # reserved for Phase 2
+
+
+# ============================================================================
 # Policy Configuration (Section 7 & Appendix B)
 # ============================================================================
 

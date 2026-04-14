@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # Backtest S3 bucket (set via BACKTEST_S3_BUCKET env var)
     backtest_s3_bucket: Optional[str] = None
 
+    # Intelligence narrative bucket (set via INTELLIGENCE_S3_BUCKET env var)
+    # Used by the Nightly Scribe and future intelligence agents for markdown artifacts.
+    intelligence_s3_bucket: Optional[str] = None
+
     # Slack webhook for opportunity alerts (optional)
     slack_webhook_url: Optional[str] = None
 

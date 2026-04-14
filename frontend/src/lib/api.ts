@@ -1071,5 +1071,60 @@ export async function getFeatureImportanceNarrative(
   return fetchApi(`/api/paper-trading/feature-importance/${analysisId}/narrative`)
 }
 
+// ============================================================================
+// Intelligence — Nightly Scribe Diary (Phase 1)
+// ============================================================================
+
+export interface DiaryEntrySummary {
+  date: string
+  entry_type: string
+  created_at: string
+  summary: string
+  s3_key: string
+  metrics: Record<string, number>
+  policy_version: string | null
+  regime_tag: string | null
+}
+
+export interface DiaryListResponse {
+  entries: DiaryEntrySummary[]
+  count: number
+}
+
+export interface DiaryDetailResponse {
+  entry: DiaryEntrySummary
+  markdown: string | null
+}
+
+export async function listDiaryEntries(
+  params: { from?: string; to?: string; limit?: number; entryType?: string } = {}
+): Promise<DiaryListResponse> {
+  const q = new URLSearchParams()
+  if (params.from) q.set('from', params.from)
+  if (params.to) q.set('to', params.to)
+  if (params.limit) q.set('limit', String(params.limit))
+  if (params.entryType) q.set('entry_type', params.entryType)
+  const qs = q.toString()
+  return fetchApi<DiaryListResponse>(
+    `/api/intelligence/diary${qs ? `?${qs}` : ''}`
+  )
+}
+
+export async function getDiaryEntry(
+  date: string,
+  entryType: string = 'nightly'
+): Promise<DiaryDetailResponse> {
+  return fetchApi<DiaryDetailResponse>(
+    `/api/intelligence/diary/${encodeURIComponent(date)}?entry_type=${encodeURIComponent(entryType)}`
+  )
+}
+
+export async function generateDiaryEntry(
+  date?: string
+): Promise<{ status: string; entry: DiaryEntrySummary }> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : ''
+  return fetchApi(`/api/intelligence/diary/generate${qs}`, { method: 'POST' })
+}
+
 // Export the ApiError for error handling
 export { ApiError }

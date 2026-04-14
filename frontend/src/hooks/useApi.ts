@@ -59,6 +59,11 @@ export const queryKeys = {
   watchInsights: (sinceDays: number) => ['evaluations', 'watch', 'insights', sinceDays] as const,
   contractQuotes: (contractIds: string[]) => ['market', 'quotes', contractIds] as const,
   stockTechnicals: (ticker: string) => ['market', 'stock', ticker, 'technicals'] as const,
+  // Intelligence diary keys (Phase 1 — Nightly Scribe)
+  diaryEntries: (params: { from?: string; to?: string; limit?: number; entryType?: string }) =>
+    ['intelligence', 'diary', 'list', params] as const,
+  diaryEntry: (date: string, entryType: string) =>
+    ['intelligence', 'diary', 'entry', date, entryType] as const,
 }
 
 // Health
@@ -1226,6 +1231,39 @@ export function useGenerateFeatureNarrative() {
     mutationFn: (analysisId: string) => api.generateFeatureImportanceNarrative(analysisId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['feature-importance'] })
+    },
+  })
+}
+
+// Intelligence — Diary (Phase 1)
+export function useDiaryEntries(
+  params: { from?: string; to?: string; limit?: number; entryType?: string } = {}
+) {
+  return useQuery({
+    queryKey: queryKeys.diaryEntries(params),
+    queryFn: () => api.listDiaryEntries(params),
+  })
+}
+
+export function useDiaryEntry(date: string | null, entryType: string = 'nightly') {
+  return useQuery({
+    queryKey: queryKeys.diaryEntry(date ?? '', entryType),
+    queryFn: () => api.getDiaryEntry(date as string, entryType),
+    enabled: !!date,
+  })
+}
+
+export function useGenerateDiaryEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (date?: string) => api.generateDiaryEntry(date),
+    onSuccess: (_data, date) => {
+      queryClient.invalidateQueries({ queryKey: ['intelligence', 'diary', 'list'] })
+      if (date) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.diaryEntry(date, 'nightly'),
+        })
+      }
     },
   })
 }

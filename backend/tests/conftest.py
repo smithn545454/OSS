@@ -507,6 +507,15 @@ def moto_dynamodb():
             TableName=f"{table_prefix}-stock-summaries", **pk_sk_schema
         )
 
+        # Diary: GSI1 for listing entries by type in date order
+        db.create_table(
+            TableName=f"{table_prefix}-diary",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
+            GlobalSecondaryIndexes=gsi1,
+            BillingMode="PAY_PER_REQUEST",
+        )
+
         # Earnings cache: ticker-keyed (no PK/SK pattern)
         db.create_table(
             TableName=f"{table_prefix}-earnings-cache",

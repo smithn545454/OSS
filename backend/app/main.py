@@ -27,6 +27,7 @@ from app.api.routes import backtest as backtest_routes
 from app.api.routes import calibration as calibration_routes
 from app.api.routes import evaluations as evaluations_routes
 from app.api.routes import health as health_routes
+from app.api.routes import intelligence as intelligence_routes
 from app.api.routes import llm as llm_routes
 from app.api.routes import market as market_routes
 from app.api.routes import observability as observability_routes
@@ -91,6 +92,9 @@ def create_app() -> FastAPI:
     app.include_router(alerts_routes.router, prefix="/api/alerts", tags=["Alerts"])
     app.include_router(backtest_routes.router, prefix="/api/backtest", tags=["Backtest"])
     app.include_router(real_trades_routes.router, prefix="/api/trades", tags=["Real Trades"])
+    app.include_router(
+        intelligence_routes.router, prefix="/api/intelligence", tags=["Intelligence"]
+    )
 
     return app
 
@@ -1322,6 +1326,39 @@ async def _run_stock_summary_worker(event: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "ticker": ticker, "error": str(e)}
 
 
+async def _run_nightly_scribe(target_date_str: Optional[str]) -> dict[str, Any]:
+    """Dispatch the Nightly Scribe intelligence agent.
+
+    ``target_date_str`` is an optional YYYY-MM-DD override. When omitted, the
+    scribe writes the entry for today (UTC).
+    """
+    from datetime import date as _date_cls
+
+    from app.intelligence.scribe import run_nightly_scribe
+
+    target_date = None
+    if target_date_str:
+        try:
+            target_date = _date_cls.fromisoformat(target_date_str)
+        except ValueError:
+            logger.warning(
+                f"Invalid nightly_scribe date '{target_date_str}'; falling back to today"
+            )
+
+    try:
+        entry = await run_nightly_scribe(target_date=target_date)
+        return {
+            "status": "ok",
+            "date": entry.date,
+            "s3_key": entry.s3_key,
+            "summary": entry.summary,
+            "metrics": entry.metrics,
+        }
+    except Exception as e:
+        logger.exception(f"Nightly scribe failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
 def handler(event: dict[str, Any], context: Any) -> Any:
     """Lambda handler that routes between API requests and scheduled events.
 
@@ -1463,6 +1500,14 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             ticker = event.get("ticker", "")
             logger.info(f"Received stock_summary_worker event (ticker={ticker})")
             return asyncio.run(_run_stock_summary_worker(event))
+
+        elif action == "nightly_scribe":
+            # Phase 1 intelligence agent — writes a dated journal entry after close
+            target_date_str = event.get("date")  # optional YYYY-MM-DD override
+            logger.info(
+                f"Received nightly_scribe event (date={target_date_str or 'today'})"
+            )
+            return asyncio.run(_run_nightly_scribe(target_date_str))
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

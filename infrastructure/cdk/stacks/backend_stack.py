@@ -129,6 +129,22 @@ class BackendStack(Stack):
             )
         )
 
+        # Grant S3 permissions for intelligence bucket (Phase 1 — Nightly Scribe)
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:ListBucket",
+                ],
+                resources=[
+                    f"arn:aws:s3:::{project_name}-{env_name}-intelligence-{self.account}",
+                    f"arn:aws:s3:::{project_name}-{env_name}-intelligence-{self.account}/*",
+                ],
+            )
+        )
+
         # Grant Lambda invoke permission (for chunked processing - coordinator invokes workers)
         lambda_role.add_to_policy(
             iam.PolicyStatement(
@@ -178,6 +194,7 @@ class BackendStack(Stack):
                 "USE_CHUNKED_PROCESSING": "true",
                 "SCANNER_CHUNK_SIZE": "100",  # Process 100 tickers per worker
                 "BACKTEST_S3_BUCKET": f"{project_name}-{env_name}-backtest-{self.account}",
+                "INTELLIGENCE_S3_BUCKET": f"{project_name}-{env_name}-intelligence-{self.account}",
             },
             log_group=log_group,
         )
@@ -317,6 +334,32 @@ class BackendStack(Stack):
                 event=events.RuleTargetInput.from_object({
                     "source": "oss.scheduler",
                     "action": "daily_data_capture",
+                }),
+            )
+        )
+
+        # EventBridge rule for Nightly Scribe intelligence agent
+        # Runs once daily at 5:30 PM ET (21:30 UTC) after market close on weekdays.
+        # Writes a dated markdown journal entry summarizing the day's pipeline activity.
+        self.nightly_scribe_rule = events.Rule(
+            self,
+            "NightlyScribeRule",
+            rule_name=f"{project_name}-{env_name}-nightly-scribe",
+            description="Generate nightly intelligence diary entry after market close",
+            schedule=events.Schedule.cron(
+                minute="30",
+                hour="21",
+                week_day="MON-FRI",
+            ),
+            enabled=True,
+        )
+
+        self.nightly_scribe_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "nightly_scribe",
                 }),
             )
         )
