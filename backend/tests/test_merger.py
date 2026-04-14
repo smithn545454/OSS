@@ -142,10 +142,26 @@ class TestGetDirectionFromTrigger:
         )
         assert get_direction_from_trigger(trigger) == DirectionHint.NONE
 
-    def test_cheap_options_always_none(self):
-        """Test cheap options always gives NONE."""
+    def test_cheap_options_without_momentum_gives_none(self):
+        """Cheap options without momentum filter metadata gives NONE."""
         trigger = _create_trigger(ScannerType.CHEAP_OPTIONS)
         assert get_direction_from_trigger(trigger) == DirectionHint.NONE
+
+    def test_cheap_options_momentum_up_gives_call(self):
+        """Cheap options with momentum filter = UP gives CALL."""
+        trigger = _create_trigger(
+            ScannerType.CHEAP_OPTIONS,
+            metrics={"triggered_direction": "UP", "rs_5d": 1.2},
+        )
+        assert get_direction_from_trigger(trigger) == DirectionHint.CALL
+
+    def test_cheap_options_momentum_down_gives_put(self):
+        """Cheap options with momentum filter = DOWN gives PUT."""
+        trigger = _create_trigger(
+            ScannerType.CHEAP_OPTIONS,
+            metrics={"triggered_direction": "DOWN", "rs_5d": -1.2},
+        )
+        assert get_direction_from_trigger(trigger) == DirectionHint.PUT
 
 
 class TestResolveDirectionHints:

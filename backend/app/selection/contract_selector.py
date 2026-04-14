@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from app.core.schemas import (
     ContractSelectionConfig,
+    DirectionHint,
     DTEBucket,
     Opportunity,
     OptionType,
@@ -211,6 +212,16 @@ class ContractSelector:
 
         # Get unique tickers
         tickers = list(set(opp.underlying_ticker for opp in opportunities))
+        # Map ticker → resolved direction_hint so selection can skip the
+        # non-matching side when the opportunity is clearly directional.
+        # If multiple opportunities exist for the same ticker, keep the first
+        # non-NONE hint (merger already resolves conflicts to NONE, so this is
+        # defensive only).
+        direction_by_ticker: dict[str, DirectionHint] = {}
+        for opp in opportunities:
+            existing = direction_by_ticker.get(opp.underlying_ticker)
+            if existing is None or existing == DirectionHint.NONE:
+                direction_by_ticker[opp.underlying_ticker] = opp.direction_hint
         logger.info(
             f"Selecting contracts for {len(opportunities)} opportunities "
             f"across {len(tickers)} tickers"
@@ -288,6 +299,9 @@ class ContractSelector:
                     ticker,
                     underlying_price,
                     chain,
+                    direction_hint=direction_by_ticker.get(
+                        ticker, DirectionHint.NONE
+                    ),
                 )
 
                 ticker_candidates.extend(candidates)
@@ -348,6 +362,7 @@ class ContractSelector:
         ticker: str,
         underlying_price: float,
         chain: list[dict[str, Any]],
+        direction_hint: DirectionHint = DirectionHint.NONE,
     ) -> list[ContractCandidate]:
         """Select contracts for a single ticker.
 
@@ -355,6 +370,8 @@ class ContractSelector:
             ticker: Underlying ticker symbol
             underlying_price: Current underlying price
             chain: Options chain data from Polygon
+            direction_hint: When CALL or PUT, skip the opposite side.
+                NONE (default) selects both sides as before.
 
         Returns:
             List of selected ContractCandidate objects
@@ -386,6 +403,17 @@ class ContractSelector:
 
         all_selected: list[ContractCandidate] = []
 
+        # Honor directional hint from the opportunity: when the upstream
+        # scanners (e.g., BREAKOUT_UP, CHEAP_OPTIONS with momentum) resolved
+        # a clear direction, only select the matching side. Both sides when
+        # the hint is NONE.
+        if direction_hint == DirectionHint.CALL:
+            sides = [OptionType.CALL]
+        elif direction_hint == DirectionHint.PUT:
+            sides = [OptionType.PUT]
+        else:
+            sides = [OptionType.CALL, OptionType.PUT]
+
         # Process each DTE bucket
         for bucket in DTEBucket:
             bucket_range = self._get_bucket_range(bucket)
@@ -394,8 +422,7 @@ class ContractSelector:
 
             min_dte, max_dte = bucket_range
 
-            # Process both sides
-            for side in [OptionType.CALL, OptionType.PUT]:
+            for side in sides:
                 candidates = self._select_for_bucket_side(
                     ticker=ticker,
                     underlying_price=underlying_price,

@@ -670,3 +670,113 @@ class TestContractSelector:
         tickers = [c.option_ticker for c in selected]
         # OTM put should get the diversity slot
         assert "OTM_PUT1" in tickers
+
+
+class TestSelectForTickerDirectionHint:
+    """Tests for _select_for_ticker honoring opportunity direction_hint.
+
+    The selector used to always produce both calls and puts for every
+    ticker, ignoring the directional signal from upstream scanners. When
+    a scanner has resolved a clear direction (e.g., BREAKOUT_UP → CALL,
+    CHEAP_OPTIONS with momentum filter → CALL or PUT), the opposite side
+    should be skipped.
+    """
+
+    @pytest.fixture
+    def default_config(self) -> ContractSelectionConfig:
+        return ContractSelectionConfig()
+
+    def _chain_with_both_sides(self):
+        """Minimal options chain with a viable call and put close to ATM."""
+        import datetime as _dt
+
+        exp = (_dt.date.today() + _dt.timedelta(days=30)).strftime("%Y-%m-%d")
+
+        def _contract(side: str, strike: float, delta: float):
+            return {
+                "details": {
+                    "contract_type": side,
+                    "ticker": f"O:TEST260320{side[0]}{int(strike * 1000):08d}",
+                    "strike_price": strike,
+                    "expiration_date": exp,
+                },
+                "open_interest": 8000,
+                "day": {
+                    "volume": 800,
+                    "last_bid": 2.0,
+                    "last_ask": 2.2,
+                    "close": 2.1,
+                },
+                "last_quote": {"bid": 2.0, "ask": 2.2, "midpoint": 2.1},
+                "greeks": {
+                    "delta": delta,
+                    "gamma": 0.03,
+                    "theta": -0.05,
+                    "vega": 0.2,
+                },
+                "implied_volatility": 0.30,
+            }
+
+        return [
+            _contract("CALL", 100.0, 0.55),
+            _contract("CALL", 102.0, 0.45),
+            _contract("PUT", 100.0, -0.45),
+            _contract("PUT", 98.0, -0.35),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_direction_hint_call_skips_puts(self, default_config):
+        """CALL hint → only CALL candidates in the output."""
+        selector = ContractSelector(default_config)
+        chain = self._chain_with_both_sides()
+
+        candidates = await selector._select_for_ticker(
+            "TEST", underlying_price=100.0, chain=chain,
+            direction_hint=DirectionHint.CALL,
+        )
+
+        assert candidates, "expected at least one CALL candidate"
+        assert all(c.option_type == OptionType.CALL for c in candidates)
+
+    @pytest.mark.asyncio
+    async def test_direction_hint_put_skips_calls(self, default_config):
+        """PUT hint → only PUT candidates in the output."""
+        selector = ContractSelector(default_config)
+        chain = self._chain_with_both_sides()
+
+        candidates = await selector._select_for_ticker(
+            "TEST", underlying_price=100.0, chain=chain,
+            direction_hint=DirectionHint.PUT,
+        )
+
+        assert candidates, "expected at least one PUT candidate"
+        assert all(c.option_type == OptionType.PUT for c in candidates)
+
+    @pytest.mark.asyncio
+    async def test_direction_hint_none_picks_both_sides(self, default_config):
+        """NONE hint → current behavior: both sides selected (regression)."""
+        selector = ContractSelector(default_config)
+        chain = self._chain_with_both_sides()
+
+        candidates = await selector._select_for_ticker(
+            "TEST", underlying_price=100.0, chain=chain,
+            direction_hint=DirectionHint.NONE,
+        )
+
+        types = {c.option_type for c in candidates}
+        assert OptionType.CALL in types
+        assert OptionType.PUT in types
+
+    @pytest.mark.asyncio
+    async def test_direction_hint_default_is_none(self, default_config):
+        """Omitting direction_hint should behave as NONE (backward compatible)."""
+        selector = ContractSelector(default_config)
+        chain = self._chain_with_both_sides()
+
+        candidates = await selector._select_for_ticker(
+            "TEST", underlying_price=100.0, chain=chain,
+        )
+
+        types = {c.option_type for c in candidates}
+        assert OptionType.CALL in types
+        assert OptionType.PUT in types

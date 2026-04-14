@@ -353,6 +353,8 @@ export interface CompressionConfig {
 export interface CheapOptionsConfig {
   iv_rv_ratio_max: number
   iv_percentile_max: number
+  require_momentum?: boolean
+  rs_5d_threshold?: number
 }
 
 export interface ScannerConfig {

@@ -280,6 +280,16 @@ class ScannerOrchestrator:
             )
             context.cached_data["daily_bars"] = daily_bars_data
 
+            # Ensure SPY bars are cached for relative-strength calculations
+            # (CHEAP_OPTIONS momentum filter). SPY is usually in the watchlist
+            # but fetch it explicitly if not to guarantee availability.
+            if "SPY" not in daily_bars_data:
+                spy_bars_map = await data_provider.get_daily_bars_batch(
+                    ["SPY"], end_date=effective_date, lookback_days=60
+                )
+                if spy_bars_map.get("SPY"):
+                    context.cached_data["daily_bars"]["SPY"] = spy_bars_map["SPY"]
+
             phase1_duration = int((datetime.now(timezone.utc) - phase1_start).total_seconds() * 1000)
             logger.info(f"Phase 1 complete: {len(daily_bars_data)} tickers in {phase1_duration}ms")
 
@@ -1151,6 +1161,7 @@ class ScannerOrchestrator:
 
                 ticker_candidates = await contract_selector._select_for_ticker(
                     ticker, underlying_price, chain,
+                    direction_hint=opportunity.direction_hint,
                 )
                 if not ticker_candidates:
                     skip_no_candidates += 1

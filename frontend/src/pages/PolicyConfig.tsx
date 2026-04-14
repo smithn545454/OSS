@@ -131,6 +131,48 @@ function ConfigField({
 }
 
 // ============================================================================
+// Editable Boolean Toggle Field Component
+// ============================================================================
+
+interface ConfigToggleProps {
+  label: string
+  value: boolean
+  fieldPath: string
+  isEditing: boolean
+  onChange: (path: string, value: boolean) => void
+}
+
+function ConfigToggle({
+  label,
+  value,
+  fieldPath,
+  isEditing,
+  onChange,
+}: ConfigToggleProps) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(fieldPath, e.target.checked)
+  }
+
+  return (
+    <div className="flex items-center justify-between py-2">
+      <span className="text-sm text-oss-muted">{label}</span>
+      {isEditing ? (
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={handleChange}
+          className="h-4 w-4 rounded border-oss-border bg-oss-bg text-oss-accent focus:ring-oss-accent"
+        />
+      ) : (
+        <span className="font-mono text-sm text-oss-text">
+          {value ? 'enabled' : 'disabled'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Policy Version List Component
 // ============================================================================
 
@@ -365,7 +407,7 @@ interface EditablePolicyConfigProps {
   isEditing: boolean
   editedConfig: PolicyConfigType
   errors: Record<string, string>
-  onConfigChange: (path: string, value: number | string) => void
+  onConfigChange: (path: string, value: number | string | boolean) => void
 }
 
 function EditablePolicyConfig({ 
@@ -533,6 +575,25 @@ function EditablePolicyConfig({
                 max={100}
                 step={5}
                 error={errors['scanner.cheap_options.iv_percentile_max']}
+              />
+              <ConfigToggle
+                label="Require Momentum Filter"
+                value={displayConfig.scanner.cheap_options.require_momentum ?? false}
+                fieldPath="scanner.cheap_options.require_momentum"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+              />
+              <ConfigField
+                label="RS 5d Threshold"
+                value={displayConfig.scanner.cheap_options.rs_5d_threshold ?? 0}
+                unit="%"
+                fieldPath="scanner.cheap_options.rs_5d_threshold"
+                isEditing={isEditing}
+                onChange={onConfigChange}
+                min={0}
+                max={10}
+                step={0.25}
+                error={errors['scanner.cheap_options.rs_5d_threshold']}
               />
             </div>
           </div>
@@ -1036,7 +1097,7 @@ function EditablePolicyConfig({
 // ============================================================================
 
 // Helper to deep clone and set nested value
-function setNestedValue(obj: PolicyConfigType, path: string, value: number | string): PolicyConfigType {
+function setNestedValue(obj: PolicyConfigType, path: string, value: number | string | boolean): PolicyConfigType {
   const clone = JSON.parse(JSON.stringify(obj)) as PolicyConfigType
   const parts = path.split('.')
   let current: Record<string, unknown> = clone as unknown as Record<string, unknown>
@@ -1080,9 +1141,9 @@ export default function PolicyConfig() {
     setIsEditing(false)
   }, [])
 
-  const handleConfigChange = useCallback((path: string, value: number | string) => {
+  const handleConfigChange = useCallback((path: string, value: number | string | boolean) => {
     if (!editedConfig) return
-    
+
     const newConfig = setNestedValue(editedConfig, path, value)
     setEditedConfig(newConfig)
     

@@ -33,7 +33,7 @@ from typing import Any, Optional
 from app.core.schemas import DirectionHint, IVHistory, ScannerType
 from app.db.tables import IVHistoryTable
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
-from app.scanners.utils import calculate_iv_proxy, calculate_rv
+from app.scanners.utils import calculate_iv_proxy, calculate_returns, calculate_rv
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ class CheapOptionsScanner(BaseScanner):
         config = context.policy_config.scanner.cheap_options
         iv_rv_ratio_max = config.iv_rv_ratio_max  # Default 1.10
         iv_percentile_max = config.iv_percentile_max  # Default 40
+        require_momentum = config.require_momentum
+        rs_5d_threshold = config.rs_5d_threshold
 
         try:
             # Step 1: Get underlying price data for RV calculation
@@ -216,6 +218,48 @@ class CheapOptionsScanner(BaseScanner):
                     metrics=metrics,
                 )
 
+            # Directional momentum filter: require 5-day relative strength
+            # (underlying return minus SPY return, in percent) to agree with
+            # the intended direction. Without this, cheap vol on a
+            # directionless underlying bleeds via theta.
+            direction_hint = DirectionHint.NONE
+            if require_momentum:
+                return_5d = calculate_returns(closes, 5)
+                spy_bars = context.cached_data.get("daily_bars", {}).get("SPY", [])
+                spy_closes = [bar.close for bar in spy_bars]
+                spy_return_5d = calculate_returns(spy_closes, 5)
+
+                if return_5d is None or spy_return_5d is None:
+                    metrics["rs_5d"] = None
+                    return ScanResult(
+                        ticker=ticker,
+                        triggered=False,
+                        metrics=metrics,
+                        error="Insufficient bars for 5d relative strength",
+                    )
+
+                rs_5d = return_5d - spy_return_5d
+                metrics["rs_5d"] = round(rs_5d, 4)
+                metrics["return_5d"] = round(return_5d, 4)
+                metrics["spy_return_5d"] = round(spy_return_5d, 4)
+
+                if rs_5d > rs_5d_threshold:
+                    direction_hint = DirectionHint.CALL
+                    metrics["triggered_direction"] = "UP"
+                elif rs_5d < -rs_5d_threshold:
+                    direction_hint = DirectionHint.PUT
+                    metrics["triggered_direction"] = "DOWN"
+                else:
+                    logger.info(
+                        f"[CHEAP_DIAG] {ticker}: momentum filter dropped "
+                        f"(rs_5d={rs_5d:.3f}, threshold=±{rs_5d_threshold})"
+                    )
+                    return ScanResult(
+                        ticker=ticker,
+                        triggered=False,
+                        metrics=metrics,
+                    )
+
             # Determine reason codes
             reason_codes = []
             if iv_rv_triggered and iv_percentile_triggered:
@@ -225,11 +269,17 @@ class CheapOptionsScanner(BaseScanner):
             else:
                 reason_codes.append("CHEAP_OPTIONS_IV_PERCENTILE_LOW")
 
-            # Create trigger (always NONE direction for volatility scanner)
+            if require_momentum:
+                reason_codes.append(
+                    "CHEAP_OPTIONS_MOMENTUM_UP"
+                    if direction_hint == DirectionHint.CALL
+                    else "CHEAP_OPTIONS_MOMENTUM_DOWN"
+                )
+
             trigger = self.create_trigger(
                 reason_codes=reason_codes,
                 metrics=metrics,
-                direction_hint=DirectionHint.NONE,
+                direction_hint=direction_hint,
             )
 
             return ScanResult(

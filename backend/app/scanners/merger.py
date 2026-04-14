@@ -114,7 +114,13 @@ def get_direction_from_trigger(trigger: ScannerTrigger) -> DirectionHint:
         return DirectionHint.NONE
 
     elif scanner_type == ScannerType.CHEAP_OPTIONS:
-        # Cheap options is always non-directional
+        # Cheap options is non-directional unless the momentum filter ran and
+        # resolved a direction (stored in metrics["triggered_direction"]).
+        direction = metrics.get("triggered_direction", "")
+        if direction == "UP":
+            return DirectionHint.CALL
+        elif direction == "DOWN":
+            return DirectionHint.PUT
         return DirectionHint.NONE
 
     return DirectionHint.NONE

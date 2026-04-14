@@ -605,6 +605,16 @@ class CheapOptionsConfig(OSSBaseModel):
 
     iv_rv_ratio_max: float = 1.10
     iv_percentile_max: int = 40
+    # Directional momentum filter — when enabled, CHEAP_OPTIONS only fires
+    # calls if underlying 5-day relative strength (vs SPY) is positive and
+    # only fires puts if RS is negative. Signals without directional agreement
+    # are dropped. Prevents buying cheap vol on directionless underlyings
+    # where theta bleeds the position to zero.
+    require_momentum: bool = False
+    # Minimum |RS_5d| (underlying 5d return minus SPY 5d return, in percent)
+    # required to emit a directional signal. 0.0 = any positive/negative RS.
+    # Raise to create a neutral band around zero (e.g., 1.0 = require >1% outperformance).
+    rs_5d_threshold: float = 0.0
 
 
 class ScannerConfig(OSSBaseModel):
