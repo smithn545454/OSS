@@ -299,6 +299,12 @@ class Evaluation(OSSBaseModel):
     evaluated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # Live-quote refresh fields (populated after entry by refresh_open_approve_quotes).
+    # Entry-time bid/ask/mid above are immutable decision snapshot.
+    current_bid: Optional[float] = None
+    current_ask: Optional[float] = None
+    current_mid: Optional[float] = None
+    quote_refreshed_at: Optional[str] = None  # ISO timestamp of last refresh
 
 
 # ============================================================================

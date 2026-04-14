@@ -281,6 +281,36 @@ class EvaluationTable:
         return items
 
     @staticmethod
+    async def update_current_quote(
+        ticker: str,
+        evaluated_at: str,
+        evaluation_id: str,
+        current_bid: float,
+        current_ask: float,
+        current_mid: float,
+        quote_refreshed_at: str,
+    ) -> None:
+        """Update only the live-quote fields on an existing evaluation row.
+
+        Does NOT touch entry-time bid/ask/mid or decision/GSI fields — those
+        are the immutable decision snapshot. Used by the post-pipeline quote
+        refresh step to keep the Opportunities page display current without
+        re-running the full pipeline.
+        """
+        db = get_dynamodb()
+        await db.update_item(
+            EvaluationTable.TABLE,
+            f"EVAL#{ticker}",
+            f"{evaluated_at}#{evaluation_id}",
+            {
+                "current_bid": current_bid,
+                "current_ask": current_ask,
+                "current_mid": current_mid,
+                "quote_refreshed_at": quote_refreshed_at,
+            },
+        )
+
+    @staticmethod
     async def list_by_ticker_since(
         ticker: str, since_iso: str, limit: int = 200
     ) -> list[dict[str, Any]]:

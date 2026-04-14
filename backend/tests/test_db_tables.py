@@ -152,6 +152,42 @@ class TestEvaluationTable:
         result = await EvaluationTable.list_by_date("2026-01-17")
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_update_current_quote_only_touches_live_fields(self, mock_db):
+        """update_current_quote must target the correct PK/SK and update only
+        current_bid/current_ask/current_mid/quote_refreshed_at — leaving
+        entry-time bid/ask/mid and decision/GSI attributes alone."""
+        from app.db.tables import EvaluationTable
+
+        mock_db.update_item = AsyncMock(return_value={})
+
+        await EvaluationTable.update_current_quote(
+            ticker="AAPL",
+            evaluated_at="2026-04-14T17:30:00+00:00",
+            evaluation_id="eval-xyz",
+            current_bid=10.0,
+            current_ask=10.2,
+            current_mid=10.1,
+            quote_refreshed_at="2026-04-14T17:42:00+00:00",
+        )
+
+        mock_db.update_item.assert_called_once()
+        args, kwargs = mock_db.update_item.call_args
+        # positional: (table_suffix, pk, sk, updates)
+        assert args[1] == "EVAL#AAPL"
+        assert args[2] == "2026-04-14T17:30:00+00:00#eval-xyz"
+        updates = args[3]
+        assert set(updates.keys()) == {
+            "current_bid",
+            "current_ask",
+            "current_mid",
+            "quote_refreshed_at",
+        }
+        assert updates["current_bid"] == 10.0
+        assert updates["current_ask"] == 10.2
+        assert updates["current_mid"] == 10.1
+        assert updates["quote_refreshed_at"] == "2026-04-14T17:42:00+00:00"
+
 
 # ---------------------------------------------------------------------------
 # PipelineRunTable

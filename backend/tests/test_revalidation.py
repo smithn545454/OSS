@@ -270,7 +270,7 @@ class TestSupersededApproves:
             patch(f"{_ROUTE}.FeatureValueTable") as mock_fv,
             patch(f"{_ROUTE}.PaperPositionTable") as mock_paper,
             patch(f"{_ROUTE}._create_catalyst_service") as mock_cat,
-            patch(f"{_ROUTE}._trading_days_cutoff", return_value="2026-04-02T00:00:00"),
+            patch(f"{_ROUTE}.trading_days_cutoff", return_value="2026-04-02T00:00:00"),
         ):
             mock_eval.list_by_verdict_since = AsyncMock(return_value=[old_approve])
             mock_opp.list_by_ticker = AsyncMock(return_value=[])

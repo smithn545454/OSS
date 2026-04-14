@@ -103,6 +103,11 @@ export interface Evaluation {
   rank_score: number
   policy_version: string
   evaluated_at: string
+  // Live-quote refresh fields (populated post-entry; entry-time bid/ask/mid above are immutable)
+  current_bid?: number | null
+  current_ask?: number | null
+  current_mid?: number | null
+  quote_refreshed_at?: string | null
 }
 
 // Pillar Score

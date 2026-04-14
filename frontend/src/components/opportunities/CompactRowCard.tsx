@@ -272,15 +272,25 @@ function SignalsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
 }
 
 function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation; liveQuote?: ContractQuote }) {
-  const hasLiveQuote = !!liveQuote
-  const stalePremium = evaluation.mid ?? 0
-  const premium = hasLiveQuote ? liveQuote.mid : stalePremium
-  const contractCost = premium * 100
-  // Price change from evaluation time
-  const priceDelta = hasLiveQuote ? liveQuote.mid - stalePremium : 0
-  // Red = more expensive (bad for entry), green = cheaper (good)
-  const deltaColor = priceDelta >= 0 ? '#FF4D6A' : '#00E676'
-  const deltaSign = priceDelta >= 0 ? '+' : ''
+  // Entry-time premium from the original evaluation (the decision snapshot).
+  const entryPremium = evaluation.mid ?? 0
+  // Prefer the server-side refreshed quote on the evaluation row; fall back to
+  // the per-page live-quote hook if present; otherwise show entry alone.
+  const refreshedMid = evaluation.current_mid ?? null
+  const refreshedAt = evaluation.quote_refreshed_at ?? null
+  const liveMid = liveQuote?.mid ?? null
+  const currentPremium =
+    refreshedMid != null ? refreshedMid : liveMid != null ? liveMid : entryPremium
+  const hasCurrent =
+    refreshedMid != null || liveMid != null
+  const contractCost = currentPremium * 100
+  const pctChange =
+    hasCurrent && entryPremium > 0
+      ? ((currentPremium - entryPremium) / entryPremium) * 100
+      : 0
+  // Red = more expensive (harder to enter now), green = cheaper (better entry)
+  const changeColor = pctChange >= 0 ? '#FF4D6A' : '#00E676'
+  const changeSign = pctChange >= 0 ? '+' : ''
 
   const absDelta = Math.abs(evaluation.delta ?? 0)
   const moneynessPct = evaluation.moneyness_pct ?? 0
@@ -301,30 +311,44 @@ function MetricsZone({ evaluation, liveQuote }: { evaluation: ApproveEvaluation;
 
   return (
     <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexShrink: 0 }}>
-      {/* Premium */}
+      {/* Premium — shows Entry (trigger price) and Now (live) side-by-side
+          when a refreshed quote is available, with percent change. */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
         <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: '4px' }}>
-          PREMIUM
-          {hasLiveQuote && (
+          {hasCurrent ? 'NOW' : 'PREMIUM'}
+          {hasCurrent && refreshedAt && (
             <span style={{
-              fontSize: '7px',
-              fontWeight: 700,
-              color: '#00E676',
-              letterSpacing: '0.1em',
+              fontSize: '8px',
+              color: '#4A5168',
+              textTransform: 'none',
+              letterSpacing: 0,
+              fontWeight: 500,
             }}>
-              LIVE
+              {formatRelativeTime(refreshedAt)}
             </span>
           )}
         </span>
-        <span style={valueStyle}>${premium.toFixed(2)}</span>
-        {hasLiveQuote && Math.abs(priceDelta) >= 0.01 ? (
-          <span style={{
-            fontSize: '10px',
-            fontFamily: "'JetBrains Mono', monospace",
-            color: deltaColor,
-          }}>
-            {deltaSign}${Math.abs(priceDelta).toFixed(2)}
-          </span>
+        <span style={valueStyle}>${currentPremium.toFixed(2)}</span>
+        {hasCurrent ? (
+          <>
+            <span style={{
+              fontSize: '10px',
+              fontFamily: "'JetBrains Mono', monospace",
+              color: '#8892A5',
+            }}>
+              entry ${entryPremium.toFixed(2)}
+            </span>
+            {Math.abs(pctChange) >= 0.1 && (
+              <span style={{
+                fontSize: '10px',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontWeight: 600,
+                color: changeColor,
+              }}>
+                {changeSign}{pctChange.toFixed(1)}%
+              </span>
+            )}
+          </>
         ) : (
           <span style={{
             fontSize: '10px',

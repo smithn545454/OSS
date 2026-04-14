@@ -267,6 +267,10 @@ async def _run_worker_scan(
             logger.error(f"UV Bridge error (non-fatal): {e}")
             uv_result = {"status": "error", "error": str(e)}
 
+        # Track whether this worker is the final one in the run. In direct
+        # (single-worker) mode, total_chunks==0 and we're always the last one.
+        is_final_worker = (total_chunks == 0)
+
         # Self-report completion if this is a coordinator-dispatched worker
         if run_id and total_chunks > 0 and started_at:
             try:
@@ -279,11 +283,22 @@ async def _run_worker_scan(
                 )
                 if completed >= total_chunks:
                     # Last worker — finalize the pipeline run
+                    is_final_worker = True
                     logger.info(f"Last worker finished, completing run {run_id}")
                     pipeline = PipelineOrchestrator()
                     await pipeline.complete_run(run_id, status="completed")
             except Exception as e:
                 logger.error(f"Worker self-report failed (non-fatal): {e}")
+
+        # After the last worker of the run finishes, refresh displayed quote
+        # prices on every open APPROVE so the Opportunities page reflects
+        # current market. Runs once per pipeline run; non-fatal on error.
+        if is_final_worker:
+            try:
+                from app.services.quote_refresh import refresh_open_approve_quotes
+                await refresh_open_approve_quotes()
+            except Exception as e:
+                logger.warning(f"APPROVE quote refresh failed (non-fatal): {e}")
 
         return {
             "status": "success",

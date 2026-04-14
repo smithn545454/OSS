@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 
 from app.config import get_settings
+from app.core.time_utils import trading_days_cutoff
 from app.db.tables import (
     EvaluationTable,
     FeatureValueTable,
@@ -786,18 +787,6 @@ async def list_evaluations_filtered(
     }
 
 
-def _trading_days_cutoff(trading_days: int) -> str:
-    """Return ISO timestamp N trading days (weekdays) ago from now."""
-    now = datetime.now(timezone.utc)
-    days_back = 0
-    counted = 0
-    while counted < trading_days:
-        days_back += 1
-        if (now - timedelta(days=days_back)).weekday() < 5:  # Mon=0..Fri=4
-            counted += 1
-    return (now - timedelta(days=days_back)).isoformat()
-
-
 @router.get("/approve")
 async def list_approve_evaluations(
     exclude_earnings: bool = True,
@@ -827,7 +816,7 @@ async def list_approve_evaluations(
     # ------------------------------------------------------------------
     # 1. Fetch APPROVE evaluations and deduplicate by contract
     # ------------------------------------------------------------------
-    cutoff_iso = _trading_days_cutoff(max_age_trading_days)
+    cutoff_iso = trading_days_cutoff(max_age_trading_days)
     items = await EvaluationTable.list_by_verdict_since("APPROVE", cutoff_iso, limit=500)
 
     contract_counts: dict[str, int] = {}
