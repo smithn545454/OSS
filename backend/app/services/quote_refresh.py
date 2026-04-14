@@ -71,12 +71,18 @@ async def refresh_open_approve_quotes(
     if not by_contract:
         return stats
 
-    # Group OCC symbols by underlying for efficient batching.
-    by_underlying: dict[str, list[str]] = {}
-    for option_ticker in by_contract:
+    # Group OCC symbols by (underlying, expiration_date) for efficient batching.
+    # A single expiry's chain comfortably fits in the 250-result page of
+    # get_options_chain_minimal, whereas a full un-filtered chain for a popular
+    # underlying spans thousands of contracts and our specific OCC symbol can
+    # fall off page 1. Each eval carries its own expiration_date, so we group.
+    by_underlying_expiry: dict[tuple[str, str], list[str]] = {}
+    for option_ticker, item in by_contract.items():
         underlying = extract_underlying_from_option_ticker(option_ticker)
-        if underlying:
-            by_underlying.setdefault(underlying, []).append(option_ticker)
+        expiry = item.get("expiration_date", "")
+        if not underlying or not expiry:
+            continue
+        by_underlying_expiry.setdefault((underlying, expiry), []).append(option_ticker)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     # Map option_ticker -> (bid, ask, mid); built concurrently from chain fetches.
@@ -84,9 +90,15 @@ async def refresh_open_approve_quotes(
 
     try:
         async with PolygonClient() as client:
-            async def fetch_underlying(underlying: str, requested: list[str]) -> None:
+            async def fetch_chain(
+                underlying: str, expiry: str, requested: list[str]
+            ) -> None:
                 try:
-                    chain = await client.get_options_chain_minimal(underlying)
+                    chain = await client.get_options_chain_minimal(
+                        underlying,
+                        expiration_date_gte=expiry,
+                        expiration_date_lte=expiry,
+                    )
                     lookup = {c.get("ticker"): c for c in chain if c.get("ticker")}
                     for option_ticker in requested:
                         contract = lookup.get(option_ticker)
@@ -103,11 +115,15 @@ async def refresh_open_approve_quotes(
                         quotes[option_ticker] = (bid, ask, round(mid, 4))
                 except Exception as e:
                     logger.warning(
-                        f"refresh_open_approve_quotes: chain fetch failed for {underlying}: {e}"
+                        f"refresh_open_approve_quotes: chain fetch failed for "
+                        f"{underlying} {expiry}: {e}"
                     )
 
             await asyncio.gather(
-                *(fetch_underlying(u, tickers) for u, tickers in by_underlying.items())
+                *(
+                    fetch_chain(underlying, expiry, tickers)
+                    for (underlying, expiry), tickers in by_underlying_expiry.items()
+                )
             )
     except Exception as e:
         logger.warning(f"refresh_open_approve_quotes: Polygon client failed: {e}")

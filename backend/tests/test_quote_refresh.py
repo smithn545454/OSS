@@ -108,6 +108,7 @@ async def test_refresh_updates_in_window_approves(fresh_dynamodb_client):
     - WATCH/REJECT rows are ignored (endpoint query filters by verdict).
     - Dedup by option_ticker: newer APPROVE for same contract wins.
     - Entry-time bid/ask/mid are not overwritten.
+    - The chain is fetched with expiration_date filters to fit in one page.
     """
     from app.services import quote_refresh as mod
 
@@ -118,7 +119,8 @@ async def test_refresh_updates_in_window_approves(fresh_dynamodb_client):
     await EvaluationTable.put(e1, _approve(e1.evaluation_id))
     await EvaluationTable.put(e2, _approve(e2.evaluation_id))
 
-    # Fake Polygon chain: each contract has moved.
+    # Fake Polygon chain: each contract has moved. Both have the same expiry
+    # so they come back on the same filtered chain call.
     fake_chain = [
         _chain_entry("O:AAPL260516C00200000", bid=10.00, ask=10.20),
         _chain_entry("O:AAPL260516C00210000", bid=6.10, ask=6.30),
@@ -138,6 +140,13 @@ async def test_refresh_updates_in_window_approves(fresh_dynamodb_client):
     assert stats["refreshed"] == 2
     assert stats["missing"] == 0
     assert stats["errors"] == 0
+
+    # Verify the chain was fetched with expiry filters, not un-filtered.
+    mock_client.get_options_chain_minimal.assert_called_once_with(
+        "AAPL",
+        expiration_date_gte="2026-05-16",
+        expiration_date_lte="2026-05-16",
+    )
 
     # Re-read the evaluations and confirm fields were set correctly.
     row1 = await EvaluationTable.get(
