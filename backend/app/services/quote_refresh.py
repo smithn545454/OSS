@@ -99,7 +99,15 @@ async def refresh_open_approve_quotes(
                         expiration_date_gte=expiry,
                         expiration_date_lte=expiry,
                     )
-                    lookup = {c.get("ticker"): c for c in chain if c.get("ticker")}
+                    # Polygon returns the OCC symbol at `details.ticker`, not
+                    # at the top level. (The un-nested `ticker` field is only
+                    # present on snapshot endpoints for index/stock tickers.)
+                    lookup: dict[str, dict[str, Any]] = {}
+                    for c in chain:
+                        details = c.get("details") or {}
+                        t = details.get("ticker") or c.get("ticker")
+                        if t:
+                            lookup[t] = c
                     for option_ticker in requested:
                         contract = lookup.get(option_ticker)
                         if not contract:

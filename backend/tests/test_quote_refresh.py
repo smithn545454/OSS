@@ -82,8 +82,10 @@ def _approve(evaluation_id: str) -> Decision:
 
 
 def _chain_entry(option_ticker: str, bid: float, ask: float) -> dict:
+    # Matches the real Polygon v3 snapshot/options response shape: the OCC
+    # symbol lives at `details.ticker`, not at the top level.
     return {
-        "ticker": option_ticker,
+        "details": {"ticker": option_ticker},
         "last_quote": {"bid": bid, "ask": ask},
         "day": {"close": bid, "volume": 1000},
     }
