@@ -100,10 +100,14 @@ class TestGetContractQuotes:
 
     @pytest.mark.asyncio
     async def test_returns_quotes_during_market_hours(self, app):
-        """When market is open and Polygon returns data, quotes are populated."""
+        """When market is open and Polygon returns data, quotes are populated.
+
+        Chain entries match the real Polygon v3 snapshot shape, with the OCC
+        symbol at details.ticker (not at the top level).
+        """
         chain_data = [
             {
-                "ticker": "O:AAPL260320C00185000",
+                "details": {"ticker": "O:AAPL260320C00185000"},
                 "last_quote": {"bid": 5.10, "ask": 5.30},
                 "day": {"close": 5.15, "volume": 1200},
                 "implied_volatility": 0.35,
@@ -111,7 +115,7 @@ class TestGetContractQuotes:
                 "open_interest": 3400,
             },
             {
-                "ticker": "O:AAPL260320C00190000",
+                "details": {"ticker": "O:AAPL260320C00190000"},
                 "last_quote": {"bid": 3.00, "ask": 3.20},
                 "day": {"close": 3.05, "volume": 800},
                 "implied_volatility": 0.32,
@@ -152,7 +156,7 @@ class TestGetContractQuotes:
         """Contracts not found in chain are silently omitted."""
         chain_data = [
             {
-                "ticker": "O:AAPL260320C00185000",
+                "details": {"ticker": "O:AAPL260320C00185000"},
                 "last_quote": {"bid": 5.10, "ask": 5.30},
                 "day": {"close": 5.15, "volume": 100},
                 "implied_volatility": 0.35,
@@ -194,14 +198,15 @@ class TestGetContractQuotes:
         assert resp.json()["quotes"] == {}
 
     @pytest.mark.asyncio
-    async def test_groups_by_underlying(self, app):
-        """Contracts for the same underlying should result in one chain fetch."""
+    async def test_groups_by_underlying_and_expiry(self, app):
+        """Contracts sharing (underlying, expiry) should batch into one chain
+        fetch filtered to that expiry — so the result fits on page 1."""
         mock_polygon = MagicMock()
         mock_polygon.__aenter__ = AsyncMock(return_value=mock_polygon)
         mock_polygon.__aexit__ = AsyncMock(return_value=False)
         mock_polygon.get_options_chain_minimal = AsyncMock(return_value=[
             {
-                "ticker": "O:AAPL260320C00185000",
+                "details": {"ticker": "O:AAPL260320C00185000"},
                 "last_quote": {"bid": 5.0, "ask": 5.2},
                 "day": {"volume": 100},
                 "implied_volatility": 0.3,
@@ -209,7 +214,7 @@ class TestGetContractQuotes:
                 "open_interest": 200,
             },
             {
-                "ticker": "O:AAPL260320P00185000",
+                "details": {"ticker": "O:AAPL260320P00185000"},
                 "last_quote": {"bid": 2.0, "ask": 2.2},
                 "day": {"volume": 50},
                 "implied_volatility": 0.28,
@@ -227,7 +232,10 @@ class TestGetContractQuotes:
                     "/api/market/quotes?contracts=O:AAPL260320C00185000,O:AAPL260320P00185000"
                 )
 
-        # Should only call get_options_chain_minimal once for AAPL
+        # Both contracts share the same (AAPL, 2026-03-20) so only one call.
         assert mock_polygon.get_options_chain_minimal.call_count == 1
+        call_kwargs = mock_polygon.get_options_chain_minimal.call_args.kwargs
+        assert call_kwargs["expiration_date_gte"] == "2026-03-20"
+        assert call_kwargs["expiration_date_lte"] == "2026-03-20"
         data = resp.json()
         assert len(data["quotes"]) == 2

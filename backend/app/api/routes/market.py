@@ -156,7 +156,10 @@ async def get_contract_quotes(contracts: str) -> dict[str, Any]:
     Returns:
         Dict mapping option ticker to quote data (bid, ask, mid, iv, greeks, etc.)
     """
-    from app.paper_trading.position_manager import extract_underlying_from_option_ticker
+    from app.paper_trading.position_manager import (
+        extract_expiration_from_option_ticker,
+        extract_underlying_from_option_ticker,
+    )
 
     contract_list = [c.strip() for c in contracts.split(",") if c.strip()]
 
@@ -171,11 +174,17 @@ async def get_contract_quotes(contracts: str) -> dict[str, Any]:
     if market_status == "closed":
         return {"quotes": {}}
 
-    # Group option tickers by underlying for efficient batching
-    by_underlying: dict[str, list[str]] = {}
+    # Group by (underlying, expiration) so each chain call fits in the single
+    # 250-result page get_options_chain_minimal returns. Un-filtered chains for
+    # popular names span thousands of contracts and drop the specific OCC
+    # symbol we're after off page 1.
+    by_underlying_expiry: dict[tuple[str, str], list[str]] = {}
     for option_ticker in contract_list:
         underlying = extract_underlying_from_option_ticker(option_ticker)
-        by_underlying.setdefault(underlying, []).append(option_ticker)
+        expiry = extract_expiration_from_option_ticker(option_ticker)
+        if not underlying:
+            continue
+        by_underlying_expiry.setdefault((underlying, expiry), []).append(option_ticker)
 
     quotes: dict[str, dict[str, Any]] = {}
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -183,12 +192,26 @@ async def get_contract_quotes(contracts: str) -> dict[str, Any]:
     try:
         async with PolygonClient() as client:
 
-            async def fetch_underlying(underlying: str, requested: list[str]) -> None:
-                """Fetch chain for one underlying and extract quotes for requested contracts."""
+            async def fetch_chain(
+                underlying: str, expiry: str, requested: list[str]
+            ) -> None:
+                """Fetch chain for one (underlying, expiry) and extract quotes."""
                 try:
-                    chain = await client.get_options_chain_minimal(underlying)
-                    # Build lookup: option ticker -> contract data
-                    chain_lookup = {c.get("ticker"): c for c in chain if c.get("ticker")}
+                    chain = await client.get_options_chain_minimal(
+                        underlying,
+                        expiration_date_gte=expiry,
+                        expiration_date_lte=expiry,
+                    )
+                    # Build lookup: option ticker -> contract data. Polygon
+                    # returns the OCC symbol at details.ticker (the top-level
+                    # `ticker` field is only populated on stock/index snapshots),
+                    # so look there first and fall back to top-level for safety.
+                    chain_lookup: dict[str, dict[str, Any]] = {}
+                    for c in chain:
+                        details = c.get("details") or {}
+                        t = details.get("ticker") or c.get("ticker")
+                        if t:
+                            chain_lookup[t] = c
 
                     for option_ticker in requested:
                         contract = chain_lookup.get(option_ticker)
@@ -216,11 +239,16 @@ async def get_contract_quotes(contracts: str) -> dict[str, Any]:
                             "updatedAt": now_iso,
                         }
                 except Exception as e:
-                    logger.error(f"Failed to fetch quotes for {underlying}: {e}")
+                    logger.error(
+                        f"Failed to fetch quotes for {underlying} {expiry}: {e}"
+                    )
 
-            # Fetch all underlyings concurrently
+            # Fetch all (underlying, expiry) groups concurrently
             await asyncio.gather(
-                *(fetch_underlying(u, tickers) for u, tickers in by_underlying.items())
+                *(
+                    fetch_chain(underlying, expiry, tickers)
+                    for (underlying, expiry), tickers in by_underlying_expiry.items()
+                )
             )
     except Exception as e:
         logger.error(f"Failed to initialize Polygon client for quotes: {e}")
