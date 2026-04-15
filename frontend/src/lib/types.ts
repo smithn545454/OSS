@@ -108,6 +108,13 @@ export interface Evaluation {
   current_ask?: number | null
   current_mid?: number | null
   quote_refreshed_at?: string | null
+  // Scanner metadata populated for direct-to-Stage-4 scanners (e.g. Unusual Volume).
+  // For scanners that flow through the Opportunity path (Cheap Options, Breakout,
+  // Breakdown, Compression), the equivalent data lives on the linked
+  // ScannerTriggerDetail and these fields may be null.
+  scanner_source?: ScannerType | null
+  scanner_metrics?: Record<string, unknown> | null
+  trigger_reasons?: string[] | null
 }
 
 // Pillar Score

@@ -15,11 +15,10 @@ import {
   Crosshair,
 } from 'lucide-react'
 import { useEvaluationDetail, useGenerateThesis, useStockSummary, useGenerateStockSummary, useIsTradeTracked } from '@/hooks/useApi'
-import type { 
-  PillarScoreDetail, 
-  GateResultDetail, 
+import type {
+  PillarScoreDetail,
+  GateResultDetail,
   PaperPositionDetail,
-  ScannerTriggerDetail,
   TradeThesis,
   Verdict,
   QualityTier
@@ -31,6 +30,20 @@ import TrackTradeModal from '@/components/TrackTradeModal'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
+import {
+  findZone,
+  formatMetricValue,
+  getScannerConfig,
+  mergeScannerTriggers,
+  resolveMetricValue,
+  scalePosition,
+  scannerLabel,
+  type MetricSpec,
+  type MetricZone,
+  type ScannerRole,
+  type SyntheticTrigger,
+  type ZoneTone,
+} from '@/lib/scannerMetrics'
 
 // ============================================================================
 // Score Bar Component
@@ -551,16 +564,7 @@ function PaperTrackingPanel({ position }: PaperTrackingPanelProps) {
 // ============================================================================
 
 interface ScannerTriggersProps {
-  triggers: ScannerTriggerDetail[]
-}
-
-const SCANNER_TYPE_LABELS: Record<string, string> = {
-  BREAKOUT: 'Breakout',
-  BREAKDOWN: 'Breakdown',
-  UNUSUAL_VOLUME: 'Unusual Volume',
-  COMPRESSION_EXPANSION: 'Compression',
-  CHEAP_OPTIONS: 'Cheap Options',
-  REVALIDATION: 'Revalidation',
+  triggers: SyntheticTrigger[]
 }
 
 function ScannerTriggers({ triggers }: ScannerTriggersProps) {
@@ -574,58 +578,339 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
       </div>
 
       <div className="space-y-3">
-        {triggers.map((trigger, idx) => {
-          const originalScanners = Array.isArray(trigger.metrics?.original_scanners)
-            ? (trigger.metrics.original_scanners as string[])
-            : []
-          const displayMetrics = Object.entries(trigger.metrics).filter(
-            ([key]) => key !== 'original_scanners'
-          )
+        {triggers.map((trigger, idx) => (
+          <ScannerTriggerCard key={idx} trigger={trigger} />
+        ))}
+      </div>
+    </div>
+  )
+}
 
-          return (
-            <div key={idx} className="rounded-lg bg-oss-bg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-oss-accent">
-                  {trigger.scanner_type.replace(/_/g, ' ')}
+function ScannerTriggerCard({ trigger }: { trigger: SyntheticTrigger }) {
+  const config = getScannerConfig(trigger.scanner_type)
+  const originalScanners = Array.isArray(trigger.metrics?.original_scanners)
+    ? (trigger.metrics.original_scanners as string[])
+    : []
+
+  const knownKeys = new Set<string>(['original_scanners'])
+  if (config) {
+    for (const m of config.metrics) knownKeys.add(m.key)
+  }
+  const leftoverMetrics = Object.entries(trigger.metrics).filter(
+    ([key]) => !knownKeys.has(key),
+  )
+
+  const fireSummary = config?.summarize ? config.summarize(trigger.metrics) : null
+
+  const mainMetrics =
+    config?.metrics.map((spec) => ({
+      spec,
+      value: resolveMetricValue(trigger.metrics, spec),
+    })) ?? []
+  const zonedMetrics = mainMetrics.filter(
+    (m) => m.value !== undefined && m.value !== null && m.spec.zones && m.spec.scale,
+  )
+  const plainMetrics = mainMetrics.filter(
+    (m) => m.value !== undefined && m.value !== null && !(m.spec.zones && m.spec.scale),
+  )
+
+  return (
+    <div className="rounded-lg bg-oss-bg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-oss-accent">
+            {scannerLabel(trigger.scanner_type)}
+          </span>
+          {config && <RoleBadge role={config.role} />}
+        </div>
+        <span className="text-xs text-oss-muted">{formatDateTime(trigger.triggered_at)}</span>
+      </div>
+
+      {config && (
+        <p className="text-xs text-oss-muted mb-2 italic">{config.thesis}</p>
+      )}
+
+      {originalScanners.length > 0 && (
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <span className="text-xs text-oss-muted">Originally discovered by:</span>
+          {originalScanners.map((s) => (
+            <span
+              key={s}
+              className="rounded-full bg-oss-surface px-2 py-0.5 text-xs font-medium text-oss-accent"
+            >
+              {scannerLabel(s)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(fireSummary || trigger.reason_codes.length > 0) && (
+        <div className="mt-3 mb-3 rounded-md border border-oss-border bg-oss-surface p-3">
+          <div className="text-[10px] uppercase tracking-wide text-oss-muted mb-1">
+            Why this fired
+          </div>
+          {fireSummary ? (
+            <p className="text-xs text-oss-text leading-relaxed">{fireSummary}</p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {trigger.reason_codes.map((code) => (
+                <span
+                  key={code}
+                  className="rounded-full bg-oss-bg px-2 py-0.5 text-xs text-oss-muted"
+                >
+                  {code}
                 </span>
-                <span className="text-xs text-oss-muted">{formatDateTime(trigger.triggered_at)}</span>
-              </div>
-              {originalScanners.length > 0 && (
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs text-oss-muted">Originally discovered by:</span>
-                  {originalScanners.map((s) => (
-                    <span
-                      key={s}
-                      className="rounded-full bg-oss-surface px-2 py-0.5 text-xs font-medium text-oss-accent"
-                    >
-                      {SCANNER_TYPE_LABELS[s] ?? s.replace(/_/g, ' ')}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-1 mb-2">
-                {trigger.reason_codes.map((code) => (
-                  <span
-                    key={code}
-                    className="rounded-full bg-oss-surface px-2 py-0.5 text-xs text-oss-muted"
-                  >
-                    {code}
-                  </span>
-                ))}
-              </div>
-              {displayMetrics.length > 0 && (
-                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-oss-border">
-                  {displayMetrics.map(([key, value]) => (
-                    <div key={key} className="flex justify-between text-xs">
-                      <span className="text-oss-muted">{key.replace(/_/g, ' ')}</span>
-                      <span className="font-mono text-oss-text">{typeof value === 'number' ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
-          )
-        })}
+          )}
+          {fireSummary && trigger.reason_codes.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {trigger.reason_codes.map((code) => (
+                <span
+                  key={code}
+                  className="rounded-full bg-oss-bg px-2 py-0.5 text-[10px] text-oss-muted/80 font-mono"
+                >
+                  {code}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {zonedMetrics.length > 0 && (
+        <div className="mt-3 space-y-4">
+          {zonedMetrics.map(({ spec, value }) => (
+            <ZonedMetric key={spec.key} spec={spec} value={value} />
+          ))}
+        </div>
+      )}
+
+      {plainMetrics.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-oss-border/50 grid grid-cols-2 gap-x-4 gap-y-1">
+          {plainMetrics.map(({ spec, value }) => (
+            <div key={spec.key} className="flex justify-between text-xs">
+              <span className="text-oss-muted" title={spec.hint}>
+                {spec.label}
+              </span>
+              <span className="font-mono text-oss-text">
+                {formatMetricValue(value, spec)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {leftoverMetrics.length > 0 && (
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-oss-muted/70 hover:text-oss-muted">
+            Raw metrics ({leftoverMetrics.length})
+          </summary>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
+            {leftoverMetrics.map(([key, value]) => (
+              <div key={key} className="flex justify-between">
+                <span className="text-oss-muted/70">{key.replace(/_/g, ' ')}</span>
+                <span className="font-mono text-oss-text/80">
+                  {typeof value === 'number'
+                    ? value.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })
+                    : String(value)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function RoleBadge({ role }: { role: ScannerRole }) {
+  const classes: Record<ScannerRole, string> = {
+    leading: 'bg-oss-approve/15 text-oss-approve border border-oss-approve/30',
+    lagging: 'bg-oss-watch/15 text-oss-watch border border-oss-watch/30',
+    mixed: 'bg-oss-surface text-oss-muted border border-oss-border',
+    meta: 'bg-oss-surface text-oss-muted border border-oss-border',
+  }
+  return (
+    <span
+      className={clsx('rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide', classes[role])}
+      title={
+        role === 'leading'
+          ? 'Fires on a setup before the move — buys cheap premium.'
+          : role === 'lagging'
+            ? 'Fires on price/volume that has already happened — rides continuation.'
+            : role === 'mixed'
+              ? 'Part setup, part confirmation.'
+              : 'Meta scanner — re-evaluates prior approvals.'
+      }
+    >
+      {role}
+    </span>
+  )
+}
+
+const ZONE_TONE_TEXT: Record<ZoneTone, string> = {
+  bad: 'text-oss-reject',
+  neutral: 'text-oss-muted',
+  good: 'text-oss-accent',
+  great: 'text-oss-approve',
+}
+
+const ZONE_TONE_BG: Record<ZoneTone, string> = {
+  bad: 'bg-oss-reject/55',
+  neutral: 'bg-oss-watch/50',
+  good: 'bg-oss-accent/55',
+  great: 'bg-oss-approve/65',
+}
+
+const ZONE_TONE_DOT: Record<ZoneTone, string> = {
+  bad: 'bg-oss-reject',
+  neutral: 'bg-oss-watch',
+  good: 'bg-oss-accent',
+  great: 'bg-oss-approve',
+}
+
+const ZONE_TONE_BORDER: Record<ZoneTone, string> = {
+  bad: 'border-oss-reject',
+  neutral: 'border-oss-watch',
+  good: 'border-oss-accent',
+  great: 'border-oss-approve',
+}
+
+function ZonedMetric({ spec, value }: { spec: MetricSpec; value: unknown }) {
+  const zones = spec.zones!
+  const scale = spec.scale!
+  const currentZone = findZone(value, zones)
+  const valuePos = scalePosition(value, spec)
+
+  return (
+    <div className="text-xs">
+      {spec.question && (
+        <div className="text-[11px] text-oss-muted/80 mb-1.5 italic">{spec.question}</div>
+      )}
+
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-oss-text font-medium" title={spec.hint}>
+          {spec.label}
+        </span>
+        <span className="flex-1 border-b border-dotted border-oss-border/50" />
+        <span
+          className={clsx(
+            'font-mono font-semibold',
+            currentZone ? ZONE_TONE_TEXT[currentZone.tone] : 'text-oss-text',
+          )}
+        >
+          {formatMetricValue(value, spec)}
+        </span>
+        {currentZone && (
+          <span
+            className={clsx(
+              'rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide border bg-oss-bg',
+              ZONE_TONE_TEXT[currentZone.tone],
+              ZONE_TONE_BORDER[currentZone.tone],
+            )}
+          >
+            {currentZone.label}
+          </span>
+        )}
+      </div>
+
+      <ZonedBar
+        zones={zones}
+        scale={scale}
+        valuePos={valuePos}
+        currentZone={currentZone}
+        spec={spec}
+      />
+
+      {currentZone && (
+        <p className="mt-1.5 text-[11px] text-oss-muted leading-relaxed">{currentZone.note}</p>
+      )}
+    </div>
+  )
+}
+
+function ZonedBar({
+  zones,
+  scale,
+  valuePos,
+  currentZone,
+  spec,
+}: {
+  zones: MetricZone[]
+  scale: { worst: number; best: number }
+  valuePos: number | null
+  currentZone: MetricZone | null
+  spec: MetricSpec
+}) {
+  const posOf = (v: number) => {
+    const { worst, best } = scale
+    if (worst === best) return 0
+    let p = (v - worst) / (best - worst)
+    if (p < 0) p = 0
+    if (p > 1) p = 1
+    return p
+  }
+
+  const zoneRects = zones.map((z) => {
+    const a = posOf(z.min)
+    const b = posOf(z.max)
+    const left = Math.min(a, b) * 100
+    const width = Math.abs(b - a) * 100
+    return { zone: z, left, width }
+  })
+
+  return (
+    <div>
+      <div className="relative h-4 rounded-md overflow-hidden bg-oss-bg border border-oss-border/60">
+        {zoneRects.map(({ zone, left, width }) => (
+          <div
+            key={zone.label}
+            className={clsx(
+              'absolute top-0 bottom-0',
+              ZONE_TONE_BG[zone.tone],
+              currentZone?.label === zone.label ? 'opacity-100' : 'opacity-45',
+            )}
+            style={{ left: `${left}%`, width: `${width}%` }}
+            title={`${zone.label}: ${formatMetricValue(zone.min, spec)} – ${formatMetricValue(zone.max, spec)}`}
+          />
+        ))}
+        {valuePos !== null && (
+          <div
+            className={clsx(
+              'absolute top-1/2 h-4 w-4 -mt-2 -ml-2 rounded-full border-2 border-oss-bg shadow',
+              currentZone ? ZONE_TONE_DOT[currentZone.tone] : 'bg-oss-text',
+            )}
+            style={{ left: `${valuePos * 100}%` }}
+          />
+        )}
+      </div>
+      <div className="relative mt-1 h-3 text-[9px] font-mono uppercase tracking-wide text-oss-muted/70">
+        {zoneRects.map(({ zone, left, width }) => (
+          <div
+            key={zone.label}
+            className={clsx(
+              'absolute text-center whitespace-nowrap overflow-hidden text-ellipsis px-0.5',
+              currentZone?.label === zone.label && clsx(ZONE_TONE_TEXT[zone.tone], 'font-semibold'),
+            )}
+            style={{ left: `${left}%`, width: `${width}%` }}
+          >
+            {zone.label}
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between mt-1 text-[9px] font-mono text-oss-muted/70">
+        <span>
+          {formatMetricValue(scale.worst, spec)}
+          <span className="text-oss-muted/50"> worst</span>
+        </span>
+        <span>
+          <span className="text-oss-muted/50">best </span>
+          {formatMetricValue(scale.best, spec)}
+        </span>
       </div>
     </div>
   )
@@ -1180,7 +1465,7 @@ export default function EvaluationDetail() {
         {decision && (
           <DecisionExplanation decision={decision} />
         )}
-        <ScannerTriggers triggers={scanner_triggers} />
+        <ScannerTriggers triggers={mergeScannerTriggers(scanner_triggers, evaluation)} />
       </div>
 
       {/* Matched Setup Rules */}
