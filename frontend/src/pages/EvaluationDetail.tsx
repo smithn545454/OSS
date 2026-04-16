@@ -1243,15 +1243,15 @@ function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
       </div>
 
       {/* Price and Score */}
-      <div className="text-right sm:text-right text-left">
-        <div className="mb-4 sm:mb-4 inline-block sm:block mr-8 sm:mr-0">
+      <div className="flex justify-between items-start sm:block sm:text-right">
+        <div className="sm:mb-4">
           <span className="text-xs text-oss-muted block mb-1">Premium</span>
           <span className="font-mono text-2xl sm:text-3xl font-bold text-oss-text">
             ${evaluation.mid.toFixed(2)}
           </span>
         </div>
         {decision && (
-          <div className="inline-block sm:block">
+          <div className="text-right">
             <span className="text-xs text-oss-muted block mb-1">Final Score</span>
             <span className={clsx(
               'font-mono text-2xl sm:text-3xl font-bold',
