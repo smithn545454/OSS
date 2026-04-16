@@ -191,7 +191,7 @@ function ContractCard({ evaluation }: ContractCardProps) {
   const isCall = evaluation.option_type === 'CALL'
 
   return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-lg font-medium text-oss-text">Contract Details</h3>
@@ -261,7 +261,7 @@ function ContractCard({ evaluation }: ContractCardProps) {
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-oss-border grid grid-cols-4 gap-4">
+      <div className="mt-4 pt-4 border-t border-oss-border grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="space-y-1">
           <p className="text-xs text-oss-muted">Delta</p>
           <p className="font-mono text-sm text-oss-text">{evaluation.delta.toFixed(3)}</p>
@@ -479,7 +479,7 @@ interface PaperTrackingPanelProps {
 function PaperTrackingPanel({ position }: PaperTrackingPanelProps) {
   if (!position) {
     return (
-      <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+      <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
         <div className="flex items-center gap-3 mb-4">
           <DollarSign className="h-5 w-5 text-oss-muted" />
           <h3 className="text-lg font-medium text-oss-text">Paper Tracking</h3>
@@ -493,7 +493,7 @@ function PaperTrackingPanel({ position }: PaperTrackingPanelProps) {
   const isOpen = position.status === 'OPEN'
 
   return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <DollarSign className={clsx('h-5 w-5', isProfit ? 'text-oss-approve' : 'text-oss-reject')} />
@@ -571,7 +571,7 @@ function ScannerTriggers({ triggers }: ScannerTriggersProps) {
   if (triggers.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
       <div className="flex items-center gap-3 mb-4">
         <Zap className="h-5 w-5 text-oss-accent" />
         <h3 className="text-lg font-medium text-oss-text">Scanner Triggers</h3>
@@ -1048,7 +1048,7 @@ interface DecisionExplanationProps {
 
 function DecisionExplanation({ decision }: DecisionExplanationProps) {
   return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
       <h3 className="text-lg font-medium text-oss-text mb-4">Decision Explanation</h3>
 
       <div className="space-y-4">
@@ -1153,7 +1153,7 @@ function GateJourney({ gates }: GateJourneyProps) {
   const enabledGates = gates.filter(g => g.enabled)
 
   return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-6">
+    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
       <h3 className="text-lg font-medium text-oss-text mb-6">Gate Journey</h3>
       
       <div className="gate-journey">
@@ -1220,10 +1220,10 @@ function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
     <div className="detail-hero">
       <div>
         {/* Ticker */}
-        <div className="flex items-center gap-4 mb-1">
+        <div className="flex items-center gap-3 sm:gap-4 mb-1 flex-wrap">
           <span className="detail-ticker">{evaluation.underlying_ticker}</span>
           <span className={clsx(
-            'rounded-lg px-4 py-2 text-lg font-semibold',
+            'rounded-lg px-3 py-1.5 sm:px-4 sm:py-2 text-base sm:text-lg font-semibold',
             isCall ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
           )}>
             {evaluation.option_type}
@@ -1243,18 +1243,18 @@ function HeroSection({ evaluation, companyName, decision }: HeroSectionProps) {
       </div>
 
       {/* Price and Score */}
-      <div className="text-right">
-        <div className="mb-4">
+      <div className="text-right sm:text-right text-left">
+        <div className="mb-4 sm:mb-4 inline-block sm:block mr-8 sm:mr-0">
           <span className="text-xs text-oss-muted block mb-1">Premium</span>
-          <span className="font-mono text-3xl font-bold text-oss-text">
+          <span className="font-mono text-2xl sm:text-3xl font-bold text-oss-text">
             ${evaluation.mid.toFixed(2)}
           </span>
         </div>
         {decision && (
-          <div>
+          <div className="inline-block sm:block">
             <span className="text-xs text-oss-muted block mb-1">Final Score</span>
             <span className={clsx(
-              'font-mono text-3xl font-bold',
+              'font-mono text-2xl sm:text-3xl font-bold',
               decision.final_score >= 75 ? 'text-oss-approve' :
               decision.final_score >= 65 ? 'text-oss-watch' : 'text-oss-reject'
             )}>
@@ -1387,7 +1387,7 @@ export default function EvaluationDetail() {
   const effectiveThesis = (thesis?.status === 'COMPLETED' ? thesis : null) ?? mutationThesis ?? thesis
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* Back Link + Track Trade Button */}
       <div className="flex items-center justify-between">
         <Link

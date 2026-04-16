@@ -31,6 +31,8 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
   const premium = evaluation.mid ?? 0
   const contractCost = premium * 100
   const score = evaluation.convictionScore ?? 0
+  const absDelta = Math.abs(evaluation.delta ?? 0)
+  const moneynessPct = evaluation.moneyness_pct ?? 0
 
   const handleClick = () => {
     navigate(`/evaluation/${evaluation.underlying_ticker}/${evaluation.evaluation_id}`)
@@ -95,8 +97,8 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
           </div>
         </div>
 
-        {/* Row 2: Contract details */}
-        <div className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] font-mono lg:w-48">
+        {/* Row 2: Contract details + metrics */}
+        <div className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] font-mono lg:w-48 flex-wrap">
           <span>${evaluation.strike}</span>
           <span className="text-[var(--text-muted)]">&middot;</span>
           <span>{formatExpiry(evaluation.expiration_date)}</span>
@@ -104,6 +106,18 @@ export function OppCard({ evaluation, rank, className }: OppCardProps) {
           <span>${premium.toFixed(2)}</span>
           <span className="text-[var(--text-muted)] text-xs">
             (${contractCost.toLocaleString('en-US', { maximumFractionDigits: 0 })})
+          </span>
+          <span className="text-[var(--text-muted)]">&middot;</span>
+          <span className="text-xs">
+            <span className="text-[var(--text-muted)]">&Delta;</span>{' '}
+            {absDelta.toFixed(2)}
+          </span>
+          <span className="text-[var(--text-muted)]">&middot;</span>
+          <span className={clsx(
+            'text-xs',
+            moneynessPct > 0 ? 'text-[var(--text-muted)]' : 'text-amber-400',
+          )}>
+            {moneynessPct > 0 ? `${moneynessPct.toFixed(1)}% OTM` : moneynessPct === 0 ? 'ATM' : 'ITM'}
           </span>
         </div>
 

@@ -808,11 +808,25 @@ body {
   margin-bottom: 24px;
 }
 
+@media (max-width: 639px) {
+  .detail-hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+}
+
 .detail-ticker {
   font-size: 32px;
   font-weight: 800;
   color: var(--text-primary);
   line-height: 1;
+}
+
+@media (max-width: 639px) {
+  .detail-ticker {
+    font-size: 24px;
+  }
 }
 
 /* Gate Journey Timeline */
@@ -821,6 +835,20 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   position: relative;
+}
+
+@media (max-width: 639px) {
+  .gate-journey {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+
+  .gate-node {
+    min-width: 48px;
+    flex-shrink: 0;
+  }
 }
 
 .gate-journey::before {
