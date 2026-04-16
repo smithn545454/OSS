@@ -13,11 +13,12 @@ import {
   Loader2,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { useTrade, useCloseTrade } from '@/hooks/useApi'
+import { useTrade, useCloseTrade, usePaperComparison } from '@/hooks/useApi'
 import { formatDateTime } from '@/lib/formatTime'
 import type { TradeExitReason, StockTechnicalsResponse, ExitPlanThesis } from '@/lib/types'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
 import { ExitPlanCard } from '@/components/AITradeThesis'
+import PaperComparison from '@/components/trades/PaperComparison'
 
 const EXIT_REASONS: { value: TradeExitReason; label: string }[] = [
   { value: 'PROFIT_TARGET', label: 'Profit Target' },
@@ -34,6 +35,9 @@ export default function TradeDetail() {
   const { tradeId } = useParams<{ tradeId: string }>()
   const { data: trade, isLoading, error } = useTrade(tradeId || '')
   const closeTrade = useCloseTrade()
+
+  const isClosed = trade?.status === 'CLOSED'
+  const { data: paperComparison } = usePaperComparison(tradeId || '', isClosed)
 
   const tradeTicker = (trade?.snapshot as Record<string, unknown>)?.underlying_ticker as string | undefined
   usePageTitle(tradeTicker ? `${tradeTicker} Trade Detail` : 'Trade Detail')
@@ -211,6 +215,11 @@ export default function TradeDetail() {
           </div>
         )}
       </div>
+
+      {/* Paper Trade Comparison (closed trades only) */}
+      {isClosed && paperComparison?.paper_position && (
+        <PaperComparison trade={trade} comparison={paperComparison} />
+      )}
 
       {/* Underlying Stock Details (at entry) */}
       {underlyingTechnicals && (

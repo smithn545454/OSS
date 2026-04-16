@@ -991,6 +991,12 @@ export async function getTradeStats(): Promise<import('./types').TradeStatsRespo
   return fetchApi('/api/trades/stats')
 }
 
+export async function getPaperComparison(
+  tradeId: string
+): Promise<import('./types').PaperComparisonResponse> {
+  return fetchApi(`/api/trades/${encodeURIComponent(tradeId)}/paper-comparison`)
+}
+
 export async function isTradeTracked(
   evaluationId: string
 ): Promise<{ tracked: boolean; trade_id?: string }> {

@@ -18,7 +18,7 @@ from app.core.schemas import (
     RealTrade,
     TradeExitReason,
 )
-from app.db.tables import RealTradeTable
+from app.db.tables import PaperPositionTable, PaperSnapshotTable, RealTradeTable
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -250,6 +250,36 @@ async def get_trade(trade_id: str) -> dict[str, Any]:
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade not found: {trade_id}")
     return trade
+
+
+@router.get("/{trade_id}/paper-comparison")
+async def get_paper_comparison(trade_id: str) -> dict[str, Any]:
+    """Get the matching paper position and its daily snapshots for a real trade.
+
+    Links via evaluation_id: the real trade and paper position share the same
+    evaluation_id from the pipeline run that produced them.
+    """
+    trade = await RealTradeTable.get_by_id(trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade not found: {trade_id}")
+
+    snapshot = trade.get("snapshot", {})
+    evaluation_id = snapshot.get("evaluation_id") if isinstance(snapshot, dict) else None
+    if not evaluation_id:
+        return {"paper_position": None, "snapshots": []}
+
+    paper = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    if not paper:
+        return {"paper_position": None, "snapshots": []}
+
+    snapshots = await PaperSnapshotTable.list_by_position(
+        paper.position_id, limit=365
+    )
+
+    return {
+        "paper_position": paper.model_dump(mode="json"),
+        "snapshots": snapshots,
+    }
 
 
 @router.patch("/{trade_id}/close")

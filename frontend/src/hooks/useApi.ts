@@ -1132,6 +1132,14 @@ export function useTrade(tradeId: string) {
   })
 }
 
+export function usePaperComparison(tradeId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['trades', tradeId, 'paper-comparison'] as const,
+    queryFn: () => api.getPaperComparison(tradeId),
+    enabled: !!tradeId && enabled,
+  })
+}
+
 export function useCloseTrade() {
   const queryClient = useQueryClient()
   return useMutation({

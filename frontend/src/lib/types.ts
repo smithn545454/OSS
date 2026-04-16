@@ -1968,6 +1968,19 @@ export interface TradeStatsResponse {
   avg_return_pct: number
 }
 
+export interface PaperComparisonSnapshot {
+  position_id: string
+  snapshot_date: string
+  current_price?: number
+  current_pnl_pct?: number
+  [key: string]: unknown
+}
+
+export interface PaperComparisonResponse {
+  paper_position: PaperPosition | null
+  snapshots: PaperComparisonSnapshot[]
+}
+
 // ============================================================================
 // Scanner Performance Analysis (AI-Powered)
 // ============================================================================
