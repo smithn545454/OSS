@@ -78,6 +78,46 @@ class TestPolicyTable:
         result = await PolicyTable.list()
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_list_skips_unparseable_rows(self, mock_db, default_policy, caplog):
+        """Legacy pre-v3 PillarWeights rows must not break list().
+
+        Simulates a dev DynamoDB row stuck with v2-era weights
+        ({directional, structural, volatility}) alongside a valid v3+ row.
+        """
+        from app.db.tables import PolicyTable
+
+        good_item = default_policy.to_dynamodb_item()
+        good_item["PK"] = "POLICY"
+        good_item["SK"] = default_policy.version
+
+        legacy_item = {
+            "PK": "POLICY",
+            "SK": "v2.0.0-legacy",
+            "version": "v2.0.0-legacy",
+            "policy_hash": "x" * 16,
+            "created_by": "legacy",
+            "is_active": False,
+            "config": {
+                "pillars": {
+                    "weights": {
+                        "directional": 0.3,
+                        "structural": 0.4,
+                        "volatility": 0.3,
+                    }
+                }
+            },
+        }
+
+        mock_db.query = AsyncMock(return_value=[good_item, legacy_item])
+
+        with caplog.at_level("WARNING", logger="app.db.tables"):
+            result = await PolicyTable.list()
+
+        assert len(result) == 1
+        assert result[0].version == default_policy.version
+        assert any("v2.0.0-legacy" in r.message for r in caplog.records)
+
 
 # ---------------------------------------------------------------------------
 # OpportunityTable

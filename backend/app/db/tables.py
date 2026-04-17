@@ -94,14 +94,27 @@ class PolicyTable:
 
     @staticmethod
     async def list(limit: int = 20) -> list[Policy]:
-        """List policy versions (most recent first)."""
+        """List policy versions (most recent first).
+
+        Rows that fail to parse under the current Policy schema (e.g. legacy
+        pre-v3 PillarWeights shapes left in dev) are skipped with a warning so
+        one bad row can't break the list endpoint.
+        """
         db = get_dynamodb()
         items = await db.query(PolicyTable.TABLE, "POLICY", limit=limit, scan_forward=False)
         policies = []
         for item in items:
+            version = item.get("SK")
             item.pop("PK", None)
             item.pop("SK", None)
-            policies.append(Policy(**item))
+            try:
+                policies.append(Policy(**item))
+            except Exception as exc:
+                logger.warning(
+                    "Skipping unparseable policy row version=%s: %s",
+                    version,
+                    exc,
+                )
         return policies
 
     @staticmethod
