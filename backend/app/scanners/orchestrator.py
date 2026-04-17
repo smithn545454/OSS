@@ -46,7 +46,13 @@ from app.core.schemas import (
     TradeThesis,
 )
 from app.core.watchlist import WatchlistManager
-from app.db.tables import EvaluationTable, IVHistoryTable, OpportunityTable, PolicyTable
+from app.db.tables import (
+    EvaluationTable,
+    IVHistoryTable,
+    OpportunityTable,
+    PolicyTable,
+    SP500TickerTable,
+)
 from app.filters.underlying import UnderlyingFilter
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
 from app.scanners.breakout import BreakoutScanner
@@ -683,6 +689,19 @@ class ScannerOrchestrator:
                         CatalystDataService(earnings_cache=earnings_cache)
                     )
 
+                # Pillar v4 wiring: DynamoDB-backed price history + sector map
+                # + earnings-history (historical_move_magnitude). All three
+                # read from tables populated by Phase 1 backfills.
+                from app.services.earnings_calendar import EarningsCalendarService
+                from app.services.price_history import PriceHistoryService
+                v4_price_history = PriceHistoryService(polygon_client=polygon)
+                v4_earnings_calendar = EarningsCalendarService()
+                try:
+                    v4_sector_map = await SP500TickerTable.get_sector_map()
+                except Exception as e:
+                    logger.warning(f"Could not load sector map: {e}")
+                    v4_sector_map = {}
+
                 feature_sets: list[FeatureSet] = []
                 if not streaming and evaluations:
                     try:
@@ -697,6 +716,9 @@ class ScannerOrchestrator:
                             persist_features=True,
                             data_provider=data_provider,
                             as_of_date=effective_date,
+                            earnings_calendar_service=v4_earnings_calendar,
+                            sector_map=v4_sector_map,
+                            price_history_service=v4_price_history,
                         )
 
                         logger.info(
@@ -1098,10 +1120,19 @@ class ScannerOrchestrator:
         # Pre-create a shared FeatureComputer for all evaluations.
         # Pre-fetch daily bars + IV history once to avoid per-eval S3 round-trips.
         from app.features.calculator import FeatureComputer
+        from app.services.earnings_calendar import EarningsCalendarService
+        from app.services.price_history import PriceHistoryService
+        try:
+            stream_sector_map = await SP500TickerTable.get_sector_map()
+        except Exception:
+            stream_sector_map = {}
         shared_feature_computer = FeatureComputer(
             config=policy_config.features,
             data_provider=data_provider,
             as_of_date=effective_date,
+            earnings_calendar_service=EarningsCalendarService(),
+            sector_map=stream_sector_map,
+            price_history_service=PriceHistoryService(polygon_client=polygon),
         )
         # Pre-populate underlying bars cache for all tickers
         all_tickers_plus_spy = tickers + [policy_config.features.rs_benchmark_ticker]

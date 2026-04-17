@@ -460,6 +460,15 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
 
         # 6. Run Stages 4-7 within a PolygonClient context
         async with PolygonClient() as polygon:
+            # Pillar v4 wiring — same services the main orchestrator uses
+            from app.db.tables import SP500TickerTable
+            from app.services.earnings_calendar import EarningsCalendarService
+            from app.services.price_history import PriceHistoryService
+            try:
+                uv_sector_map = await SP500TickerTable.get_sector_map()
+            except Exception:
+                uv_sector_map = {}
+
             # Stage 4: Feature Computation
             feature_sets = await run_feature_computation(
                 run_id=run_id,
@@ -469,6 +478,9 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
                 orchestrator=pipeline,
                 config=policy_config.features,
                 persist_features=True,
+                earnings_calendar_service=EarningsCalendarService(),
+                sector_map=uv_sector_map,
+                price_history_service=PriceHistoryService(polygon_client=polygon),
             )
             logger.info(f"UV Bridge Stage 4: {len(feature_sets)} feature sets computed")
 

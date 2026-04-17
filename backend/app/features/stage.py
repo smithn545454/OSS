@@ -42,6 +42,9 @@ class FeatureComputationStage:
         catalyst_service: Optional[Any] = None,
         data_provider: Optional[Any] = None,
         as_of_date: Optional[date] = None,
+        earnings_calendar_service: Optional[Any] = None,
+        sector_map: Optional[dict[str, str]] = None,
+        price_history_service: Optional[Any] = None,
     ) -> None:
         """Initialize the feature computation stage.
 
@@ -52,6 +55,9 @@ class FeatureComputationStage:
             catalyst_service: CatalystDataService for earnings/SEC filing data
             data_provider: Optional DataProvider for unified data access (backtest mode)
             as_of_date: Target date for backtesting (defaults to today)
+            earnings_calendar_service: Pillar v4 historical_move_magnitude source
+            sector_map: Pillar v4 {ticker: sector} map for sector_rs_20d
+            price_history_service: Pillar v4 daily-bar source (DynamoDB-backed)
         """
         self._polygon = polygon_client
         self._orchestrator = orchestrator or PipelineOrchestrator()
@@ -64,6 +70,9 @@ class FeatureComputationStage:
             config=config,
             data_provider=data_provider,
             as_of_date=as_of_date,
+            earnings_calendar_service=earnings_calendar_service,
+            sector_map=sector_map,
+            price_history_service=price_history_service,
         )
 
     async def execute(
@@ -241,6 +250,9 @@ async def run_feature_computation(
     persist_features: bool = True,
     data_provider: Optional[Any] = None,
     as_of_date: Optional[date] = None,
+    earnings_calendar_service: Optional[Any] = None,
+    sector_map: Optional[dict[str, str]] = None,
+    price_history_service: Optional[Any] = None,
 ) -> list[FeatureSet]:
     """Convenience function to run feature computation stage.
 
@@ -266,6 +278,9 @@ async def run_feature_computation(
         catalyst_service=catalyst_service,
         data_provider=data_provider,
         as_of_date=as_of_date,
+        earnings_calendar_service=earnings_calendar_service,
+        sector_map=sector_map,
+        price_history_service=price_history_service,
     )
     return await stage.execute(
         run_id=run_id,

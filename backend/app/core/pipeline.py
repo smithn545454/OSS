@@ -201,14 +201,19 @@ class PipelineOrchestrator:
 
         for event in events:
             if event.stage == PipelineStage.OPPORTUNITY_DISCOVERY:
-                total_opportunities = event.items_out
+                total_opportunities += event.items_out
             elif event.stage == PipelineStage.CONTRACT_SELECTION:
-                total_evaluations = event.items_out
+                total_evaluations += event.items_out
             elif event.stage == PipelineStage.DECISION_LOGIC:
-                # Get verdict counts from metadata
-                total_approves = event.metadata.get("approves", 0)
-                total_watches = event.metadata.get("watches", 0)
-                total_rejects = event.metadata.get("rejects", 0)
+                # Sum counts across multiple DECISION_LOGIC events.
+                # A single run can record more than one: the main scan
+                # plus the UV bridge (processes PENDING UV evaluations
+                # into the same run_id). Assigning instead of summing
+                # caused UV bridge's 0-approve event to overwrite the
+                # main scan's real count.
+                total_approves += event.metadata.get("approves", 0)
+                total_watches += event.metadata.get("watches", 0)
+                total_rejects += event.metadata.get("rejects", 0)
 
         # Build list of completed stages
         stages_completed = [e.stage for e in events]
