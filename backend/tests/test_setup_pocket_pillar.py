@@ -365,7 +365,7 @@ class TestFromEvaluationAndFeaturesWiring:
 
 class TestPillarWeightsDefaults:
     def test_v31_defaults_promote_setup_pocket(self):
-        w = PillarWeights()
+        w = PillarWeights.v3_default()
         assert w.premium_leverage == 0.25
         assert w.underlying_behavior == 0.35
         assert w.setup_quality == 0.40

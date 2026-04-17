@@ -242,15 +242,15 @@ class TestPerScannerWeightsDecision:
         """DecisionCalculator with pillar_config uses scanner-specific weights."""
         from app.core.schemas import PillarConfig
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "BREAKOUT": PillarWeights(
                     premium_leverage=0.15,
                     underlying_behavior=0.80,
                     setup_quality=0.05,
                 ),
             }
-        )
+        })
         calculator = DecisionCalculator(pillar_config=config)
 
         # Global weights: 0.25*80+0.35*70+0.40*90=80.5
@@ -274,15 +274,15 @@ class TestPerScannerWeightsDecision:
         from app.core.schemas import PillarConfig
         from app.decision.calculator import DecisionContext
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "UNUSUAL_VOLUME": PillarWeights(
                     premium_leverage=0.45,
                     underlying_behavior=0.15,
                     setup_quality=0.40,
                 ),
             }
-        )
+        })
         calculator = DecisionCalculator(pillar_config=config)
 
         ctx = DecisionContext(

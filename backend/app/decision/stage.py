@@ -69,7 +69,8 @@ class DecisionStage:
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = decision_config or DecisionConfig()
-        self._weights = pillar_weights or PillarWeights()
+        # v3 fallback — remove at Phase 9.
+        self._weights = pillar_weights or PillarWeights.v3_default()
         self._thesis_config = thesis_config or ThesisConfig()
         self._calculator = DecisionCalculator(
             decision_config, pillar_weights, pillar_config=pillar_config

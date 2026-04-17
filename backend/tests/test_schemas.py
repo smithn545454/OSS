@@ -97,10 +97,15 @@ class TestEnumStability:
         assert set(DTEBucket) == {DTEBucket.A, DTEBucket.B, DTEBucket.C, DTEBucket.D}
 
     def test_pillar_id_members(self):
+        # v3 values are retained forever for historical-data deserialization;
+        # v4 values are the active regime from Phase 7 onward.
         assert set(PillarId) == {
             PillarId.PREMIUM_LEVERAGE,
             PillarId.UNDERLYING_BEHAVIOR,
             PillarId.SETUP_QUALITY,
+            PillarId.DIRECTIONAL_CONVICTION,
+            PillarId.MOVE_POTENTIAL,
+            PillarId.TRADE_STRUCTURE,
         }
 
     def test_verdict_members(self):
@@ -211,14 +216,41 @@ class TestPolicyConfigDefaults:
         assert cfg.tier_1_max_spread == 5.0
         assert cfg.tier_2_min_pillar == 55
 
-    def test_pillar_weights_defaults(self):
+    def test_pillar_weights_v3_default(self):
         # Policy v3.1.0 defaults: Setup Pocket dominates (0.40), PL/UB filter quality.
-        cfg = PillarWeights()
+        cfg = PillarWeights.v3_default()
         assert cfg.premium_leverage == 0.25
         assert cfg.underlying_behavior == 0.35
         assert cfg.setup_quality == 0.40
-        total = cfg.premium_leverage + cfg.underlying_behavior + cfg.setup_quality
+        total = (cfg.premium_leverage or 0) + (cfg.underlying_behavior or 0) + (cfg.setup_quality or 0)
         assert abs(total - 1.0) < 1e-9
+        assert cfg.is_v3()
+        assert not cfg.is_v4()
+
+    def test_pillar_weights_v4_default(self):
+        # v4: Directional Conviction (0.40), Move Potential (0.35), Trade Structure (0.25).
+        cfg = PillarWeights.v4_default()
+        assert cfg.directional_conviction == 0.40
+        assert cfg.move_potential == 0.35
+        assert cfg.trade_structure == 0.25
+        total = (cfg.directional_conviction or 0) + (cfg.move_potential or 0) + (cfg.trade_structure or 0)
+        assert abs(total - 1.0) < 1e-9
+        assert cfg.is_v4()
+        assert not cfg.is_v3()
+
+    def test_pillar_weights_bare_construction_invalid(self):
+        # Bare PillarWeights() carries no regime; validator must reject it.
+        import pytest
+
+        with pytest.raises(ValueError, match="fully v3.*OR fully v4"):
+            PillarWeights()
+
+    def test_pillar_weights_mixed_regime_invalid(self):
+        # Mixing v3 and v4 fields is invalid.
+        import pytest
+
+        with pytest.raises(ValueError, match="fully v3.*OR fully v4"):
+            PillarWeights(premium_leverage=0.5, directional_conviction=0.5)
 
     def test_tracking_config_defaults(self):
         cfg = TrackingConfig()

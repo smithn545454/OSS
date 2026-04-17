@@ -44,11 +44,12 @@ class PillarCalculator:
 
         Args:
             config: Pillar scoring configuration. If omitted, uses
-                `PillarConfig()` which loads the seeded Policy v3.0.0
-                defaults. Production code should explicitly pass the
-                active policy's pillar config.
+                `PillarConfig.v3_default()` which loads the seeded Policy
+                v3.0.0 defaults. Production code should explicitly pass the
+                active policy's pillar config. Transitional fallback —
+                remove at Phase 9 alongside v3 code.
         """
-        self._config = config or PillarConfig()
+        self._config = config or PillarConfig.v3_default()
 
     def compute_pillars(
         self,
@@ -83,6 +84,12 @@ class PillarCalculator:
                 opportunity=opportunity,
             )
 
+        # v3-only compute path — v4 orchestrator registered in Phase 3.
+        # Assert non-None because PillarConfig validator guarantees v3 shape
+        # when this method runs.
+        assert self._config.premium_leverage is not None
+        assert self._config.underlying_behavior is not None
+        assert self._config.setup_quality is not None
         premium_leverage = compute_premium_leverage_pillar(
             context, self._config.premium_leverage
         )
@@ -231,13 +238,13 @@ def compute_final_score(
         Final weighted composite score (0-100)
     """
     if config is None:
-        config = PillarConfig()
+        config = PillarConfig.v3_default()
     weights = config.get_weights(scanner_source)
 
     final = (
-        weights.premium_leverage * premium_leverage
-        + weights.underlying_behavior * underlying_behavior
-        + weights.setup_quality * setup_quality
+        (weights.premium_leverage or 0.0) * premium_leverage
+        + (weights.underlying_behavior or 0.0) * underlying_behavior
+        + (weights.setup_quality or 0.0) * setup_quality
     )
 
     return max(0.0, min(100.0, final))

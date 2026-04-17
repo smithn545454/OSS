@@ -385,7 +385,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     # Load pillar config (uses v3.0.0 defaults from the seed JSON)
     log.info("Loading Policy v3.0.0 pillar config...")
-    pillar_config = PillarConfig()
+    pillar_config = PillarConfig.v3_default()
     calculator = PillarCalculator(pillar_config)
 
     # Query all positions

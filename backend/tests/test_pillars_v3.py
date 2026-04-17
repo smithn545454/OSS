@@ -28,7 +28,7 @@ from app.pillars.underlying_behavior import compute_underlying_behavior_pillar
 @pytest.fixture
 def v3_pillar_config() -> PillarConfig:
     """Load the default Policy v3.0.0 pillar config from the seed JSON."""
-    return PillarConfig()
+    return PillarConfig.v3_default()
 
 
 def make_context(
@@ -305,15 +305,15 @@ class TestPerScannerWeights:
         """BREAKOUT scanner uses UB-heavy weights when configured."""
         from app.core.schemas import PillarWeights
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "BREAKOUT": PillarWeights(
                     premium_leverage=0.15,
                     underlying_behavior=0.80,
                     setup_quality=0.05,
                 ),
             }
-        )
+        })
         # Global: 0.25*80 + 0.35*70 + 0.40*90 = 80.5
         global_score = compute_final_score(80.0, 70.0, 90.0, config)
         assert global_score == pytest.approx(80.5, abs=0.01)
@@ -328,15 +328,15 @@ class TestPerScannerWeights:
         """Scanner names with _SCANNER suffix are normalised."""
         from app.core.schemas import PillarWeights
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "UNUSUAL_VOLUME": PillarWeights(
                     premium_leverage=0.45,
                     underlying_behavior=0.15,
                     setup_quality=0.40,
                 ),
             }
-        )
+        })
         score = compute_final_score(
             80.0, 70.0, 90.0, config, scanner_source="UNUSUAL_VOLUME_SCANNER"
         )
@@ -347,15 +347,15 @@ class TestPerScannerWeights:
         """Unknown scanner → global weights."""
         from app.core.schemas import PillarWeights
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "BREAKOUT": PillarWeights(
                     premium_leverage=0.15,
                     underlying_behavior=0.80,
                     setup_quality=0.05,
                 ),
             }
-        )
+        })
         score = compute_final_score(
             80.0, 70.0, 90.0, config, scanner_source="SOME_NEW_SCANNER"
         )
@@ -366,15 +366,15 @@ class TestPerScannerWeights:
         """None scanner_source → global weights."""
         from app.core.schemas import PillarWeights
 
-        config = PillarConfig(
-            scanner_weights={
+        config = PillarConfig.v3_default().model_copy(update={
+            "scanner_weights": {
                 "BREAKOUT": PillarWeights(
                     premium_leverage=0.15,
                     underlying_behavior=0.80,
                     setup_quality=0.05,
                 ),
             }
-        )
+        })
         score = compute_final_score(80.0, 70.0, 90.0, config, scanner_source=None)
         assert score == pytest.approx(80.5, abs=0.01)
 
@@ -384,19 +384,15 @@ class TestPerScannerWeights:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            PillarConfig(
-                scanner_weights={
-                    "BREAKOUT": PillarWeights(
-                        premium_leverage=0.50,
-                        underlying_behavior=0.80,
-                        setup_quality=0.05,
-                    ),
-                }
+            PillarWeights(
+                premium_leverage=0.50,
+                underlying_behavior=0.80,
+                setup_quality=0.05,
             )
 
     def test_scanner_weights_none_deserializes(self):
         """PillarConfig with scanner_weights=None deserializes correctly."""
-        config = PillarConfig(scanner_weights=None)
+        config = PillarConfig.v3_default()
         assert config.scanner_weights is None
         # get_weights still returns global
         assert config.get_weights("BREAKOUT") is config.weights

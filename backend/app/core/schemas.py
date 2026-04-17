@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -60,11 +60,21 @@ class DTEBucket(str, Enum):
 
 
 class PillarId(str, Enum):
-    """Scoring pillar identifiers (Policy v3.0.0)."""
+    """Scoring pillar identifiers.
 
+    v3 values are retained permanently (even after Phase 9 v3 code removal)
+    so historical Decision, PillarScore, PaperPosition, and EvaluationSnapshot
+    records remain deserializable.
+    """
+
+    # v3.x (retained for historical data; code removed at Phase 9)
     PREMIUM_LEVERAGE = "PREMIUM_LEVERAGE"
     UNDERLYING_BEHAVIOR = "UNDERLYING_BEHAVIOR"
     SETUP_QUALITY = "SETUP_QUALITY"
+    # v4.0.0 (Sharpshooter pillars — active from Phase 7 onward)
+    DIRECTIONAL_CONVICTION = "DIRECTIONAL_CONVICTION"
+    MOVE_POTENTIAL = "MOVE_POTENTIAL"
+    TRADE_STRUCTURE = "TRADE_STRUCTURE"
 
 
 class Verdict(str, Enum):
@@ -380,15 +390,34 @@ class GateResult(OSSBaseModel):
 
 
 class Decision(OSSBaseModel):
-    """Final decision for an evaluation (Policy v3.0.0 pillars)."""
+    """Final decision for an evaluation.
+
+    Pillar score fields reflect whichever regime produced the decision:
+
+    - v3 decisions populate ``premium_leverage_score`` / ``underlying_behavior_score`` /
+      ``setup_quality_score`` (v4 fields remain None).
+    - v4 decisions populate ``directional_conviction_score`` / ``move_potential_score`` /
+      ``trade_structure_score`` (v3 fields remain None once Phase 6 flips them
+      to Optional).
+
+    Phase 2 keeps v3 score fields non-Optional for backward-compat with the
+    many downstream read sites that treat them as ``float``. Phase 6 converts
+    v3 fields to ``Optional[float]`` once all read sites have been
+    generalized to handle either regime.
+    """
 
     evaluation_id: str
     verdict: Verdict
     quality_tier: Optional[QualityTier] = None
     final_score: float
+    # v3 pillar scores (retained forever for historical data; Optional in Phase 6)
     premium_leverage_score: float
     underlying_behavior_score: float
     setup_quality_score: float
+    # v4 pillar scores (populated for Phase 7+ decisions)
+    directional_conviction_score: Optional[float] = None
+    move_potential_score: Optional[float] = None
+    trade_structure_score: Optional[float] = None
     primary_reason_code: str
     supporting_reason_codes: list[str]
     failed_gates: list[str]
@@ -469,9 +498,14 @@ class PaperPosition(OSSBaseModel):
     scanner_list: Optional[list[str]] = None  # All scanners that fired (for confluence)
     convergence_count: Optional[int] = None
     conviction_score: Optional[float] = None
+    # v3 denormalized pillar scores (retained forever for historical positions)
     pillar_premium_leverage: Optional[float] = None
     pillar_underlying_behavior: Optional[float] = None
     pillar_setup_quality: Optional[float] = None
+    # v4 denormalized pillar scores (populated for positions opened under v4 policy)
+    pillar_directional_conviction: Optional[float] = None
+    pillar_move_potential: Optional[float] = None
+    pillar_trade_structure: Optional[float] = None
     strike: Optional[float] = None
     option_type: Optional[str] = None
     expiration_date: Optional[str] = None
@@ -726,30 +760,113 @@ class GateConfig(OSSBaseModel):
 
 
 class PillarWeights(OSSBaseModel):
-    """Pillar weight configuration (Policy v3.1.0). Weights must sum to 1.0.
+    """Pillar weight configuration.
 
-    Policy v3.1.0 defaults: Setup Pocket (semantically the renamed Setup Quality
-    pillar — schema field locked by migration shims) is promoted from 17% to 40%
-    so the conviction ranking concentrates in the home-run-bearing pockets.
-    Premium Leverage and Underlying Behavior retain a within-pocket quality
-    filtering role at reduced weights.
+    A PillarWeights instance is *shaped* for one of two regimes:
+
+    - **v3** (Premium Leverage / Underlying Behavior / Setup Quality) — retained
+      for the deprecation window; removed at Phase 9.
+    - **v4** (Directional Conviction / Move Potential / Trade Structure) —
+      active from Phase 7 onward, the only regime after Phase 9.
+
+    Exactly one regime's three fields must be fully populated and sum to 1.0.
+    Mixing regimes or leaving a regime partially filled raises a validation
+    error. Bare `PillarWeights()` construction is intentionally invalid —
+    callers must be explicit about which regime they intend (use
+    :meth:`v3_default` or :meth:`v4_default` when a sensible baseline is fine).
     """
 
-    premium_leverage: float = 0.25
-    underlying_behavior: float = 0.35
-    setup_quality: float = 0.40
+    # v3 (retained through Phase 8 observation window; fields remain forever
+    # for historical data deserialization)
+    premium_leverage: Optional[float] = None
+    underlying_behavior: Optional[float] = None
+    setup_quality: Optional[float] = None
+    # v4 (Sharpshooter pillars)
+    directional_conviction: Optional[float] = None
+    move_potential: Optional[float] = None
+    trade_structure: Optional[float] = None
+
+    @classmethod
+    def v3_default(cls) -> "PillarWeights":
+        """Baseline v3 weights (0.25 / 0.35 / 0.40).
+
+        Transitional helper — delete at Phase 9 alongside v3 code removal.
+        """
+        return cls(
+            premium_leverage=0.25,
+            underlying_behavior=0.35,
+            setup_quality=0.40,
+        )
+
+    @classmethod
+    def v4_default(cls) -> "PillarWeights":
+        """Baseline v4 weights (0.40 directional / 0.35 move / 0.25 structure).
+
+        These are the exponents used by the weighted geometric-mean composite.
+        """
+        return cls(
+            directional_conviction=0.40,
+            move_potential=0.35,
+            trade_structure=0.25,
+        )
+
+    def is_v4(self) -> bool:
+        """True if this instance carries v4 weights."""
+        return all(
+            x is not None
+            for x in (
+                self.directional_conviction,
+                self.move_potential,
+                self.trade_structure,
+            )
+        )
+
+    def is_v3(self) -> bool:
+        """True if this instance carries v3 weights."""
+        return all(
+            x is not None
+            for x in (
+                self.premium_leverage,
+                self.underlying_behavior,
+                self.setup_quality,
+            )
+        )
 
     @model_validator(mode="after")
-    def _weights_must_sum_to_one(self) -> "PillarWeights":
-        total = self.premium_leverage + self.underlying_behavior + self.setup_quality
-        if abs(total - 1.0) > 1e-4:
-            raise ValueError(
-                f"Pillar weights must sum to 1.0, got {total:.6f} "
-                f"(premium_leverage={self.premium_leverage}, "
-                f"underlying_behavior={self.underlying_behavior}, "
-                f"setup_quality={self.setup_quality})"
-            )
-        return self
+    def _weights_must_be_fully_v3_or_fully_v4(self) -> "PillarWeights":
+        v3 = [self.premium_leverage, self.underlying_behavior, self.setup_quality]
+        v4 = [self.directional_conviction, self.move_potential, self.trade_structure]
+        v3_vals = [x for x in v3 if x is not None]
+        v4_vals = [x for x in v4 if x is not None]
+
+        if len(v3_vals) == 3 and len(v4_vals) == 0:
+            total = sum(v3_vals)
+            if abs(total - 1.0) > 1e-4:
+                raise ValueError(
+                    f"v3 pillar weights must sum to 1.0, got {total:.6f} "
+                    f"(premium_leverage={self.premium_leverage}, "
+                    f"underlying_behavior={self.underlying_behavior}, "
+                    f"setup_quality={self.setup_quality})"
+                )
+            return self
+
+        if len(v4_vals) == 3 and len(v3_vals) == 0:
+            total = sum(v4_vals)
+            if abs(total - 1.0) > 1e-4:
+                raise ValueError(
+                    f"v4 pillar weights must sum to 1.0, got {total:.6f} "
+                    f"(directional_conviction={self.directional_conviction}, "
+                    f"move_potential={self.move_potential}, "
+                    f"trade_structure={self.trade_structure})"
+                )
+            return self
+
+        raise ValueError(
+            "PillarWeights must be fully v3 (premium_leverage + "
+            "underlying_behavior + setup_quality) OR fully v4 "
+            "(directional_conviction + move_potential + trade_structure). "
+            f"Got v3={v3}, v4={v4}."
+        )
 
 
 class SubscoreBreakpoint(OSSBaseModel):
@@ -947,26 +1064,63 @@ def _default_pillar_config_v2(pillar_key: str) -> Any:
 
 
 class PillarConfig(OSSBaseModel):
-    """Complete pillar scoring configuration (Policy v3.0.0).
+    """Complete pillar scoring configuration.
 
-    Uses return-based empirically-derived breakpoint scoring. Defaults
-    for all pillars are loaded from `scripts/output/policy_v3_default.json`
-    via `_load_default_pillar_configs()`, so `PillarConfig()` produces a
-    fully-valid instance in environments where the seed file is available.
-    Production code should always load the active policy from DynamoDB.
+    A PillarConfig carries one regime's worth of pillar definitions:
+
+    - **v3**: ``premium_leverage`` + ``underlying_behavior`` + ``setup_quality``
+      populated; v4 fields all None. ``composite_formula="weighted_sum"``.
+    - **v4**: ``directional_conviction`` + ``move_potential`` + ``trade_structure``
+      populated; v3 fields all None. ``composite_formula="weighted_geometric_mean"``.
+
+    The active regime is determined by inspecting which pillar fields are
+    populated and is enforced by the post-init validator. Bare ``PillarConfig()``
+    construction is invalid — callers must use :meth:`v3_default` (which loads
+    the seeded Policy v3.0.0 pillar definitions) or :meth:`v4_default` (TBD
+    Phase 5).
     """
 
-    weights: PillarWeights = Field(default_factory=PillarWeights)
+    weights: PillarWeights
     scanner_weights: Optional[dict[str, PillarWeights]] = None
-    premium_leverage: PillarConfigV2 = Field(
-        default_factory=lambda: _default_pillar_config_v2("premium_leverage")
-    )
-    underlying_behavior: PillarConfigV2 = Field(
-        default_factory=lambda: _default_pillar_config_v2("underlying_behavior")
-    )
-    setup_quality: PillarConfigV2 = Field(
-        default_factory=lambda: _default_pillar_config_v2("setup_quality")
-    )
+    composite_formula: Literal["weighted_sum", "weighted_geometric_mean"] = "weighted_sum"
+    # v3 pillar definitions (retained through Phase 8; deleted at Phase 9)
+    premium_leverage: Optional[PillarConfigV2] = None
+    underlying_behavior: Optional[PillarConfigV2] = None
+    setup_quality: Optional[PillarConfigV2] = None
+    # v4 pillar definitions (active from Phase 7 onward)
+    directional_conviction: Optional[PillarConfigV2] = None
+    move_potential: Optional[PillarConfigV2] = None
+    trade_structure: Optional[PillarConfigV2] = None
+
+    @classmethod
+    def v3_default(cls) -> "PillarConfig":
+        """Policy v3.0.0 baseline — loads seeded pillar definitions.
+
+        Transitional helper — delete at Phase 9 alongside v3 code removal.
+        """
+        return cls(
+            weights=PillarWeights.v3_default(),
+            composite_formula="weighted_sum",
+            premium_leverage=_default_pillar_config_v2("premium_leverage"),
+            underlying_behavior=_default_pillar_config_v2("underlying_behavior"),
+            setup_quality=_default_pillar_config_v2("setup_quality"),
+        )
+
+    def is_v4(self) -> bool:
+        """True if this config is in v4 regime."""
+        return (
+            self.directional_conviction is not None
+            and self.move_potential is not None
+            and self.trade_structure is not None
+        )
+
+    def is_v3(self) -> bool:
+        """True if this config is in v3 regime."""
+        return (
+            self.premium_leverage is not None
+            and self.underlying_behavior is not None
+            and self.setup_quality is not None
+        )
 
     def get_weights(self, scanner_source: Optional[str] = None) -> PillarWeights:
         """Return per-scanner weights if available, else global weights.
@@ -980,23 +1134,86 @@ class PillarConfig(OSSBaseModel):
         return self.weights
 
     @model_validator(mode="after")
-    def _validate_pillar_ids(self) -> "PillarConfig":
-        if self.premium_leverage.pillar_id != PillarId.PREMIUM_LEVERAGE:
-            raise ValueError(
-                f"premium_leverage must have pillar_id=PREMIUM_LEVERAGE, "
-                f"got {self.premium_leverage.pillar_id}"
-            )
-        if self.underlying_behavior.pillar_id != PillarId.UNDERLYING_BEHAVIOR:
-            raise ValueError(
-                f"underlying_behavior must have pillar_id=UNDERLYING_BEHAVIOR, "
-                f"got {self.underlying_behavior.pillar_id}"
-            )
-        if self.setup_quality.pillar_id != PillarId.SETUP_QUALITY:
-            raise ValueError(
-                f"setup_quality must have pillar_id=SETUP_QUALITY, "
-                f"got {self.setup_quality.pillar_id}"
-            )
-        return self
+    def _validate_regime_consistency(self) -> "PillarConfig":
+        v3_fields = [self.premium_leverage, self.underlying_behavior, self.setup_quality]
+        v4_fields = [self.directional_conviction, self.move_potential, self.trade_structure]
+        v3_present = [x for x in v3_fields if x is not None]
+        v4_present = [x for x in v4_fields if x is not None]
+
+        if len(v3_present) == 3 and len(v4_present) == 0:
+            # Locals narrow Optional away for mypy.
+            pl = self.premium_leverage
+            ub = self.underlying_behavior
+            sq = self.setup_quality
+            assert pl is not None and ub is not None and sq is not None
+            if not self.weights.is_v3():
+                raise ValueError(
+                    "PillarConfig has v3 pillar definitions but weights are "
+                    "not v3-shaped"
+                )
+            if self.composite_formula != "weighted_sum":
+                raise ValueError(
+                    "v3 PillarConfig must use composite_formula='weighted_sum', "
+                    f"got '{self.composite_formula}'"
+                )
+            if pl.pillar_id != PillarId.PREMIUM_LEVERAGE:
+                raise ValueError(
+                    f"premium_leverage must have pillar_id=PREMIUM_LEVERAGE, "
+                    f"got {pl.pillar_id}"
+                )
+            if ub.pillar_id != PillarId.UNDERLYING_BEHAVIOR:
+                raise ValueError(
+                    f"underlying_behavior must have pillar_id=UNDERLYING_BEHAVIOR, "
+                    f"got {ub.pillar_id}"
+                )
+            if sq.pillar_id != PillarId.SETUP_QUALITY:
+                raise ValueError(
+                    f"setup_quality must have pillar_id=SETUP_QUALITY, "
+                    f"got {sq.pillar_id}"
+                )
+            return self
+
+        if len(v4_present) == 3 and len(v3_present) == 0:
+            dc = self.directional_conviction
+            mp = self.move_potential
+            ts = self.trade_structure
+            assert dc is not None and mp is not None and ts is not None
+            if not self.weights.is_v4():
+                raise ValueError(
+                    "PillarConfig has v4 pillar definitions but weights are "
+                    "not v4-shaped"
+                )
+            if self.composite_formula != "weighted_geometric_mean":
+                raise ValueError(
+                    "v4 PillarConfig must use "
+                    "composite_formula='weighted_geometric_mean', "
+                    f"got '{self.composite_formula}'"
+                )
+            if dc.pillar_id != PillarId.DIRECTIONAL_CONVICTION:
+                raise ValueError(
+                    f"directional_conviction must have "
+                    f"pillar_id=DIRECTIONAL_CONVICTION, "
+                    f"got {dc.pillar_id}"
+                )
+            if mp.pillar_id != PillarId.MOVE_POTENTIAL:
+                raise ValueError(
+                    f"move_potential must have pillar_id=MOVE_POTENTIAL, "
+                    f"got {mp.pillar_id}"
+                )
+            if ts.pillar_id != PillarId.TRADE_STRUCTURE:
+                raise ValueError(
+                    f"trade_structure must have pillar_id=TRADE_STRUCTURE, "
+                    f"got {ts.pillar_id}"
+                )
+            return self
+
+        raise ValueError(
+            "PillarConfig must define exactly one regime: all three v3 pillars "
+            "(premium_leverage + underlying_behavior + setup_quality) OR all "
+            "three v4 pillars (directional_conviction + move_potential + "
+            f"trade_structure). Got v3={[int(x is not None) for x in v3_fields]}, "
+            f"v4={[int(x is not None) for x in v4_fields]}."
+        )
 
 
 class DecisionConfig(OSSBaseModel):
@@ -1080,7 +1297,7 @@ class PolicyConfig(OSSBaseModel):
     contract_selection: ContractSelectionConfig = Field(default_factory=ContractSelectionConfig)
     features: FeatureConfig = Field(default_factory=FeatureConfig)
     gates: GateConfig = Field(default_factory=GateConfig)
-    pillars: PillarConfig = Field(default_factory=PillarConfig)
+    pillars: PillarConfig = Field(default_factory=PillarConfig.v3_default)
     decision: DecisionConfig = Field(default_factory=DecisionConfig)
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
@@ -1750,9 +1967,14 @@ class EvaluationSnapshot(OSSBaseModel):
     verdict: str
     quality_tier: Optional[str] = None
     final_score: float
+    # v3 pillar scores (retained forever for historical data; Optional in Phase 6)
     premium_leverage_score: float
     underlying_behavior_score: float
     setup_quality_score: float
+    # v4 pillar scores (populated for Phase 7+ decisions)
+    directional_conviction_score: Optional[float] = None
+    move_potential_score: Optional[float] = None
+    trade_structure_score: Optional[float] = None
     primary_reason_code: str
     supporting_reason_codes: list[str]
     failed_gates: list[str]

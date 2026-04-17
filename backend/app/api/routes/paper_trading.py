@@ -2108,6 +2108,9 @@ async def rescore_paper_positions(
             ctx = ScoringContext.from_position_and_features(pos, feature_set)
 
             # Compute new pillar scores (Policy v3.0.0)
+            assert pillar_config.premium_leverage is not None
+            assert pillar_config.underlying_behavior is not None
+            assert pillar_config.setup_quality is not None
             premium_leverage = compute_premium_leverage_pillar(
                 ctx, pillar_config.premium_leverage
             )

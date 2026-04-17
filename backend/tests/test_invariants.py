@@ -69,9 +69,9 @@ class TestScoreInvariants:
 
     def test_pillar_weights_must_sum_to_one(self):
         """INV-5: PillarWeights validator enforces sum == 1.0."""
-        # Defaults work
-        pw = PillarWeights()
-        assert abs(pw.premium_leverage + pw.underlying_behavior + pw.setup_quality - 1.0) < 1e-9
+        # Defaults work (v3 baseline)
+        pw = PillarWeights.v3_default()
+        assert abs((pw.premium_leverage or 0) + (pw.underlying_behavior or 0) + (pw.setup_quality or 0) - 1.0) < 1e-9
 
         # Invalid weights rejected
         with pytest.raises(ValueError, match="must sum to 1.0"):

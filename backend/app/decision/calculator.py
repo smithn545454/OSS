@@ -116,13 +116,14 @@ class DecisionCalculator:
         Args:
             decision_config: Decision threshold configuration
             pillar_weights: Weights for combining pillar scores. If None,
-                uses PillarWeights defaults.
+                uses PillarWeights.v3_default() (v3 baseline). Transitional
+                fallback — remove at Phase 9 alongside v3 code.
             pillar_config: Full PillarConfig for per-scanner weight lookup.
                 When provided, scanner_source on DecisionContext selects
                 the appropriate weights. Falls back to pillar_weights/global.
         """
         self._config = decision_config or DecisionConfig()
-        self._weights = pillar_weights or PillarWeights()
+        self._weights = pillar_weights or PillarWeights.v3_default()
         self._pillar_config = pillar_config
 
     def compute_final_score(
@@ -143,9 +144,9 @@ class DecisionCalculator:
         else:
             weights = self._weights
         final = (
-            weights.premium_leverage * premium_leverage
-            + weights.underlying_behavior * underlying_behavior
-            + weights.setup_quality * setup_quality
+            (weights.premium_leverage or 0.0) * premium_leverage
+            + (weights.underlying_behavior or 0.0) * underlying_behavior
+            + (weights.setup_quality or 0.0) * setup_quality
         )
         return max(0.0, min(100.0, final))
 

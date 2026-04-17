@@ -516,8 +516,8 @@ class TestPipelineBugRegressions:
         from app.core.schemas import PillarWeights
 
         # Should not raise
-        pw = PillarWeights()
-        total = pw.premium_leverage + pw.underlying_behavior + pw.setup_quality
+        pw = PillarWeights.v3_default()
+        total = (pw.premium_leverage or 0) + (pw.underlying_behavior or 0) + (pw.setup_quality or 0)
         assert abs(total - 1.0) < 1e-4
 
     def test_pillar_weights_tiny_drift_passes(self):

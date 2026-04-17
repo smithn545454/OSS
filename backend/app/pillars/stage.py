@@ -45,11 +45,12 @@ class PillarScoringStage:
         Args:
             orchestrator: Pipeline orchestrator for event tracking.
             config: Pillar scoring configuration. If omitted, uses
-                `PillarConfig()` which loads Policy v3.0.0 defaults from
-                the seed JSON.
+                `PillarConfig.v3_default()` which loads Policy v3.0.0
+                defaults from the seed JSON. Transitional fallback —
+                remove at Phase 9 alongside v3 code.
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
-        self._config = config or PillarConfig()
+        self._config = config or PillarConfig.v3_default()
         self._calculator = PillarCalculator(self._config)
     
     async def execute(
