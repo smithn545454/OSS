@@ -958,6 +958,30 @@ class PillarConfigV2(OSSBaseModel):
         return self
 
 
+def _load_seeded_pillar_payload(filename: str) -> Optional[dict[str, Any]]:
+    """Load a seeded policy JSON file and return its `config.pillars` dict.
+
+    Returns None if the file is missing or malformed — callers fall back to
+    minimal stubs or raise, depending on whether a stub is acceptable.
+    """
+    import os as _os
+    from pathlib import Path as _Path
+
+    candidates = [
+        _Path(__file__).resolve().parent.parent.parent / "scripts" / "output" / filename,
+        _Path(_os.getcwd()) / "scripts" / "output" / filename,
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path) as f:
+                    payload = json.load(f)
+                return payload["config"]["pillars"]
+            except Exception:
+                continue
+    return None
+
+
 def _load_default_pillar_configs() -> dict[str, Any]:
     """Load the seeded Policy v3.0.0 pillar configs from the JSON file.
 
@@ -971,21 +995,9 @@ def _load_default_pillar_configs() -> dict[str, Any]:
     Falls back to minimal stubs if the seed file cannot be loaded (e.g. in
     environments where the repo layout differs).
     """
-    import os as _os
-    from pathlib import Path as _Path
-
-    candidates = [
-        _Path(__file__).resolve().parent.parent.parent / "scripts" / "output" / "policy_v3_default.json",
-        _Path(_os.getcwd()) / "scripts" / "output" / "policy_v3_default.json",
-    ]
-    for path in candidates:
-        if path.exists():
-            try:
-                with open(path) as f:
-                    payload = json.load(f)
-                return payload["config"]["pillars"]
-            except Exception:
-                continue
+    payload = _load_seeded_pillar_payload("policy_v3_default.json")
+    if payload is not None:
+        return payload
 
     # Fallback: minimal stub configs with one breakpoint each. This keeps
     # PolicyConfig() working in environments where the seed file is missing
@@ -1105,6 +1117,29 @@ class PillarConfig(OSSBaseModel):
             underlying_behavior=_default_pillar_config_v2("underlying_behavior"),
             setup_quality=_default_pillar_config_v2("setup_quality"),
         )
+
+    @classmethod
+    def v4_default(cls) -> "PillarConfig":
+        """Policy v4.0.0 baseline — loads the seeded Sharpshooter config.
+
+        Reads `scripts/output/v4_default_policy.json` (produced by
+        `backend/scripts/build_policy_v4_default.py`) and returns a fully
+        populated v4 PillarConfig: three v4 pillar slots, global + per-scanner
+        weights, and `composite_formula="weighted_geometric_mean"`.
+
+        Raises ``RuntimeError`` if the seed file cannot be found or loaded —
+        unlike v3, there is no minimal-stub fallback because a stub would
+        silently produce bad scores on a live v4 pipeline.
+        """
+        payload = _load_seeded_pillar_payload("v4_default_policy.json")
+        if payload is None:
+            raise RuntimeError(
+                "v4 seed file not found. Run "
+                "`PYTHONPATH=. python3 scripts/build_policy_v4_default.py` "
+                "from the backend/ directory to generate "
+                "scripts/output/v4_default_policy.json."
+            )
+        return cls.model_validate(payload)
 
     def is_v4(self) -> bool:
         """True if this config is in v4 regime."""

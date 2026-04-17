@@ -252,6 +252,47 @@ class TestPolicyConfigDefaults:
         with pytest.raises(ValueError, match="fully v3.*OR fully v4"):
             PillarWeights(premium_leverage=0.5, directional_conviction=0.5)
 
+    def test_pillar_config_v4_default(self):
+        """PillarConfig.v4_default loads the seeded v4 policy into a valid
+        v4-regime config with geometric-mean composite and Sharpshooter weights."""
+        from app.core.schemas import PillarConfig, PillarId
+
+        cfg = PillarConfig.v4_default()
+        assert cfg.is_v4()
+        assert not cfg.is_v3()
+        assert cfg.composite_formula == "weighted_geometric_mean"
+        assert cfg.weights.directional_conviction == pytest.approx(0.40)
+        assert cfg.weights.move_potential == pytest.approx(0.35)
+        assert cfg.weights.trade_structure == pytest.approx(0.25)
+        # All three v4 pillar slots populated with the right pillar_ids.
+        assert cfg.directional_conviction is not None
+        assert cfg.directional_conviction.pillar_id == PillarId.DIRECTIONAL_CONVICTION
+        assert cfg.move_potential is not None
+        assert cfg.move_potential.pillar_id == PillarId.MOVE_POTENTIAL
+        assert cfg.trade_structure is not None
+        assert cfg.trade_structure.pillar_id == PillarId.TRADE_STRUCTURE
+        # No v3 pillar definitions present (clean regime).
+        assert cfg.premium_leverage is None
+        assert cfg.underlying_behavior is None
+        assert cfg.setup_quality is None
+        # Scanner overrides exist and are v4-shaped.
+        assert cfg.scanner_weights is not None
+        for key, weights in cfg.scanner_weights.items():
+            assert weights.is_v4(), f"scanner {key} has non-v4 weights"
+
+    def test_pillar_config_v4_default_within_pillar_weights_sum(self):
+        """Every v4 pillar's within-pillar subscore weights must sum to 1.0."""
+        from app.core.schemas import PillarConfig
+
+        cfg = PillarConfig.v4_default()
+        for attr in ("directional_conviction", "move_potential", "trade_structure"):
+            pillar = getattr(cfg, attr)
+            assert pillar is not None
+            total = sum(s.weight for s in pillar.numeric_subscores) + sum(
+                s.weight for s in pillar.categorical_subscores
+            )
+            assert abs(total - 1.0) < 1e-3, f"{attr} subscore weights sum to {total}"
+
     def test_tracking_config_defaults(self):
         cfg = TrackingConfig()
         assert cfg.profit_target_pct == 50.0
