@@ -132,13 +132,13 @@ Total active-engineering estimate: ~22-24 working days (original 10-14 understat
 | 3 | v4 pillar classes + orchestrator registry refactor + LLM prompt/model/generator rewrite + composite formula + geometric-mean min-count rule + reason-code rewrite + tests | 5 days | ✅ **Complete** (2026-04-17, Lambda v236) — see §7.6 |
 | 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ✅ **Complete** (2026-04-17, commit a36b14c, CloudFront live) — see §7.7 |
 | 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | ✅ **Complete** (2026-04-17, commit b6b7102, v4.0.0 inactive on dev) — see §7.8 |
-| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) + flip v3 Decision score fields to Optional | 3 days | ⏳ **Next up** |
-| 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | Blocked |
+| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration + flip v3 Decision score fields to Optional | 3 days | ✅ **Complete** (2026-04-17, Lambda v238, commit 7667efa) — see §7.9 |
+| 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | ⏳ **Next up** (blocked) |
 | 8 | 2-week observation + tuning | 14 days | Pending |
 | 9 | v3 code removal | 2 days | Pending |
 | 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days | Pending |
 
-**Progress summary (end of 2026-04-17):** 5 of 10 phases complete. Backend Lambda v234/v235/v236 healthy with v3.1.3 policy still active; frontend CloudFront carries the dual-regime renderer (commit a36b14c); v4.0.0 now seeded into `oss-dev-policies` as an inactive draft (commit b6b7102, `policy_hash=5f2380b8132b...`). Zero behavior change for users; all v4 code paths unreachable until Phase 7 activates v4.0.0.
+**Progress summary (end of 2026-04-17):** 6 of 10 phases complete. Backend Lambda v238 healthy with v3.1.3 policy still active; frontend CloudFront carries the dual-regime renderer (commit a36b14c); v4.0.0 seeded into `oss-dev-policies` as an inactive draft (commit b6b7102, `policy_hash=5f2380b8132b...`); backend read paths now regime-aware end-to-end (commit 7667efa). Zero behavior change for users; all v4 code paths unreachable until Phase 7 activates v4.0.0. Only remaining Phase 7 blocker is the CloudFormation drift on the two EventBridge rules.
 
 ---
 
@@ -490,6 +490,83 @@ Pre-existing issue surfaced during verification, not caused by Phase 5: `GET /ap
 
 ---
 
+## 7.9 Phase 6 Outcomes — Hardcoded-Reference Sweep + Decision Field Flip (2026-04-17)
+
+**Shipped:** Lambda v238, commit `7667efa`, merged to `main`. Backend read paths are now regime-agnostic end-to-end. Zero user-visible change — v3.1.3 policy is still active, no position or evaluation data shape has changed on the wire.
+
+### What shipped
+
+- **`backend/app/core/schemas.py`:**
+  - `Decision.{premium_leverage_score, underlying_behavior_score, setup_quality_score}` flipped from `float` to `Optional[float] = None`. Same for `EvaluationSnapshot`. The Phase-2-era 0.0 sentinel for inactive-regime fields is gone; inactive fields now carry `None` and callers must branch on presence.
+  - v2 migration shim (`_migrate_legacy_pillar_fields`) preserved on both classes for pre-v3 historical records.
+  - New `Decision.is_v4()` method and `Decision.pillar_score_dict()` helper — the single source of truth for regime detection and for copying all six pillar scores into downstream dicts. Replaces the 10+ hand-rolled regime-detection blocks previously scattered across the codebase.
+
+- **`backend/app/decision/calculator.py`:**
+  - `compute_decision` now uses `_round_opt()` uniformly across all six pillar score fields (v3 trio + v4 trio). The `_round(value, default=0.0)` sentinel helper was removed — no longer needed now that the schema accepts `None`.
+  - Docstring rewritten to reflect the Phase 6 invariant: inactive regime's fields are `None`, not `0.0`.
+
+- **`backend/app/decision/concentration.py` + `decision/stage.py`:** Decision rebuilds (concentration-warning merge) and rule-matching extract now emit all six pillar score fields via `decision.pillar_score_dict()`. No more dropped v4 scores when passing through concentration.
+
+- **API routes:**
+  - `api/helpers/evaluation_snapshot.py`: new shared `hydrate_decision_scores_from_pillars(eval_decision, pillar_scores)` helper replaces the if/elif chain over v3 PillarId strings. Drives a `(PillarId → field_name)` dict covering all six pillars.
+  - `api/routes/evaluations.py`: detail endpoint delegates to the new helper — detail renders v3 and v4 decisions uniformly.
+  - `api/routes/alerts.py`: preview-alerts `decision_data` is assembled from the same six-pillar table, so rule-matching works against both regimes' criterion keys.
+  - `api/routes/paper_trading.py`: position-analysis log line picks the populated regime's three pillar labels; rule-rematch helper emits all six score fields in its `decision_dict`.
+  - `api/routes/real_trades.py`: `EvaluationSnapshot` construction uses `_safe_float(decision.get(...))` for every pillar field so `None` values pass through instead of crashing in `float(None)`.
+  - `app/main.py`: pipeline's setup-rule-matching `decision_dict` uses `**decision.pillar_score_dict()`.
+
+- **Paper trading:**
+  - `position_manager.py`: new positions now denormalize all six pillar score fields from the Decision onto the PaperPosition. Per the Phase-2 schema additions, the inactive regime's slots remain `None` — a position carries the exact trio its originating Decision produced.
+  - `rule_matcher.py`: three new criterion keys — `pillar_directional_conviction_min`, `pillar_move_potential_min`, `pillar_trade_structure_min`. Existing v3 criterion keys preserved unchanged. `build_dicts_from_position` emits all six score fields so a rule written for either regime can match any position that carries the matching trio.
+  - `scanner_analysis.py`: winner/loser profiles gained three `avg_pillar_*` keys for v4; feature divergence table extended with three new v4 rows; prompt profile-fields list includes v4 labels.
+  - `trade_statistics.py`: top-performer comparison feature list gained three v4 pillar entries.
+  - `pattern_discovery.py`: CSV column list expanded from 26 to 29 columns (added `p_dc`, `p_mp`, `p_ts`). Each position only fills one trio; missing cells stay empty. `CURRENT_SCORING_REGIME` stays `"v3"` for now — Phase 7 activation will bump it.
+
+- **`backend/app/calibration/feature_importance.py`:** `FEATURE_REGISTRY` gained three new entries for `pillar_directional_conviction / _move_potential / _trade_structure`, each tagged with the new pillar name so the feature-importance engine treats them as first-class pillar features.
+
+- **`backend/scripts/extract_training_data.py`:** output CSV column list extended to include the three v4 pillar fields alongside v3. Each training row now carries at most one populated trio — consumers infer the source regime from which set is non-null.
+
+- **Tests:**
+  - `test_pillars_v4_integration.py` — `test_v4_decision_populates_both_regime_fields` renamed to `test_v4_decision_leaves_v3_fields_none`. Now asserts `decision.premium_leverage_score is None` and `decision.is_v4() is True` for a v4 decision — the inverse of the Phase-2 sentinel assertion.
+  - `test_scanner_analysis.py` — MockPosition gained the three v4 pillar attributes (defaulting to `None`) so the new v4 stats in the analyzer iterate cleanly.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Backend test suite | **2278 passing** (2277 + 1 from merged-main's `fix: skip unparseable rows in PolicyTable.list`) |
+| Ruff | net delta **0** on changed files (1365 errors baseline and HEAD) |
+| Mypy | net delta **0** (747 errors baseline and HEAD, identical set) |
+| Deploy | Lambda v238 published from commit `7667efa` |
+| Health endpoint | `healthy` |
+| CloudWatch (5 min post-deploy) | zero ERROR events |
+| First post-deploy pipeline run (`095f1ae8...`) | 621 tickers in, 178 contracts processed, 8 stages all `healthy`, Stage 7 emitted 56 decisions |
+| `GET /api/policies/active` | v3.1.3 (unchanged) |
+
+### What Phase 6 did NOT change
+
+- v4.0.0 is still an inactive draft; v3.1.3 continues to be the active policy.
+- No position in DynamoDB has v4 pillar fields populated yet — new positions will fill the v4 trio automatically once v4.0.0 activates in Phase 7.
+- Frontend bundles are unchanged (Phase 4's bundle still serves both regimes correctly).
+- Historical v3 evaluations and paper positions continue to render exactly as before (Decision v3 fields going Optional doesn't break deserialization — the migration shim for pre-v3 records still populates them, and plain v3 records read their own stored values).
+
+### Phase 6 deferrals (by design)
+
+1. **`rescore_all_positions.py` / `rescore_positions_v31.py` / `restore_position_scores.py` left v3-specific.** These scripts operate on historical paper positions that carry only v3 pillar scores. They remain valid for v3 data; Phase 10 will add a v4 counterpart once v4 positions exist.
+2. **`CURRENT_SCORING_REGIME = "v3"` stayed at "v3".** Bumping now would mark every existing setup rule `is_stale=True` while v3.1.3 is still the active policy — wrong signal. Phase 7 activation will bump to `"v4"` as part of the cut-over.
+3. **No PaperPosition rescore to populate v4 fields on historical positions.** Phase 10's responsibility — needs Finnhub earnings-history backfill first.
+4. **Test fixture migration was narrower than the 334-occurrence audit suggested.** Only two test files needed modification — `test_pillars_v4_integration.py` (flipped assertion) and `test_scanner_analysis.py` (MockPosition attrs). The other 332 occurrences are legitimately v3-regime-specific tests of v3 compute code and pre-Phase-9 don't need generalization.
+
+### Heads-up items for Phase 7 kickoff
+
+- **All backend read paths now handle either regime transparently.** Activating v4.0.0 no longer risks NoneType crashes in rule-matching, evaluation detail, alerts preview, or paper-trading analytics. The decision-engine composite formula dispatch (Phase 3) was already in place; Phase 6 filled in every downstream consumer.
+- **CloudFormation drift on the two EventBridge rules is still the only blocker.** Everything else is green.
+- **After Phase 7 activates v4.0.0**, the first pipeline run should produce Decision records with the v4 trio populated and the v3 trio set to `None`. Historical records continue to render untouched. Frontend `pillarMeta` + Phase 6 backend generalization together guarantee the UI renders both regimes correctly in the same session.
+- **Rule-rematch on historical v3 positions stays working.** `build_dicts_from_position` emits all six score fields; v4 slots on v3 positions are `None`, so v4 criteria produce no-match (the intended behavior — a v4 rule against a v3 position simply doesn't fire).
+- **Phase 8 observation window starts ticking from Phase 7 activation**, not from Phase 6 deploy. Phase 6 is unreachable code until the policy flips.
+
+---
+
 ## 8. Key Sub-Rules (apply throughout)
 
 1. **Geometric mean insufficient-data rule:** a pillar with <3 available subscores returns score = 0. Composite then evaluates to 0 → auto-REJECT.
@@ -568,4 +645,4 @@ Follow `CLAUDE.md` deployment protocol (mandatory):
 
 ---
 
-**End of Plan. Phases 1-5 complete (2026-04-17). Phase 6 (backend hardcoded-reference sweep + test fixture migration + flip v3 Decision score fields to Optional) ready to start.**
+**End of Plan. Phases 1-6 complete (2026-04-17). Phase 7 (v4.0.0 activation) blocked only on CloudFormation drift cleanup; all code paths on the backend and frontend handle both regimes transparently.**
