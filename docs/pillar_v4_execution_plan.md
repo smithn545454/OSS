@@ -131,14 +131,14 @@ Total active-engineering estimate: ~22-24 working days (original 10-14 understat
 | 2 | Schema extensions (PillarId enum, PillarWeights, PillarConfig, Decision, PaperPosition — additive) | 1 day | ✅ **Complete** (2026-04-17, Lambda v235) — see §7.5 |
 | 3 | v4 pillar classes + orchestrator registry refactor + LLM prompt/model/generator rewrite + composite formula + geometric-mean min-count rule + reason-code rewrite + tests | 5 days | ✅ **Complete** (2026-04-17, Lambda v236) — see §7.6 |
 | 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ✅ **Complete** (2026-04-17, commit a36b14c, CloudFront live) — see §7.7 |
-| 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | ⏳ **Next up** |
-| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) + flip v3 Decision score fields to Optional | 3 days | Pending |
+| 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | ✅ **Complete** (2026-04-17, commit b6b7102, v4.0.0 inactive on dev) — see §7.8 |
+| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) + flip v3 Decision score fields to Optional | 3 days | ⏳ **Next up** |
 | 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | Blocked |
 | 8 | 2-week observation + tuning | 14 days | Pending |
 | 9 | v3 code removal | 2 days | Pending |
 | 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days | Pending |
 
-**Progress summary (end of 2026-04-17):** 4 of 10 phases complete. Backend Lambda v234/v235/v236 healthy with v3.1.3 policy still active; frontend CloudFront now carries the dual-regime renderer (commit a36b14c) and will display whichever pillar set the active policy produces. Zero behavior change for users; all v4 code paths unreachable until a v4 policy activates at Phase 7.
+**Progress summary (end of 2026-04-17):** 5 of 10 phases complete. Backend Lambda v234/v235/v236 healthy with v3.1.3 policy still active; frontend CloudFront carries the dual-regime renderer (commit a36b14c); v4.0.0 now seeded into `oss-dev-policies` as an inactive draft (commit b6b7102, `policy_hash=5f2380b8132b...`). Zero behavior change for users; all v4 code paths unreachable until Phase 7 activates v4.0.0.
 
 ---
 
@@ -430,6 +430,66 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 
 ---
 
+## 7.8 Phase 5 Outcomes — v4 Default Policy Seed (2026-04-17)
+
+**Shipped:** commit `b6b7102`, merged to `main`. v4.0.0 now exists in `oss-dev-policies` DynamoDB as an inactive draft. No Lambda deploy required (per Phase 5 plan — the seed script writes directly to DynamoDB via `PolicyTable.put`). v3.1.3 remains the active policy; zero behavior change.
+
+### What shipped
+
+- **`backend/scripts/build_policy_v4_default.py`** — programmatic generator for the v4 PolicyConfig. Authors design-reasoned breakpoints for all 16 subscores across the three pillars (see §4.1 of this plan for the thesis) and serializes to JSON:
+  - **Directional Conviction** (0.40 exponent): `stage_2_trend_score` (0.30, 5 BPs), `rs_20d` (0.20, 6 BPs), `adx_directional_score` (0.15, 5 BPs), `breakout_proximity_pct` (0.15, 8 BPs — non-monotone, peaks at +2% post-breakout), `obv_confirmation_score` (0.10, 5 BPs), `sector_rs_20d` (0.10, 6 BPs).
+  - **Move Potential** (0.35 exponent): `move_trigger_score` (0.35, 6 BPs), `historical_move_magnitude` (0.20, 6 BPs), `iv_rv_ratio` (0.15, 7 BPs), `bb_width_percentile` (0.15, 7 BPs — low-percentile = compressed range = high score), `expected_vs_required` (0.15, 6 BPs).
+  - **Trade Structure** (0.25 exponent): `abs_delta` (0.25, 8 BPs — non-monotone, peaks at 0.30), `gamma_theta_ratio` (0.25, 6 BPs), `dte_sweet_spot_score` (0.20, 6 BPs), `iv_percentile` (0.20, 6 BPs — monotonic low-is-better), `strike_vs_pivot_pct` (0.10, 6 BPs — peaks at pivot).
+  - Seeds neutral per-scanner overrides (`BREAKOUT` / `BREAKDOWN` / `COMPRESSION_EXPANSION` / `UNUSUAL_VOLUME` / `CHEAP_OPTIONS`) all mirroring the global v4 weights; Phase 8 tuning edits them via the Policy page.
+  - Gates (`GateConfig`) reset to Section 4.2 defaults (`max_spread_pct=10`, `min_open_interest=100`, `min_daily_volume=50`); everything else inherits schema defaults so years of tuning on spread / OI / volume / greeks rails carry forward.
+
+- **`backend/scripts/output/v4_default_policy.json`** — generated seed file (32 KB). Committed so it bundles with the Lambda deploy and is available for `PillarConfig.v4_default()` at runtime.
+
+- **`backend/app/core/schemas.py`**:
+  - Factored `_load_default_pillar_configs()` through a new `_load_seeded_pillar_payload(filename)` helper so v3 and v4 share the same file-resolution logic.
+  - Added **`PillarConfig.v4_default()`** classmethod — loads the v4 seed from disk, raises `RuntimeError` if the file is missing. Deliberately no stub fallback (unlike v3): a stub on a live v4 pipeline would silently produce bad scores. Callers in Phase 6 tests / Phase 10 rescore tooling can now instantiate a v4 PillarConfig without touching DynamoDB.
+  - `_load_default_pillar_configs()` now delegates to the new helper.
+
+- **`backend/scripts/seed_policy_v4.py`** — one-shot DynamoDB seeder. Writes `Policy(version="v4.0.0", is_active=False, policy_hash=SHA-256-over-config, ...)` directly via `PolicyTable.put()` because the `/api/policies` POST handler auto-increments version (`_compute_next_version`) and cannot produce an explicit `v4.0.0` on its own. Aborts cleanly if v4.0.0 already exists; `--overwrite` flag replaces it.
+
+- **`backend/tests/test_schemas.py`** — two new tests on `PillarConfig.v4_default`: regime consistency (`is_v4()` / `is_v3()=False`), composite formula, weight values (0.40 / 0.35 / 0.25), pillar-slot `pillar_id` identity, scanner override shape, and within-pillar subscore-weight sum=1.0 invariants for all three pillars.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Backend test suite | **2275 passing** (2273 baseline + 2 new) |
+| Ruff on changed files | net **-1** (fixed an existing import-sort regression while touching `schemas.py`) |
+| Mypy errors on `schemas.py` | **5** (identical to baseline — zero new regressions) |
+| `build_policy_v4_default.py` round-trip | `PolicyConfig.model_validate(payload['config'])` succeeds, `is_v4()=True`, weights sum to 1.0, 5 scanner overrides present, all pillar slots populated |
+| `PillarConfig.v4_default()` runtime load | `is_v4()=True`, `composite_formula="weighted_geometric_mean"`, `weights.directional_conviction=0.4`; `v3_default()` still returns a valid v3 config (no cross-regime damage) |
+| DynamoDB seed | `Created policy version v4.0.0 (inactive). policy_hash=5f2380b8132b...` |
+| `GET /api/policies/v4.0.0` | **HTTP 200**; returns full config with `is_active=false`, `composite_formula=weighted_geometric_mean`, all three v4 pillar slots populated, 5 scanner overrides |
+| `GET /api/policies/active` | v3.1.3, `is_active=true`, `composite_formula=weighted_sum` — unchanged |
+| `GET /api/policies?limit=3` | v4.0.0 (newest) + v3.1.3 + v3.1.2 — HTTP 200 |
+| Health endpoint | `healthy` |
+| CloudWatch (5 min post-seed) | only a pre-existing `/api/policies?limit=8` 500 surfaced; it's a v2-era Policy row that fails the new v3/v4 regime validator — see "Phase 5 spawned cleanup" below. Unrelated to Phase 5 code. |
+
+### Phase 5 deferrals (by design) — track for later phases
+
+1. **Breakpoints are design-reasoned, not backtested.** The v3 regime shipped with empirically-derived breakpoints from a 15,505-position backtest; v4 ships with author-designed curves calibrated to the Sharpshooter thesis. This is intentional — Phase 8 (2-week observation + tuning) is the calibration window, tuning via the Policy page without code changes. If any pillar's tier distribution looks wildly off on Day 1 post-activation, Policy-page edits handle it.
+2. **No historical backtest run against v4.** Without live pipeline output (Phase 7) there is no population to score; retro-scoring Phase 1's price/earnings-history-backed FeatureSets against v4 would take several hours and doesn't add signal until Phase 8 has live comparison data. Deferred to Phase 8 as an optional "pre-live sanity check" if Nick wants it before activation.
+3. **Scanner weight overrides are all neutral** (= global weights). Phase 5 seeds the plumbing so Phase 8 tuning has target slots; per-scanner calibration follows observation data.
+4. **`build_policy_v4_default.py` hasn't been wired into the policy-page editor.** The v4 Policy page (shipped Phase 4) already iterates populated v4 pillar slots, so Nick can edit breakpoints/weights from the UI. But there's no "Regenerate from script" button — rebuilding the seed means running the script and re-seeding. Non-blocking; policy-page edits are the normal tuning path.
+
+### Phase 5 spawned cleanup (queued as separate task)
+
+Pre-existing issue surfaced during verification, not caused by Phase 5: `GET /api/policies?limit>=8` 500s because an old v2-era Policy row with `PillarWeights={'directional', 'structural', 'volatility'}` shape fails the v3/v4 regime validator. Specific versions still resolve correctly (`GET /api/policies/v3.1.3`, etc.) — only the list endpoint at large page sizes is affected. Spawned as a separate cleanup task.
+
+### Heads-up items for Phase 6 kickoff
+
+- **v4.0.0 draft is live in DynamoDB and addressable via API.** Phase 6 integration tests can now flip a staging policy to v4.0.0 and exercise the end-to-end pipeline in a sandbox.
+- **`PillarConfig.v4_default()` is callable from any runtime context** (backend, scripts, tests). Phase 6's test fixture migration (334 v3-specific test occurrences across 27 files) should leverage this classmethod for any test that needs to construct a v4 PolicyConfig programmatically.
+- **Phase 1 CloudFormation drift remains the only Phase 7 blocker.** Unchanged from Phases 2-4; schedule the drift-cleanup session before the Tuesday activation.
+- **No Lambda deploy was required for Phase 5.** Subsequent phases (6+) resume the normal `./scripts/deploy.sh backend` cadence since they touch runtime code paths.
+
+---
+
 ## 8. Key Sub-Rules (apply throughout)
 
 1. **Geometric mean insufficient-data rule:** a pillar with <3 available subscores returns score = 0. Composite then evaluates to 0 → auto-REJECT.
@@ -508,4 +568,4 @@ Follow `CLAUDE.md` deployment protocol (mandatory):
 
 ---
 
-**End of Plan. Phases 1-4 complete (2026-04-17). Phase 5 (v4 default policy config build + seed) ready to start.**
+**End of Plan. Phases 1-5 complete (2026-04-17). Phase 6 (backend hardcoded-reference sweep + test fixture migration + flip v3 Decision score fields to Optional) ready to start.**
