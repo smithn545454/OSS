@@ -257,6 +257,24 @@ Features are additive. If broken:
 2. Lambda rollback: `./scripts/deploy.sh rollback`
 3. Tables can stay — no data dependency yet
 
+### Phase 1 Known Issues — MUST address before Phase 7 activation
+
+These items were discovered during the Phase 1 deploy (2026-04-17) and worked around with minimal-risk substitutes. None block Phase 2-6 (which only deploy Lambda code via `./scripts/deploy.sh backend`, not CDK). They **must** be cleaned up before Phase 7, when we flip the active policy to v4.0.0 and any deploy reliability issue becomes a production risk.
+
+**⚠ Action required (separate cleanup session before Phase 7):**
+
+1. **CloudFormation drift on `oss-dev-daily-data-capture` EventBridge rule.** The rule exists in AWS but CloudFormation no longer owns it. Any `cdk deploy oss-dev-backend` fails with `AlreadyExists`. Resolution: either (a) delete the orphaned rule and let CDK recreate it — requires a ~3-5 min Lambda-broken window during deploy, or (b) use `cloudformation create-change-set --change-set-type IMPORT` to reconcile ownership without downtime. Option (b) is cleaner.
+
+2. **`oss-dev-nightly-scribe` EventBridge rule not in CDK code.** Also orphaned from CloudFormation. Same resolution path as #1.
+
+3. **Pillar v4 EventBridge rules created manually, not via CDK.** Phase 1 created `oss-dev-price-history-refresh` and `oss-dev-earnings-history-refresh` via `aws events put-rule` to sidestep #1. Once #1 is resolved, import these two rules into CloudFormation alongside so the CDK template matches reality.
+
+4. **`DiaryTable` and `IntelligenceBucket` deleted** during the Phase 1 database-stack deploy. Confirmed non-issue by Nick (feature abandoned), but noting here so the audit trail is complete.
+
+**Why deferred:** Resolving drift cleanly requires a CDK-focused session with time to test imports and verify no resources are inadvertently affected. Phase 1 data-foundation goals were achieved with manual rule creation, keeping risk low and momentum on the primary workstream.
+
+**Do not advance to Phase 7 with these items unresolved** — by Phase 7 we need the ability to rollback via CDK if needed, and that requires drift-free stacks.
+
 ---
 
 ## 8. Key Sub-Rules (apply throughout)
