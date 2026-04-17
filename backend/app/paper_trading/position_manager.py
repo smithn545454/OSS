@@ -177,6 +177,9 @@ async def create_position_from_evaluation(
         pillar_premium_leverage=decision.premium_leverage_score,
         pillar_underlying_behavior=decision.underlying_behavior_score,
         pillar_setup_quality=decision.setup_quality_score,
+        pillar_directional_conviction=decision.directional_conviction_score,
+        pillar_move_potential=decision.move_potential_score,
+        pillar_trade_structure=decision.trade_structure_score,
         strike=evaluation.strike,
         option_type=evaluation.option_type,
         expiration_date=evaluation.expiration_date,
@@ -265,9 +268,7 @@ async def create_position_from_evaluation(
             }
             decision_dict = {
                 "final_score": decision.final_score,
-                "premium_leverage_score": decision.premium_leverage_score,
-                "underlying_behavior_score": decision.underlying_behavior_score,
-                "setup_quality_score": decision.setup_quality_score,
+                **decision.pillar_score_dict(),
             }
             matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
             if matched:

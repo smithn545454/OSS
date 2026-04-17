@@ -66,6 +66,16 @@ FEATURE_REGISTRY: list[FeatureRegistryEntry] = [
     ("pillar_premium_leverage", "Premium Leverage Score", "premium_leverage", None, None, True),
     ("pillar_underlying_behavior", "Underlying Behavior Score", "underlying_behavior", None, None, True),
     ("pillar_setup_quality", "Setup Quality Score", "setup_quality", None, None, True),
+    (
+        "pillar_directional_conviction",
+        "Directional Conviction Score",
+        "directional_conviction",
+        None,
+        None,
+        True,
+    ),
+    ("pillar_move_potential", "Move Potential Score", "move_potential", None, None, True),
+    ("pillar_trade_structure", "Trade Structure Score", "trade_structure", None, None, True),
     ("entry_underlying_price", "Underlying Price", None, None, None, None),
     ("theta_adj_ev", "Theta-Adj EV", None, None, None, True),
 ]

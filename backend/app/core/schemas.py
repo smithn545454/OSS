@@ -395,25 +395,22 @@ class Decision(OSSBaseModel):
     Pillar score fields reflect whichever regime produced the decision:
 
     - v3 decisions populate ``premium_leverage_score`` / ``underlying_behavior_score`` /
-      ``setup_quality_score`` (v4 fields remain None).
+      ``setup_quality_score``; v4 fields are None.
     - v4 decisions populate ``directional_conviction_score`` / ``move_potential_score`` /
-      ``trade_structure_score`` (v3 fields remain None once Phase 6 flips them
-      to Optional).
+      ``trade_structure_score``; v3 fields are None.
 
-    Phase 2 keeps v3 score fields non-Optional for backward-compat with the
-    many downstream read sites that treat them as ``float``. Phase 6 converts
-    v3 fields to ``Optional[float]`` once all read sites have been
-    generalized to handle either regime.
+    All six pillar score fields are Optional[float] — readers must check
+    which regime produced the decision before consuming a specific score.
     """
 
     evaluation_id: str
     verdict: Verdict
     quality_tier: Optional[QualityTier] = None
     final_score: float
-    # v3 pillar scores (retained forever for historical data; Optional in Phase 6)
-    premium_leverage_score: float
-    underlying_behavior_score: float
-    setup_quality_score: float
+    # v3 pillar scores (retained forever for historical data)
+    premium_leverage_score: Optional[float] = None
+    underlying_behavior_score: Optional[float] = None
+    setup_quality_score: Optional[float] = None
     # v4 pillar scores (populated for Phase 7+ decisions)
     directional_conviction_score: Optional[float] = None
     move_potential_score: Optional[float] = None
@@ -456,6 +453,30 @@ class Decision(OSSBaseModel):
             else:
                 data.pop("structure_score", None)
         return data
+
+    def is_v4(self) -> bool:
+        """Return True if this decision carries the v4 pillar trio."""
+        return (
+            self.directional_conviction_score is not None
+            and self.move_potential_score is not None
+            and self.trade_structure_score is not None
+        )
+
+    def pillar_score_dict(self) -> dict[str, Optional[float]]:
+        """Return all six pillar score fields keyed by field name.
+
+        Useful for copying scores into downstream dicts (rule matching,
+        position denormalization, API responses) without hardcoding the
+        field list in every call site.
+        """
+        return {
+            "premium_leverage_score": self.premium_leverage_score,
+            "underlying_behavior_score": self.underlying_behavior_score,
+            "setup_quality_score": self.setup_quality_score,
+            "directional_conviction_score": self.directional_conviction_score,
+            "move_potential_score": self.move_potential_score,
+            "trade_structure_score": self.trade_structure_score,
+        }
 
 
 # ============================================================================
@@ -2002,10 +2023,10 @@ class EvaluationSnapshot(OSSBaseModel):
     verdict: str
     quality_tier: Optional[str] = None
     final_score: float
-    # v3 pillar scores (retained forever for historical data; Optional in Phase 6)
-    premium_leverage_score: float
-    underlying_behavior_score: float
-    setup_quality_score: float
+    # v3 pillar scores (retained forever for historical data)
+    premium_leverage_score: Optional[float] = None
+    underlying_behavior_score: Optional[float] = None
+    setup_quality_score: Optional[float] = None
     # v4 pillar scores (populated for Phase 7+ decisions)
     directional_conviction_score: Optional[float] = None
     move_potential_score: Optional[float] = None

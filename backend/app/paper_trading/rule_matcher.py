@@ -60,6 +60,19 @@ def _check_criterion(
             score = decision.get("setup_quality_score")
             return score is not None and score >= float(value)
 
+        # Policy v4.0.0 pillar criteria
+        if key == "pillar_directional_conviction_min":
+            score = decision.get("directional_conviction_score")
+            return score is not None and score >= float(value)
+
+        if key == "pillar_move_potential_min":
+            score = decision.get("move_potential_score")
+            return score is not None and score >= float(value)
+
+        if key == "pillar_trade_structure_min":
+            score = decision.get("trade_structure_score")
+            return score is not None and score >= float(value)
+
         # Legacy v2 pillar criteria — accepted for backward compat in
         # stored setup rules. Map old names to new scores.
         if key == "pillar_directional_min":
@@ -271,6 +284,9 @@ def build_dicts_from_position(
         "premium_leverage_score": position.pillar_premium_leverage,
         "underlying_behavior_score": position.pillar_underlying_behavior,
         "setup_quality_score": position.pillar_setup_quality,
+        "directional_conviction_score": position.pillar_directional_conviction,
+        "move_potential_score": position.pillar_move_potential,
+        "trade_structure_score": position.pillar_trade_structure,
     }
     scanners: list[str] = position.scanner_list or []
     return eval_dict, decision_dict, scanners

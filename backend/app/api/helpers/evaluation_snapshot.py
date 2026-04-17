@@ -22,6 +22,38 @@ from app.db.tables import (
 logger = logging.getLogger(__name__)
 
 
+# PillarId string → Decision score field name. Covers both v3 and v4 pillars;
+# the caller writes only the fields matching the pillars actually present on
+# the evaluation.
+_PILLAR_TO_DECISION_SCORE_FIELD: dict[str, str] = {
+    "PREMIUM_LEVERAGE": "premium_leverage_score",
+    "UNDERLYING_BEHAVIOR": "underlying_behavior_score",
+    "SETUP_QUALITY": "setup_quality_score",
+    "DIRECTIONAL_CONVICTION": "directional_conviction_score",
+    "MOVE_POTENTIAL": "move_potential_score",
+    "TRADE_STRUCTURE": "trade_structure_score",
+}
+
+
+def hydrate_decision_scores_from_pillars(
+    eval_decision: dict[str, Any],
+    pillar_scores: list[dict[str, Any]],
+) -> None:
+    """Populate per-pillar score fields on an evaluation decision dict.
+
+    Iterates the pillar_scores list (each carrying ``pillar_id`` +
+    ``score``) and copies the score into the matching Decision field,
+    using ``setdefault`` so any fields already present are preserved.
+
+    Handles both v3 and v4 pillar IDs; unknown IDs are ignored.
+    """
+    for ps in pillar_scores:
+        pid = ps.get("pillar_id", "")
+        field = _PILLAR_TO_DECISION_SCORE_FIELD.get(pid)
+        if field is not None:
+            eval_decision.setdefault(field, ps.get("score"))
+
+
 def _enum_str(val: Any) -> str:
     """Convert an enum-like value to string."""
     return str(val.value) if hasattr(val, "value") else str(val)
@@ -225,20 +257,7 @@ async def build_evaluation_snapshot_data(
             if not isinstance(eval_decision, dict):
                 eval_decision = {}
             if not eval_decision.get("final_score"):
-                for ps in pillar_scores_list:
-                    pid = ps.get("pillar_id", "")
-                    if pid == "PREMIUM_LEVERAGE":
-                        eval_decision.setdefault(
-                            "premium_leverage_score", ps.get("score")
-                        )
-                    elif pid == "UNDERLYING_BEHAVIOR":
-                        eval_decision.setdefault(
-                            "underlying_behavior_score", ps.get("score")
-                        )
-                    elif pid == "SETUP_QUALITY":
-                        eval_decision.setdefault(
-                            "setup_quality_score", ps.get("score")
-                        )
+                hydrate_decision_scores_from_pillars(eval_decision, pillar_scores_list)
 
             eval_scanners = [
                 st.get("scanner_type", "") for st in scanner_triggers if st.get("scanner_type")

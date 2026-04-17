@@ -207,8 +207,8 @@ class TestDecisionCalculatorV4Composite:
         assert decision.verdict == Verdict.REJECT
         assert "INSUFFICIENT_DATA_TRADE_STRUCTURE" in decision.supporting_reason_codes
 
-    def test_v4_decision_populates_both_regime_fields(self) -> None:
-        """Decision schema keeps v3 non-Optional; v4 decisions must still validate."""
+    def test_v4_decision_leaves_v3_fields_none(self) -> None:
+        """Phase 6: inactive regime's fields are None, not a sentinel."""
         config = _v4_full_config()
         calc = DecisionCalculator(pillar_config=config)
         ctx = _decision_ctx(p_dc=80.0, p_mp=75.0, p_ts=85.0)
@@ -218,10 +218,11 @@ class TestDecisionCalculatorV4Composite:
         assert decision.directional_conviction_score == 80.0
         assert decision.move_potential_score == 75.0
         assert decision.trade_structure_score == 85.0
-        # v3 fields sentinelled to 0.0 (non-Optional through Phase 5)
-        assert decision.premium_leverage_score == 0.0
-        assert decision.underlying_behavior_score == 0.0
-        assert decision.setup_quality_score == 0.0
+        # v3 fields remain None
+        assert decision.premium_leverage_score is None
+        assert decision.underlying_behavior_score is None
+        assert decision.setup_quality_score is None
+        assert decision.is_v4()
 
     def test_v3_decision_leaves_v4_fields_none(self) -> None:
         calc = DecisionCalculator()  # defaults to v3 weights, no pillar_config

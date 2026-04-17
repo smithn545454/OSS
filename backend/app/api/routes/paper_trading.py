@@ -1342,12 +1342,25 @@ async def analyze_position(position_id: str) -> dict[str, Any]:
     score_info = ""
     if eval_data and isinstance(eval_data, dict):
         decision = eval_data.get("decision", {})
-        score_info = (
-            f" Score: {decision.get('final_score', 'N/A')}."
-            f" Premium Leverage: {decision.get('premium_leverage_score', 'N/A')},"
-            f" Underlying Behavior: {decision.get('underlying_behavior_score', 'N/A')},"
-            f" Setup Quality: {decision.get('setup_quality_score', 'N/A')}."
+        parts = [f" Score: {decision.get('final_score', 'N/A')}."]
+        # Emit whichever pillar regime is populated.
+        v4_labels = (
+            ("directional_conviction_score", "Directional Conviction"),
+            ("move_potential_score", "Move Potential"),
+            ("trade_structure_score", "Trade Structure"),
         )
+        v3_labels = (
+            ("premium_leverage_score", "Premium Leverage"),
+            ("underlying_behavior_score", "Underlying Behavior"),
+            ("setup_quality_score", "Setup Quality"),
+        )
+        active = v4_labels if all(
+            decision.get(k) is not None for k, _ in v4_labels
+        ) else v3_labels
+        parts.append(" " + ", ".join(
+            f"{label}: {decision.get(key, 'N/A')}" for key, label in active
+        ) + ".")
+        score_info = "".join(parts)
 
     prompt = (
         f"Analyze this options position in 2-3 sentences: "
@@ -1835,6 +1848,9 @@ async def backfill_setup_rule_matches(
                 "premium_leverage_score": decision.get("premium_leverage_score"),
                 "underlying_behavior_score": decision.get("underlying_behavior_score"),
                 "setup_quality_score": decision.get("setup_quality_score"),
+                "directional_conviction_score": decision.get("directional_conviction_score"),
+                "move_potential_score": decision.get("move_potential_score"),
+                "trade_structure_score": decision.get("trade_structure_score"),
             }
 
             scanner_list = pos.scanner_list or []

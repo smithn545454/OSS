@@ -273,9 +273,7 @@ class DecisionStage:
 
                         decision_dict: dict[str, Any] = {
                             "final_score": decision.final_score,
-                            "premium_leverage_score": decision.premium_leverage_score,
-                            "underlying_behavior_score": decision.underlying_behavior_score,
-                            "setup_quality_score": decision.setup_quality_score,
+                            **decision.pillar_score_dict(),
                         }
                         scanner_names = [
                             str(
@@ -632,9 +630,7 @@ def extract_decisions_for_paper_trading(
             "verdict": str(decision.verdict.value) if hasattr(decision.verdict, 'value') else str(decision.verdict),
             "quality_tier": tier_value,
             "final_score": decision.final_score,
-            "premium_leverage_score": decision.premium_leverage_score,
-            "underlying_behavior_score": decision.underlying_behavior_score,
-            "setup_quality_score": decision.setup_quality_score,
+            **decision.pillar_score_dict(),
             "concentration_warnings": decision.concentration_warnings,
         }
     

@@ -163,6 +163,19 @@ def _build_profile(positions: list, label: str) -> dict[str, Any]:
         "avg_pillar_setup_quality": _safe_avg(
             [p.pillar_setup_quality for p in positions if p.pillar_setup_quality is not None]
         ),
+        "avg_pillar_directional_conviction": _safe_avg(
+            [
+                p.pillar_directional_conviction
+                for p in positions
+                if p.pillar_directional_conviction is not None
+            ]
+        ),
+        "avg_pillar_move_potential": _safe_avg(
+            [p.pillar_move_potential for p in positions if p.pillar_move_potential is not None]
+        ),
+        "avg_pillar_trade_structure": _safe_avg(
+            [p.pillar_trade_structure for p in positions if p.pillar_trade_structure is not None]
+        ),
         "by_option_type": _count_by(positions, lambda p: p.option_type or "UNKNOWN"),
         "by_exit_reason": _count_by(
             positions, lambda p: _val(p.exit_reason) if p.exit_reason else "UNKNOWN"
@@ -186,6 +199,13 @@ def _compute_feature_divergences(
         ("pillar_premium_leverage", "Premium Leverage Pillar", lambda p: p.pillar_premium_leverage),
         ("pillar_underlying_behavior", "Underlying Behavior Pillar", lambda p: p.pillar_underlying_behavior),
         ("pillar_setup_quality", "Setup Quality Pillar", lambda p: p.pillar_setup_quality),
+        (
+            "pillar_directional_conviction",
+            "Directional Conviction Pillar",
+            lambda p: p.pillar_directional_conviction,
+        ),
+        ("pillar_move_potential", "Move Potential Pillar", lambda p: p.pillar_move_potential),
+        ("pillar_trade_structure", "Trade Structure Pillar", lambda p: p.pillar_trade_structure),
     ]
 
     result = []
@@ -334,6 +354,9 @@ def build_scanner_analysis_prompt(
         ("Avg Premium Leverage Pillar", "avg_pillar_premium_leverage"),
         ("Avg Underlying Behavior Pillar", "avg_pillar_underlying_behavior"),
         ("Avg Setup Quality Pillar", "avg_pillar_setup_quality"),
+        ("Avg Directional Conviction Pillar", "avg_pillar_directional_conviction"),
+        ("Avg Move Potential Pillar", "avg_pillar_move_potential"),
+        ("Avg Trade Structure Pillar", "avg_pillar_trade_structure"),
     ]
     sections.append(f"{'Metric':<28} {'Winners':<14} {'Losers':<14}")
     sections.append("-" * 56)

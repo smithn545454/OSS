@@ -434,20 +434,10 @@ async def get_evaluation_detail_by_id(
                 eval_decision = {}
             # Also try pillar scores for decision fields
             if not eval_decision.get("final_score"):
-                for ps in pillar_scores_dict:
-                    pid = ps.get("pillar_id", "")
-                    if pid == "PREMIUM_LEVERAGE":
-                        eval_decision.setdefault(
-                            "premium_leverage_score", ps.get("score")
-                        )
-                    elif pid == "UNDERLYING_BEHAVIOR":
-                        eval_decision.setdefault(
-                            "underlying_behavior_score", ps.get("score")
-                        )
-                    elif pid == "SETUP_QUALITY":
-                        eval_decision.setdefault(
-                            "setup_quality_score", ps.get("score")
-                        )
+                from app.api.helpers.evaluation_snapshot import (
+                    hydrate_decision_scores_from_pillars,
+                )
+                hydrate_decision_scores_from_pillars(eval_decision, pillar_scores_dict)
 
             # Extract scanner types from scanner_triggers
             eval_scanners = [

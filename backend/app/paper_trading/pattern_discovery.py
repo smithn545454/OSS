@@ -30,8 +30,9 @@ SETUP_RULE_PK = "SETUP_RULE"
 # Scoring regime version. Bumped when pillar/gate/conviction logic changes materially.
 # v1: pre-Entry Quality pillar (before April 2026)
 # v2: Entry Quality added but before directional enhancement (April 1-2)
-# v3: current — Entry Quality structure, enhanced directional (EMA/RSI/ADX/OBV),
+# v3: Entry Quality structure, enhanced directional (EMA/RSI/ADX/OBV),
 #     interaction bonus, premium leverage subscore (April 3+)
+# v4: Sharpshooter regime — bumped by Phase 7 activation (not yet live)
 CURRENT_SCORING_REGIME = "v3"
 
 # Abbreviations for token-efficient CSV encoding
@@ -58,8 +59,11 @@ SECTOR_ABBREV = {
 # CSV columns sent to the LLM (short names to save tokens)
 # Dropped: bucket (redundant with dte), mfe/mae (outcome tracking, not criteria),
 # ev (niche), delta (correlated with moneyness+type)
+# Pillar columns span both regimes; each position only populates one trio
+# (p_pl/p_ub/p_sq for v3, p_dc/p_mp/p_ts for v4). Missing cells stay empty.
 CSV_COLUMNS = [
-    "tkr", "sec", "scn", "conv", "cscore", "p_pl", "p_ub", "p_sq",
+    "tkr", "sec", "scn", "conv", "cscore",
+    "p_pl", "p_ub", "p_sq", "p_dc", "p_mp", "p_ts",
     "type", "dte", "iv", "iv_pct", "ivrv", "theta_edge",
     "gate_m", "money_pct", "spread", "oi", "vol",
     "dte_earn", "atr", "rs", "feas", "ret", "days", "verdict",
@@ -109,6 +113,9 @@ def build_trade_csv(
             _fmt(p.pillar_premium_leverage, 0),
             _fmt(p.pillar_underlying_behavior, 0),
             _fmt(p.pillar_setup_quality, 0),
+            _fmt(p.pillar_directional_conviction, 0),
+            _fmt(p.pillar_move_potential, 0),
+            _fmt(p.pillar_trade_structure, 0),
             TYPE_ABBREV.get(str(p.option_type or ""), str(p.option_type or "")),
             _fmt(p.dte_at_entry, 0),
             _fmt(p.entry_iv, 2),

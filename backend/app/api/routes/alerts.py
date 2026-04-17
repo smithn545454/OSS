@@ -385,12 +385,21 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         if filter_ids and rules_by_id:
             from app.paper_trading.rule_matcher import match_rules
 
-            decision_data = {
+            decision_data: dict[str, Any] = {
                 "final_score": item.get("final_score", 0),
-                "premium_leverage_score": pillar_scores.get("PREMIUM_LEVERAGE", 0),
-                "underlying_behavior_score": pillar_scores.get("UNDERLYING_BEHAVIOR", 0),
-                "setup_quality_score": pillar_scores.get("SETUP_QUALITY", 0),
             }
+            # Copy whichever pillar scores are present (v3 or v4). Missing
+            # pillars leave the corresponding criterion unable to match —
+            # rule_matcher already treats None as "unknown".
+            for pid, field in (
+                ("PREMIUM_LEVERAGE", "premium_leverage_score"),
+                ("UNDERLYING_BEHAVIOR", "underlying_behavior_score"),
+                ("SETUP_QUALITY", "setup_quality_score"),
+                ("DIRECTIONAL_CONVICTION", "directional_conviction_score"),
+                ("MOVE_POTENTIAL", "move_potential_score"),
+                ("TRADE_STRUCTURE", "trade_structure_score"),
+            ):
+                decision_data[field] = pillar_scores.get(pid)
             matched = match_rules(
                 list(rules_by_id.values()),
                 item,

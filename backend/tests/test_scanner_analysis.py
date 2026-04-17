@@ -46,6 +46,9 @@ class MockPosition:
     pillar_premium_leverage: Optional[float] = 62.0
     pillar_underlying_behavior: Optional[float] = 55.0
     pillar_setup_quality: Optional[float] = 70.0
+    pillar_directional_conviction: Optional[float] = None
+    pillar_move_potential: Optional[float] = None
+    pillar_trade_structure: Optional[float] = None
     strike: Optional[float] = 150.0
     expiration_date: Optional[str] = "2026-04-01"
     matched_rule_ids: Optional[list] = None

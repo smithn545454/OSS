@@ -96,11 +96,15 @@ POSITION_FIELDS = [
     "max_adverse_excursion",
     "days_held",
     "exit_reason",
-    # v3.0.0 baseline scores (for comparison in Phase 7)
+    # Regime-tagged baseline scores (v3 scores on pre-v4 rows; v4 scores
+    # on post-activation rows). Each row carries at most one populated trio.
     "conviction_score",
     "pillar_premium_leverage",
     "pillar_underlying_behavior",
     "pillar_setup_quality",
+    "pillar_directional_conviction",
+    "pillar_move_potential",
+    "pillar_trade_structure",
 ]
 
 # FVT-derived numeric features used by the v3.1.0 fitter

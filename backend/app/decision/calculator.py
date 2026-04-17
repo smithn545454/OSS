@@ -381,19 +381,18 @@ class DecisionCalculator:
             ctx, verdict, quality_tier
         )
 
-        # Decision schema keeps v3 pillar-score fields non-Optional through
-        # Phase 5 (Phase 6 will convert them to Optional). In v4 regime we
-        # fill the inactive regime's fields with 0.0 as a sentinel so the
-        # schema still validates. Consumers distinguish regimes via which
-        # score trio has non-zero / non-null values.
+        # Every pillar-score field on Decision is Optional[float]. The
+        # inactive regime's scores are None; the active regime's scores
+        # round normally. Consumers distinguish regimes by which trio is
+        # non-None.
         return Decision(
             evaluation_id=ctx.evaluation_id,
             verdict=verdict,
             quality_tier=quality_tier,
             final_score=round(final_score, 2),
-            premium_leverage_score=_round(ctx.premium_leverage_score, default=0.0),
-            underlying_behavior_score=_round(ctx.underlying_behavior_score, default=0.0),
-            setup_quality_score=_round(ctx.setup_quality_score, default=0.0),
+            premium_leverage_score=_round_opt(ctx.premium_leverage_score),
+            underlying_behavior_score=_round_opt(ctx.underlying_behavior_score),
+            setup_quality_score=_round_opt(ctx.setup_quality_score),
             directional_conviction_score=_round_opt(ctx.directional_conviction_score),
             move_potential_score=_round_opt(ctx.move_potential_score),
             trade_structure_score=_round_opt(ctx.trade_structure_score),
@@ -525,16 +524,6 @@ _PILLAR_LABELS_V4: tuple[str, str, str] = (
 
 def _round_opt(value: Optional[float], ndigits: int = 2) -> Optional[float]:
     return round(value, ndigits) if value is not None else None
-
-
-def _round(value: Optional[float], default: float, ndigits: int = 2) -> float:
-    """Round a float, substituting ``default`` when the input is None.
-
-    Used for schema fields that remain non-Optional through Phase 5 — the
-    default acts as an inactive-regime sentinel (``0.0`` for the v3 trio
-    when v4 is active, and vice versa).
-    """
-    return round(value, ndigits) if value is not None else default
 
 
 # ============================================================================
