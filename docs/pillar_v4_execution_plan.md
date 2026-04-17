@@ -1,7 +1,7 @@
 # Pillar v4 Execution Plan: Directional Conviction, Move Potential, Trade Structure
 
 **Author:** Principal engineering plan (Claude), revised after codebase audit with Nick 2026-04-16
-**Status:** Phase 1 in execution
+**Status:** Phase 1 + Phase 2 complete (2026-04-17). Phase 3 ready to start pending Nick sign-off.
 **Trade universe:** S&P 500 **+ Russell 1000** (~1,500 tickers per scan)
 **Constraint:** ZERO tolerance for disruption. Frontend must not lose functionality. No shadow mode.
 
@@ -288,6 +288,50 @@ These items were discovered during the Phase 1 deploy (2026-04-17) and worked ar
 **Why deferred:** Resolving drift cleanly requires a CDK-focused session with time to test imports and verify no resources are inadvertently affected. Phase 1 data-foundation goals were achieved with manual rule creation, keeping risk low and momentum on the primary workstream.
 
 **Do not advance to Phase 7 with these items unresolved** — by Phase 7 we need the ability to rollback via CDK if needed, and that requires drift-free stacks.
+
+---
+
+## 7.5 Phase 2 Outcomes — Schema Extensions (2026-04-17)
+
+**Shipped:** Lambda v235, commit `36dd7fb`, merged to `main`. All schema changes additive; v3.1.3 remains the active policy with zero behavior change.
+
+### What shipped
+
+- **`PillarId` enum** extended with three v4 values (`DIRECTIONAL_CONVICTION`, `MOVE_POTENTIAL`, `TRADE_STRUCTURE`) alongside preserved v3. V3 values are retained permanently for historical-data deserialization (per plan Section 2).
+- **`PillarWeights` / `PillarConfig`**: all pillar-related fields converted to `Optional`; new regime-detecting validators enforce fully-v3 OR fully-v4 shape (mixed or bare construction rejected). Added `PillarWeights.v3_default()` / `v4_default()` and `PillarConfig.v3_default()` classmethods as explicit transition helpers — marked for Phase 9 removal.
+- **`PillarConfig.composite_formula`** field added (`"weighted_sum"` for v3, `"weighted_geometric_mean"` for v4). Consumed by Phase 3 composite function.
+- **`Decision` / `EvaluationSnapshot`**: added three v4 pillar-score fields as `Optional[float]`. V3 score fields kept non-Optional for Phase 2 — see deferral #1 below.
+- **`PaperPosition`**: added three v4 denormalized pillar fields (`pillar_directional_conviction`, `pillar_move_potential`, `pillar_trade_structure`) as `Optional[float]`.
+- **Production fallback callers** (`DecisionCalculator`, `DecisionStage`, `PillarCalculator`, `PillarStage`, `rescore_all_positions.py`): updated from bare `PillarWeights()` / `PillarConfig()` to explicit `v3_default()` factories. All call sites marked for Phase 9 cleanup.
+
+### Design decision: Option A clean cutover (confirmed 2026-04-17)
+
+Nick confirmed: old v3 weights are **not** the future default. PillarWeights/PillarConfig bare construction is now intentionally invalid. The `v3_default()` / `v4_default()` classmethods are the only acceptable baselines during the transition window; Phase 9 removes `v3_default()`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Backend test suite | 2,195 passing |
+| Ruff (touched files) | 151 baseline → 151 post-change (zero new regressions) |
+| CloudWatch ERROR logs (5 min post-deploy) | none |
+| Health endpoint | `healthy` |
+| Active policy v3.1.3 deserialization under new schema | v3 fields populated, v4 fields `null` ✓ |
+| Post-deploy pipeline run | completed, status=`healthy`, 220 contracts in prior run |
+
+### Phase 2 deferrals (by design) — track for later phases
+
+1. **V3 `premium_leverage_score` / `underlying_behavior_score` / `setup_quality_score` fields on `Decision` + `EvaluationSnapshot` were kept non-Optional** for Phase 2. The plan's Section 6 showed them as `Optional[float] = None`, but ~30 downstream read sites treat them as `float` (arithmetic comparisons, direct field reads, dict extraction). Making them Optional in Phase 2 would force mypy-narrowing refactors across v3-specific code paths, exceeding Phase 2's "purely additive" scope. **Phase 6 (hardcoded-reference sweep)** is the right home for this transition, since Phase 6 is already touching every v3 read site for generalization.
+
+2. **Mypy narrowing in two v3 call sites** (`pillars/calculator.py:87-95`, `api/routes/paper_trading.py:2110-2120`): `config.premium_leverage` etc. became `Optional[PillarConfigV2]`, so v3 compute paths now have `assert` narrowing. These are interim — Phase 3 registry refactor replaces the entire hardcoded v3 dispatch with a regime-aware orchestrator.
+
+3. **Redundant string-equality checks in `pillars/calculator.py:207-211`** (`pid == PillarId.PREMIUM_LEVERAGE or pid == "PREMIUM_LEVERAGE"`) now trigger mypy `comparison-overlap` warnings because the widened enum narrows the `or`-branch type. Latent dead code pre-existing; cleaned up in Phase 6.
+
+### Heads-up items for Phase 3 kickoff
+
+- **Phase 1 known issues still stand** (CloudFormation drift + manual EventBridge rules). They only block Phase 7 activation, not Phases 3–6 Lambda-code deploys. Schedule the drift-cleanup session before Phase 7.
+- **`composite_formula` field is live but unused** until Phase 3 ships the `app/pillars/composite.py` dispatcher. Current v3.1.3 policy defaults it to `"weighted_sum"`, matching existing arithmetic behavior.
+- **Phase 3 entry point** = `app/pillars/calculator.py` orchestrator needs to discover which pillar configs are populated in the active policy (v3 vs v4) and dispatch accordingly. Registry refactor is the natural home; v3 code paths remain reachable until Phase 9.
 
 ---
 
