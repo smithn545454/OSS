@@ -21,10 +21,14 @@ from app.features.catalyst import compute_catalyst_features
 from app.features.contract import compute_contract_features
 from app.features.liquidity import compute_liquidity_features
 from app.features.models import FeatureSet
-from app.features.relative_strength import compute_relative_strength_features
+from app.features.relative_strength import (
+    compute_relative_strength_features,
+    sector_etf_for,
+)
 from app.features.underlying import UnderlyingFeatures, compute_underlying_features
 from app.features.volatility import compute_volatility_features
 from app.services.catalyst import CatalystDataService
+from app.services.earnings_calendar import EarningsCalendarService
 from app.services.polygon import DailyBar, PolygonClient
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,8 @@ class FeatureComputer:
         config: Optional[FeatureConfig] = None,
         data_provider: Optional[Any] = None,
         as_of_date: Optional[date] = None,
+        earnings_calendar_service: Optional[EarningsCalendarService] = None,
+        sector_map: Optional[dict[str, str]] = None,
     ) -> None:
         """Initialize the feature computer.
 
@@ -57,18 +63,29 @@ class FeatureComputer:
             config: Feature computation configuration
             data_provider: Optional DataProvider for unified data access (backtest mode)
             as_of_date: Target date for backtesting (defaults to today)
+            earnings_calendar_service: Pillar v4 service — provides
+                historical_move_magnitude from ``oss-dev-earnings-history``.
+                When omitted, the feature is left as None.
+            sector_map: Pre-fetched {ticker: sector} mapping. Enables
+                sector_rs_20d feature when paired with pre-fetched
+                sector ETF bars. When omitted, sector_rs_20d is None.
         """
         self._polygon = polygon_client
         self._catalyst = catalyst_service
         self._config = config or FeatureConfig()
         self._data_provider = data_provider
         self._as_of_date = as_of_date
+        self._earnings_calendar = earnings_calendar_service
+        self._sector_map: dict[str, str] = sector_map or {}
 
         # Cache for underlying bars (ticker -> bars)
         self._underlying_bars_cache: dict[str, list[DailyBar]] = {}
 
         # Cache for SPY bars
         self._spy_bars: Optional[list[DailyBar]] = None
+
+        # Cache for sector ETF bars (etf_ticker -> bars)
+        self._sector_bars_cache: dict[str, list[DailyBar]] = {}
 
     async def compute_features(
         self,
@@ -174,13 +191,32 @@ class FeatureComputer:
             underlying_features = UnderlyingFeatures(close=evaluation.underlying_price)
 
         # =========================================================================
-        # Category B: Relative Strength Features
+        # Category B: Relative Strength Features (+ Pillar v4 sector RS)
         # =========================================================================
+        sector = self._sector_map.get(ticker)
+        sector_etf = sector_etf_for(sector)
+        sector_bars: Optional[list[DailyBar]] = None
+        if sector_etf:
+            sector_bars = self._sector_bars_cache.get(sector_etf)
+
         rs_features = compute_relative_strength_features(
             underlying_return_5d=underlying_features.return_5d,
             underlying_return_20d=underlying_features.return_20d,
             spy_bars=spy_bars,
+            sector_bars=sector_bars,
         )
+
+        # =========================================================================
+        # Pillar v4: historical_move_magnitude from EarningsHistoryTable
+        # =========================================================================
+        historical_move_magnitude: Optional[float] = None
+        historical_move_confidence: Optional[int] = None
+        if self._earnings_calendar is not None:
+            result = await self._earnings_calendar.get_historical_move_magnitude(
+                ticker
+            )
+            if result is not None:
+                historical_move_magnitude, historical_move_confidence = result
 
         # =========================================================================
         # Category C: Volatility Features (uses days_to_earnings for IV regime)
@@ -262,6 +298,20 @@ class FeatureComputer:
             # Category F
             days_to_earnings=catalyst_features.days_to_earnings,
             recent_sec_filing=catalyst_features.recent_sec_filing,
+            # Category H — Pillar v4 long-range technicals + sector context
+            ma_150=underlying_features.ma_150,
+            ma_200=underlying_features.ma_200,
+            high_52w=underlying_features.high_52w,
+            low_52w=underlying_features.low_52w,
+            dist_to_52w_high_pct=underlying_features.dist_to_52w_high_pct,
+            dist_to_52w_low_pct=underlying_features.dist_to_52w_low_pct,
+            bb_width=underlying_features.bb_width,
+            bb_width_percentile=underlying_features.bb_width_percentile,
+            sector=sector,
+            sector_rs_20d=rs_features.sector_rs_20d,
+            # Category I — Pillar v4 catalyst extensions
+            historical_move_magnitude=historical_move_magnitude,
+            historical_move_confidence=historical_move_confidence,
         )
 
     async def compute_features_batch(
@@ -290,14 +340,31 @@ class FeatureComputer:
         # Build opportunity lookup
         opp_by_ticker = {opp.underlying_ticker: opp for opp in opportunities}
 
-        # Get unique tickers for batch fetching
-        tickers = list(set(e.underlying_ticker for e in evaluations))
-        tickers.append(self._config.rs_benchmark_ticker)  # Add SPY
+        # Get unique tickers for batch fetching — include SPY and every
+        # sector ETF whose sector is represented by any underlying in
+        # this batch, so per-ticker compute can read from cache.
+        underlying_tickers = list(set(e.underlying_ticker for e in evaluations))
+        sector_etfs_needed: set[str] = set()
+        if self._sector_map:
+            for t in underlying_tickers:
+                etf = sector_etf_for(self._sector_map.get(t))
+                if etf:
+                    sector_etfs_needed.add(etf)
+
+        tickers = list(
+            set(underlying_tickers)
+            | {self._config.rs_benchmark_ticker}
+            | sector_etfs_needed
+        )
 
         effective_date = self._as_of_date or date.today()
 
         # Batch fetch underlying bars
-        logger.info(f"Fetching daily bars for {len(tickers)} tickers")
+        logger.info(
+            f"Fetching daily bars for {len(tickers)} tickers "
+            f"({len(underlying_tickers)} underlyings, 1 benchmark, "
+            f"{len(sector_etfs_needed)} sector ETFs)"
+        )
         if self._data_provider:
             bars_by_ticker = await self._data_provider.get_daily_bars_batch(
                 tickers, end_date=effective_date, lookback_days=252,
@@ -307,9 +374,13 @@ class FeatureComputer:
         else:
             bars_by_ticker = {}
 
-        # Cache bars
+        # Cache bars — split into underlying vs sector ETF caches for clarity.
         self._underlying_bars_cache.update(bars_by_ticker)
         self._spy_bars = bars_by_ticker.get(self._config.rs_benchmark_ticker)
+        for etf in sector_etfs_needed:
+            bars = bars_by_ticker.get(etf)
+            if bars:
+                self._sector_bars_cache[etf] = bars
 
         # Prefetch catalyst data for all tickers (if service available)
         catalyst_tickers = [t for t in tickers if t != self._config.rs_benchmark_ticker]
@@ -362,6 +433,7 @@ class FeatureComputer:
         """Clear cached data."""
         self._underlying_bars_cache.clear()
         self._spy_bars = None
+        self._sector_bars_cache.clear()
         if self._catalyst is not None:
             self._catalyst.clear_cache()
 

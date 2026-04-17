@@ -94,7 +94,28 @@ class FeatureSet:
     plus_di: Optional[float] = None
     minus_di: Optional[float] = None
     obv_trend: Optional[str] = None  # RISING, FALLING, FLAT
-    
+
+    # =========================================================================
+    # Category H: Pillar v4 Long-Range Technicals & Sector Context
+    # =========================================================================
+    ma_150: Optional[float] = None  # 150-day SMA (Stage 2 template)
+    ma_200: Optional[float] = None  # 200-day SMA (Stage 2 template)
+    high_52w: Optional[float] = None
+    low_52w: Optional[float] = None
+    dist_to_52w_high_pct: Optional[float] = None
+    dist_to_52w_low_pct: Optional[float] = None
+    bb_width: Optional[float] = None  # current (upper-lower)/middle
+    bb_width_percentile: Optional[float] = None  # 0-100 (252-day rank)
+
+    sector: Optional[str] = None  # GICS sector, used to look up ETF proxy
+    sector_rs_20d: Optional[float] = None  # sector ETF 20d return minus SPY
+
+    # =========================================================================
+    # Category I: Pillar v4 Catalyst Extensions (Move Potential)
+    # =========================================================================
+    historical_move_magnitude: Optional[float] = None  # mean |1-day post-earnings return| (%)
+    historical_move_confidence: Optional[int] = None  # count of events used (0-4)
+
     # =========================================================================
     # Metadata
     # =========================================================================
@@ -206,6 +227,20 @@ class FeatureSet:
             plus_di=_float("plus_di"),
             minus_di=_float("minus_di"),
             obv_trend=_str("obv_trend"),
+            # Category H — Pillar v4 long-range + sector
+            ma_150=_float("ma_150"),
+            ma_200=_float("ma_200"),
+            high_52w=_float("high_52w"),
+            low_52w=_float("low_52w"),
+            dist_to_52w_high_pct=_float("dist_to_52w_high_pct"),
+            dist_to_52w_low_pct=_float("dist_to_52w_low_pct"),
+            bb_width=_float("bb_width"),
+            bb_width_percentile=_float("bb_width_percentile"),
+            sector=_str("sector"),
+            sector_rs_20d=_float("sector_rs_20d"),
+            # Category I — Pillar v4 catalyst extensions
+            historical_move_magnitude=_float("historical_move_magnitude"),
+            historical_move_confidence=_int("historical_move_confidence"),
         )
 
     def to_feature_values(self) -> list[FeatureValue]:
@@ -289,6 +324,26 @@ class FeatureSet:
             FeatureValue(evaluation_id=eid, feature_name="obv_trend", value=self.obv_trend, units="enum"),
         ])
 
+        # Category H — Pillar v4 long-range + sector
+        features.extend([
+            FeatureValue(evaluation_id=eid, feature_name="ma_150", value=self.ma_150, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="ma_200", value=self.ma_200, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="high_52w", value=self.high_52w, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="low_52w", value=self.low_52w, units="dollars"),
+            FeatureValue(evaluation_id=eid, feature_name="dist_to_52w_high_pct", value=self.dist_to_52w_high_pct, units="percent"),
+            FeatureValue(evaluation_id=eid, feature_name="dist_to_52w_low_pct", value=self.dist_to_52w_low_pct, units="percent"),
+            FeatureValue(evaluation_id=eid, feature_name="bb_width", value=self.bb_width, units="ratio"),
+            FeatureValue(evaluation_id=eid, feature_name="bb_width_percentile", value=self.bb_width_percentile, units="percent"),
+            FeatureValue(evaluation_id=eid, feature_name="sector", value=self.sector, units="string"),
+            FeatureValue(evaluation_id=eid, feature_name="sector_rs_20d", value=self.sector_rs_20d, units="percent"),
+        ])
+
+        # Category I — Pillar v4 catalyst extensions
+        features.extend([
+            FeatureValue(evaluation_id=eid, feature_name="historical_move_magnitude", value=self.historical_move_magnitude, units="percent"),
+            FeatureValue(evaluation_id=eid, feature_name="historical_move_confidence", value=self.historical_move_confidence, units="count"),
+        ])
+
         return features
     
     def to_dict(self) -> dict[str, Any]:
@@ -346,6 +401,20 @@ class FeatureSet:
             "plus_di": self.plus_di,
             "minus_di": self.minus_di,
             "obv_trend": self.obv_trend,
+            # Category H — Pillar v4 long-range + sector
+            "ma_150": self.ma_150,
+            "ma_200": self.ma_200,
+            "high_52w": self.high_52w,
+            "low_52w": self.low_52w,
+            "dist_to_52w_high_pct": self.dist_to_52w_high_pct,
+            "dist_to_52w_low_pct": self.dist_to_52w_low_pct,
+            "bb_width": self.bb_width,
+            "bb_width_percentile": self.bb_width_percentile,
+            "sector": self.sector,
+            "sector_rs_20d": self.sector_rs_20d,
+            # Category I — Pillar v4 catalyst extensions
+            "historical_move_magnitude": self.historical_move_magnitude,
+            "historical_move_confidence": self.historical_move_confidence,
             # Metadata
             "computed_at": self.computed_at,
         }

@@ -2,11 +2,16 @@
 
 Computes technical indicators for the underlying stock.
 Per Section 13.2 of OSS_Complete_Requirements.md.
+
+Pillar v4 adds 150/200-day simple moving averages, 52-week high/low
+proximity, and Bollinger Band width percentile. These power the
+Stage 2 Minervini trend template and the volatility-regime subscore.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -28,11 +33,19 @@ from app.services.technicals import (
 
 logger = logging.getLogger(__name__)
 
+# Pillar v4 constants
+_BB_PERIOD = 20
+_BB_STDEV = 2.0
+_BB_PERCENTILE_LOOKBACK = 252
+_TRADING_DAYS_52W = 252
+_MA_150 = 150
+_MA_200 = 200
+
 
 @dataclass
 class UnderlyingFeatures:
     """Category A features for an underlying."""
-    
+
     close: float
     sma20: Optional[float] = None
     sma50: Optional[float] = None
@@ -56,6 +69,16 @@ class UnderlyingFeatures:
     plus_di: Optional[float] = None
     minus_di: Optional[float] = None
     obv_trend: Optional[str] = None  # RISING, FALLING, FLAT
+
+    # Pillar v4 additions (require ≥252 daily bars for full coverage)
+    ma_150: Optional[float] = None  # 150-day simple moving average (Stage 2)
+    ma_200: Optional[float] = None  # 200-day simple moving average (Stage 2)
+    high_52w: Optional[float] = None  # 252-day high of daily close
+    low_52w: Optional[float] = None  # 252-day low of daily close
+    dist_to_52w_high_pct: Optional[float] = None  # (close - high_52w) / high_52w * 100
+    dist_to_52w_low_pct: Optional[float] = None  # (close - low_52w) / low_52w * 100
+    bb_width: Optional[float] = None  # (upper - lower) / SMA20
+    bb_width_percentile: Optional[float] = None  # 0-100 rank over past 252 days
 
 
 def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[UnderlyingFeatures]:
@@ -130,6 +153,30 @@ def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[Underlying
     obv_result = calculate_obv_trend(bars, 20)
     obv_trend_val = obv_result["trend"] if obv_result else None
 
+    # =========================================================================
+    # Pillar v4 additions — require longer bar windows; degrade gracefully
+    # when the bars sequence is shorter than the required lookback.
+    # =========================================================================
+    ma_150 = calculate_sma(closes, _MA_150)
+    ma_200 = calculate_sma(closes, _MA_200)
+
+    high_52w = low_52w = None
+    dist_to_52w_high_pct = dist_to_52w_low_pct = None
+    if len(closes) >= _TRADING_DAYS_52W:
+        recent = closes[-_TRADING_DAYS_52W:]
+        high_52w = max(recent)
+        low_52w = min(recent)
+        if high_52w > 0:
+            dist_to_52w_high_pct = (
+                (current_close - high_52w) / high_52w
+            ) * 100
+        if low_52w > 0:
+            dist_to_52w_low_pct = (
+                (current_close - low_52w) / low_52w
+            ) * 100
+
+    bb_width, bb_width_percentile = _compute_bb_width(closes)
+
     return UnderlyingFeatures(
         close=current_close,
         sma20=sma20,
@@ -152,4 +199,70 @@ def compute_underlying_features(bars: Sequence[DailyBar]) -> Optional[Underlying
         plus_di=plus_di,
         minus_di=minus_di,
         obv_trend=obv_trend_val,
+        ma_150=ma_150,
+        ma_200=ma_200,
+        high_52w=high_52w,
+        low_52w=low_52w,
+        dist_to_52w_high_pct=dist_to_52w_high_pct,
+        dist_to_52w_low_pct=dist_to_52w_low_pct,
+        bb_width=bb_width,
+        bb_width_percentile=bb_width_percentile,
     )
+
+
+def _bb_width_at(closes: Sequence[float], end_idx: int) -> Optional[float]:
+    """Compute Bollinger Band width at ``end_idx`` using the prior 20 closes.
+
+    BB width = (upper - lower) / middle, where middle = SMA20,
+    upper = middle + 2*stdev, lower = middle - 2*stdev. Returns None
+    when fewer than 20 bars are available or when the middle is zero.
+    """
+    if end_idx < _BB_PERIOD - 1:
+        return None
+    window = closes[end_idx - _BB_PERIOD + 1 : end_idx + 1]
+    if len(window) < _BB_PERIOD:
+        return None
+    mean = sum(window) / _BB_PERIOD
+    if mean <= 0:
+        return None
+    variance = sum((x - mean) ** 2 for x in window) / _BB_PERIOD
+    stdev = math.sqrt(variance)
+    upper = mean + _BB_STDEV * stdev
+    lower = mean - _BB_STDEV * stdev
+    return (upper - lower) / mean
+
+
+def _compute_bb_width(
+    closes: Sequence[float],
+) -> tuple[Optional[float], Optional[float]]:
+    """Return ``(current_bb_width, percentile)`` from a close-price series.
+
+    The percentile ranks the current BB width against the last 252
+    rolling BB-width values. Returns ``(width, None)`` when we have
+    a current width but fewer than ~60 historical values to rank
+    against (below that the percentile is too noisy to be useful).
+    """
+    if len(closes) < _BB_PERIOD:
+        return None, None
+
+    current_width = _bb_width_at(closes, len(closes) - 1)
+    if current_width is None:
+        return None, None
+
+    # Build historical BB-width series for percentile ranking.
+    lookback = min(_BB_PERCENTILE_LOOKBACK, len(closes) - _BB_PERIOD + 1)
+    historical: list[float] = []
+    # Start_idx so that we produce `lookback` rolling widths ending at
+    # the most recent bar.
+    start = len(closes) - lookback
+    for i in range(start, len(closes)):
+        w = _bb_width_at(closes, i)
+        if w is not None:
+            historical.append(w)
+
+    if len(historical) < 60:
+        return current_width, None
+
+    below = sum(1 for w in historical if w < current_width)
+    percentile = (below / len(historical)) * 100
+    return current_width, round(percentile, 2)

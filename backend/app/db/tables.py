@@ -2152,21 +2152,38 @@ class SP500TickerTable:
         return sorted(result)
 
     @staticmethod
-    async def get_sector_map() -> dict[str, str]:
-        """Get a mapping of ticker → sector for all active S&P 500 tickers.
+    async def get_sector_map(
+        universe: Optional[str] = None,
+    ) -> dict[str, str]:
+        """Get a mapping of ticker → sector for active tickers.
+
+        Args:
+            universe: Optional universe filter ("sp500", "russell1000").
+                When None, returns sectors for all active tickers across
+                every universe. When set, only tickers whose
+                ``index_membership`` list contains the value are included.
 
         Returns:
-            Dict mapping ticker symbol to sector string (e.g. {"AAPL": "Technology"})
+            Dict mapping ticker symbol to sector string.
+            (e.g. {"AAPL": "Technology"})
         """
         db = get_dynamodb()
         items = await db.query(
             SP500TickerTable.TABLE, "TICKER_LIST", limit=None, scan_forward=True
         )
-        return {
-            item["ticker"]: item.get("sector", "")
-            for item in items
-            if item.get("is_active", True) and item.get("sector")
-        }
+        result: dict[str, str] = {}
+        for item in items:
+            if not item.get("is_active", True):
+                continue
+            sector = item.get("sector")
+            if not sector:
+                continue
+            if universe is not None:
+                membership = item.get("index_membership", ["sp500"])
+                if universe not in membership:
+                    continue
+            result[item["ticker"]] = sector
+        return result
 
     @staticmethod
     async def put_ticker(
