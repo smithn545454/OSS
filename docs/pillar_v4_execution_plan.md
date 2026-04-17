@@ -637,6 +637,101 @@ Three causes (resolved together in commit `52b06fc`, with concurrent overlap in 
 
 ---
 
+## 7.11 Phase 8 Detailed Plan — 2-Week Observation + Tuning (kicks off 2026-04-20)
+
+**Status:** ⏳ **Active starting Monday 2026-04-20 13:00 UTC** — exit criteria targeted for **2026-05-04**.
+
+**Goal:** Prove v4.0.0 produces stable, trustworthy decisions for two consecutive weeks of live market exposure. No code changes during the window — all calibration via the Policy page (`/policies` → edit active v4.0.0). If anything breaks, rollback is one curl: `POST /api/policies/v3.1.3/activate`.
+
+### What is in scope (Nick + future Claude sessions)
+
+**Daily monitoring (5–10 min/day, every trading day):**
+1. Open the **Pipeline Monitor** page — confirm 8 stages all green on the most recent coordinator-fan-out run. Investigate any stage with `status=failed` or anomaly flag immediately.
+2. Open the **Opportunities** page (filter to `APPROVE`, sort by `final_score` desc). Top 5 are the day's Sharpshooter candidates. Manual sanity check: do they look like trades you'd actually take?
+3. Spot-check the **CloudWatch data-availability log** (one entry per pillar batch in `/aws/lambda/oss-dev-backend`). Coverage thresholds:
+   - `ma_200`, `high_52w`, `bb_width_percentile` → must stay ≥ 85%
+   - `sector_rs_20d` → must stay ≥ 85%
+   - `historical_move_magnitude` → must stay ≥ 80%
+   - `days_to_earnings` → currently 23–70%; floor is "don't drop further"
+4. Skim CloudWatch ERROR pattern for the last 24h. Pre-existing transient Polygon JSON parse errors are normal; anything new is not.
+
+**Weekly review (~30 min, end of each week):**
+1. Pull the week's APPROVE decisions: `GET /api/evaluations/approve?limit=200`. Bucket by tier and compute average composite per tier. Compare against plan §4.4 expected daily flow (TIER_1: 2–6, TIER_2: 8–20, TIER_3: 25–60). Note drift.
+2. Cross-check 5 high-conviction trades against forward 1d/2d/5d returns (manual lookup on broker / chart). Are the picks profitable? Direction-correct? Are they catching the actual breakouts that fired during the week?
+3. Cross-check 5 *rejected* trades that should have approved (manual: pick a ticker that ran 5%+ during the week and look up its evaluation in `/evaluation/<ticker>/<id>`). Which subscore killed it? Is the breakpoint mis-calibrated?
+4. Pull the week's `PillarScore.contributors` distributions (CloudWatch query or DynamoDB scan): which subscores are pinned at 0 or at 100? A pinned subscore is a sign the breakpoint curve doesn't differentiate.
+
+**Tunable knobs (Policy page only — no code):**
+
+| Knob | Where to adjust | When to touch |
+|---|---|---|
+| `tier_1_min_score` (currently 85) | `decision.tier_1_min_score` | After 7 trading days with zero TIER_1, drop to 82 |
+| `tier_1_min_pillar` (currently 70) | `decision.tier_1_min_pillar` | If TIER_1s have one weak pillar (e.g., Trade Structure low) |
+| `approve_threshold` (currently 75) | `decision.approve_threshold` | If APPROVE flow exceeds 60/run consistently, raise to 78 |
+| `watch_threshold` (currently 65) | `decision.watch_threshold` | If WATCH list is unmanageably long |
+| Per-pillar subscore breakpoints | `pillars.{pillar}.numeric_subscores[N].breakpoints` | If a subscore is pinned at 0 or 100 across most evaluations |
+| Per-scanner weight overrides | `pillars.scanner_weights.{SCANNER}` | If one scanner systematically under/over-fires |
+| Hard-gate thresholds | `gates.*` | If a gate is killing legitimate setups (e.g., `theta_burden_max`) |
+
+**Out of scope until Phase 8 exits:**
+- ❌ Code changes (any file in `backend/app/pillars/`, `backend/app/decision/`, `backend/app/features/`, etc.)
+- ❌ New pillars or new subscores
+- ❌ Changes to composite formula
+- ❌ Phase 9 cleanup (v3 code removal)
+- ❌ Phase 10 (historical rescore) — **except** building the v4 rescore script in a separate worktree as prep work; do NOT run it against production
+- ❌ Frontend changes beyond bug fixes
+- ❌ Reactivating v3.1.3 unless something is materially broken
+
+### 2-Week Schedule (concrete dates)
+
+**Week 1: 2026-04-20 → 2026-04-24 (Mon–Fri)**
+
+| Day | Date | What's expected | Decision triggers |
+|---|---|---|---|
+| 1 | Mon 04-20 | First post-weekend coordinator run at 13:00 UTC. ~9 scheduled runs (every 10 min, 13:00–14:30 UTC sample window). Validate data availability stays in target ranges. | If `ma_200` < 85% or any stage fails → investigate before market continues |
+| 2 | Tue 04-21 | Daily refresh of price history fired at 5am UTC. Coverage should be unchanged or higher. | If any feature drops > 5pp vs Monday → check `oss-dev-price-history-refresh` rule fired |
+| 3 | Wed 04-22 | First mid-week sanity check: are the same tickers persistently topping the APPROVE list? That's evidence the breakpoints reward the same setup repeatedly — fine if you'd take those trades, concerning if not. | If top 3 are static across 3 days → review which subscores dominate |
+| 4 | Thu 04-23 | Look for the first Sharpshooter (TIER_1). | If still zero TIER_1 → log evidence (top composite + which pillar pulled it down) for end-of-week review |
+| 5 | Fri 04-24 | Friday 21:00 UTC last scan. **Week-1 review** over the weekend. | If zero TIER_1 across full week → drop `tier_1_min_score` to 82 on Sunday so Monday's first run can validate |
+
+**Week 2: 2026-04-27 → 2026-05-01 (Mon–Fri)**
+
+| Day | Date | What's expected | Decision triggers |
+|---|---|---|---|
+| 6 | Mon 04-27 | First run with any week-1 tuning applied. Validate the change had the intended distribution effect. | If tuning over-corrected (e.g., 50+ TIER_1 / run) → revert to v4.0.0 base |
+| 7 | Tue 04-28 | Stability check. | — |
+| 8 | Wed 04-29 | Mid-week 2 check. | — |
+| 9 | Thu 04-30 | Pre-final-day check: any v4-related issue in the last 14 days? Any rollback to v3.1.3 needed at any point? | If any rollback occurred → reset Phase 8 clock |
+| 10 | Fri 05-01 | Friday 21:00 UTC. **Phase 8 exit review** Saturday/Sunday. | If exit criteria met → green-light Phase 9 for week of 05-04 |
+
+### Phase 8 Exit Criteria (all must be true to proceed to Phase 9)
+
+- [ ] **Zero v4-related production incidents** for 10 consecutive trading days. ("v4-related" = anything traceable to the new pillar code, the geometric-mean composite, or the Phase 1 features wiring. Pre-existing Polygon flakes don't count.)
+- [ ] **Tier distribution stabilized** in the expected range (TIER_1: 2–6, TIER_2: 8–20, TIER_3: 25–60 per coordinator-fan-out run on Russell 1000). Acceptable to be at the low end of each range.
+- [ ] **Data availability holds:** all four Phase 1 features at ≥ 85% on every coordinator-fan-out run (small-chunk runs and UV bridge can vary).
+- [ ] **At least one TIER_1 has appeared and exhibits the Sharpshooter profile:** delta 0.20–0.40, DTE 21–45, catalyst in window OR clear technical breakout, Stage 2 uptrend, IV rank ≤ 60.
+- [ ] **No reactivation of v3.1.3 during the window.** Even one rollback resets the clock.
+- [ ] **Nick has explicitly confirmed trust** in the top of the Opportunities page. The end-state test from plan §13: when Nick sees TIER_1, would he enter the trade without hesitation?
+
+### What to do if exit criteria fail
+
+- **At Day 10 with criteria not met:** do NOT proceed to Phase 9. Stay on v4.0.0; continue calibration. Re-evaluate at Day 14, 21.
+- **At Day 21 with criteria still not met:** escalation point. Either (a) the breakpoints fundamentally need a backtest-driven recalibration (introduces a new sub-phase 8.5), or (b) the design needs revisiting (return to plan §4 and rethink). Document specifically which criterion is failing and why.
+
+### Known Watch Items (carried from §7.10)
+
+1. **`FinnhubClient` "not initialized" issue** (CLAUDE.md Known Issues / Watch Items). Causes `days_to_earnings` to be partial (23–70%). Move Potential's catalyst subscore (3.5% of total weight) defaults to 50 for missing entries — fails open. Watch but don't fix during Phase 8 unless coverage drops < 20%.
+2. **No TIER_1 emergence at activation.** Composites top out at 84; `tier_1_min_score=85`. Either market doesn't currently contain a Sharpshooter setup OR breakpoints are slightly mis-calibrated. Week 1 will tell.
+3. **`oss-dev-nightly-scribe` EventBridge rule** still orphaned (fires Mon-Fri 21:30 UTC into a removed handler). Dead-code firing, no functional impact. Decide whether to delete during Phase 9.
+4. **`oss-dev-daily-data-capture` Lambda permission** remains outside CFN (manual SID). Acceptable temporary drift — rules fire correctly. Reconcile during a future infra-only session.
+
+### Phase 9 + 10 — out of scope this 2 weeks but unblocked
+
+- **Phase 9 (v3 code removal, 2 days):** scheduled to start week of 2026-05-04 if Phase 8 exits cleanly. Removes `app/pillars/premium_leverage.py / underlying_behavior.py / setup_quality.py`, v3 policy defaults (`policy_v3_default.json`), v3 weight editing on Policy page, `composite_formula="weighted_sum"` branch in `pillars/composite.py`, `_load_default_pillar_configs()` v3 fallbacks, v3 paths in `rescore_*.py`, v3 entries in `calibration/feature_importance.py`. Permanent retention list (PillarId enum values, denormalized PaperPosition fields, `pillarMeta.ts` legacy entries, migration shims) stays untouched.
+- **Phase 10 (historical paper-position rescore, 2–3 days):** depends on Finnhub earnings-history backfill (or accepting current `oss-dev-earnings-history` coverage) + a new v4 rescore script. Can be drafted in a separate worktree during Phase 8 — do NOT run against production.
+
+---
+
 ## 8. Key Sub-Rules (apply throughout)
 
 1. **Geometric mean insufficient-data rule:** a pillar with <3 available subscores returns score = 0. Composite then evaluates to 0 → auto-REJECT.
