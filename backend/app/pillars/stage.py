@@ -200,32 +200,23 @@ async def run_pillar_scoring(
 def extract_pillar_scores_for_decision(
     results: dict[str, list[PillarResult]],
 ) -> dict[str, dict[str, float]]:
-    """Extract pillar scores in format needed for decision logic (v3.0.0).
+    """Extract pillar scores in the format consumed by decision logic.
 
-    Args:
-        results: Dict mapping evaluation_id to PillarResults
-
-    Returns:
-        Dict mapping evaluation_id to dict with new pillar keys:
-        `premium_leverage`, `underlying_behavior`, `setup_quality`.
+    Returns a dict keyed by evaluation_id with snake_case pillar-name keys
+    for every pillar present on each PillarResult. Works transparently for
+    both v3 (premium_leverage / underlying_behavior / setup_quality) and v4
+    (directional_conviction / move_potential / trade_structure) regimes —
+    unknown PillarIds are silently dropped.
     """
     scores: dict[str, dict[str, float]] = {}
 
     for evaluation_id, pillar_results in results.items():
-        eval_scores = {
-            "premium_leverage": 50.0,
-            "underlying_behavior": 50.0,
-            "setup_quality": 50.0,
-        }
-
+        eval_scores: dict[str, float] = {}
         for pr in pillar_results:
             pillar_name = str(pr.pillar_id)
             if hasattr(pr.pillar_id, "value"):
                 pillar_name = pr.pillar_id.value
-            key = pillar_name.lower()
-            if key in eval_scores:
-                eval_scores[key] = pr.score
-
+            eval_scores[pillar_name.lower()] = pr.score
         scores[evaluation_id] = eval_scores
 
     return scores

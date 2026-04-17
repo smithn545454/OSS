@@ -48,12 +48,23 @@ class ContractData:
 
 @dataclass
 class ScoresData:
-    """Pillar and final scores for thesis input (Policy v3.0.0)."""
+    """Pillar and final scores for thesis input.
+
+    Carries both v3 and v4 pillar scores as optional fields so the prompt
+    builder can render whichever regime produced this decision. The
+    ``regime`` field ("v3" or "v4") makes the active set explicit.
+    """
 
     final: float
-    premium_leverage: float
-    underlying_behavior: float
-    setup_quality: float
+    # v3 (Policy v3.x — retained through Phase 8)
+    premium_leverage: Optional[float] = None
+    underlying_behavior: Optional[float] = None
+    setup_quality: Optional[float] = None
+    # v4 (Policy v4.x — active from Phase 7)
+    directional_conviction: Optional[float] = None
+    move_potential: Optional[float] = None
+    trade_structure: Optional[float] = None
+    regime: str = "v3"
 
 
 @dataclass
@@ -128,9 +139,13 @@ class ThesisInput:
             },
             "scores": {
                 "final": self.scores.final,
+                "regime": self.scores.regime,
                 "premium_leverage": self.scores.premium_leverage,
                 "underlying_behavior": self.scores.underlying_behavior,
                 "setup_quality": self.scores.setup_quality,
+                "directional_conviction": self.scores.directional_conviction,
+                "move_potential": self.scores.move_potential,
+                "trade_structure": self.scores.trade_structure,
             },
             "pillar_contributors": {
                 pillar: [

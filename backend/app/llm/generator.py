@@ -160,12 +160,22 @@ class ThesisGenerator:
             theta_pct=theta_pct,
         )
 
-        # Build scores data
+        # Build scores data — carries both regimes as optional fields and
+        # records which regime is active so the prompt picks the right labels.
+        is_v4 = (
+            decision.directional_conviction_score is not None
+            and decision.move_potential_score is not None
+            and decision.trade_structure_score is not None
+        )
         scores = ScoresData(
             final=decision.final_score,
+            regime="v4" if is_v4 else "v3",
             premium_leverage=decision.premium_leverage_score,
             underlying_behavior=decision.underlying_behavior_score,
             setup_quality=decision.setup_quality_score,
+            directional_conviction=decision.directional_conviction_score,
+            move_potential=decision.move_potential_score,
+            trade_structure=decision.trade_structure_score,
         )
 
         # Build pillar contributors

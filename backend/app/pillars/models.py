@@ -161,7 +161,30 @@ class ScoringContext:
     plus_di: Optional[float] = None
     minus_di: Optional[float] = None
     obv_trend: Optional[str] = None
-    
+
+    # Category H (Pillar v4): long-range technicals + sector context
+    ma_150: Optional[float] = None
+    ma_200: Optional[float] = None
+    high_52w: Optional[float] = None
+    low_52w: Optional[float] = None
+    dist_to_52w_high_pct: Optional[float] = None
+    dist_to_52w_low_pct: Optional[float] = None
+    bb_width: Optional[float] = None
+    bb_width_percentile: Optional[float] = None
+    sector: Optional[str] = None
+    sector_rs_20d: Optional[float] = None
+
+    # Category I (Pillar v4): catalyst extensions (Move Potential)
+    historical_move_magnitude: Optional[float] = None
+    historical_move_confidence: Optional[int] = None
+
+    # Contract Greeks beyond delta (Trade Structure pillar needs gamma/theta/vega)
+    # kept alongside Category D fields to preserve ordering of existing defaults.
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    strike: Optional[float] = None
+
     @property
     def is_call(self) -> bool:
         """Check if this is a CALL contract."""
@@ -266,10 +289,31 @@ class ScoringContext:
             ema_alignment=feature_set.ema_alignment if feature_set else None,
             rsi_14=feature_set.rsi_14 if feature_set else None,
             macd_histogram=feature_set.macd_histogram if feature_set else None,
-            adx_14=feature_set.adx_14 if feature_set else None,
-            plus_di=feature_set.plus_di if feature_set else None,
-            minus_di=feature_set.minus_di if feature_set else None,
+            adx_14=feature_set.adx_14 if feature_set else (getattr(position, "entry_adx_14", None) or None),
+            plus_di=feature_set.plus_di if feature_set else (getattr(position, "entry_plus_di", None) or None),
+            minus_di=feature_set.minus_di if feature_set else (getattr(position, "entry_minus_di", None) or None),
             obv_trend=feature_set.obv_trend if feature_set else None,
+            # Category H (Pillar v4) — long-range technicals + sector
+            ma_150=feature_set.ma_150 if feature_set else None,
+            ma_200=feature_set.ma_200 if feature_set else None,
+            high_52w=feature_set.high_52w if feature_set else None,
+            low_52w=feature_set.low_52w if feature_set else None,
+            dist_to_52w_high_pct=feature_set.dist_to_52w_high_pct if feature_set else None,
+            dist_to_52w_low_pct=feature_set.dist_to_52w_low_pct if feature_set else None,
+            bb_width=feature_set.bb_width if feature_set else None,
+            bb_width_percentile=feature_set.bb_width_percentile if feature_set else None,
+            sector=feature_set.sector if feature_set else None,
+            sector_rs_20d=feature_set.sector_rs_20d if feature_set else None,
+            # Category I (Pillar v4) — catalyst extensions
+            historical_move_magnitude=feature_set.historical_move_magnitude if feature_set else None,
+            historical_move_confidence=feature_set.historical_move_confidence if feature_set else None,
+            # Contract Greeks beyond delta (historical positions lack entry_gamma/vega;
+            # only entry_theta is snapshotted). Pillar v4 min-subscore rule gracefully
+            # degrades when gamma/vega are missing on historical rescores.
+            gamma=None,
+            theta=(getattr(position, "entry_theta", None) or None),
+            vega=None,
+            strike=(getattr(position, "strike", None) or None),
         )
 
     @classmethod
@@ -367,4 +411,27 @@ class ScoringContext:
             plus_di=feature_set.plus_di if feature_set else None,
             minus_di=feature_set.minus_di if feature_set else None,
             obv_trend=feature_set.obv_trend if feature_set else None,
+            # Category H (Pillar v4) — long-range technicals + sector
+            ma_150=feature_set.ma_150 if feature_set else None,
+            ma_200=feature_set.ma_200 if feature_set else None,
+            high_52w=feature_set.high_52w if feature_set else None,
+            low_52w=feature_set.low_52w if feature_set else None,
+            dist_to_52w_high_pct=feature_set.dist_to_52w_high_pct if feature_set else None,
+            dist_to_52w_low_pct=feature_set.dist_to_52w_low_pct if feature_set else None,
+            bb_width=feature_set.bb_width if feature_set else None,
+            bb_width_percentile=feature_set.bb_width_percentile if feature_set else None,
+            sector=feature_set.sector if feature_set else None,
+            sector_rs_20d=feature_set.sector_rs_20d if feature_set else None,
+            # Category I (Pillar v4) — catalyst extensions
+            historical_move_magnitude=(
+                feature_set.historical_move_magnitude if feature_set else None
+            ),
+            historical_move_confidence=(
+                feature_set.historical_move_confidence if feature_set else None
+            ),
+            # Contract Greeks beyond delta + strike (Trade Structure pillar inputs)
+            gamma=getattr(evaluation, "gamma", None),
+            theta=getattr(evaluation, "theta", None),
+            vega=getattr(evaluation, "vega", None),
+            strike=getattr(evaluation, "strike", None),
         )

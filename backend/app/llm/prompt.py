@@ -15,7 +15,12 @@ THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst. Your task i
 You will receive data about:
 - The underlying stock (ticker, price, technical indicators, ATR)
 - The option contract (type, strike, expiration, Greeks, breakeven, expected move)
-- Scoring metrics (premium leverage, underlying behavior, setup quality scores)
+- Scoring metrics across three pillars. The active scoring regime is declared at
+  the top of the Scoring Summary as either v3 (Premium Leverage / Underlying
+  Behavior / Setup Quality, composite = arithmetic weighted sum) or v4
+  (Directional Conviction / Move Potential / Trade Structure, composite =
+  weighted geometric mean 0.40 / 0.35 / 0.25). In v4 the geometric mean means a
+  weak pillar collapses the composite — treat a lagging pillar as a material risk.
 - The factors that contributed to the recommendation
 - Setup rule matches (codified trade archetypes from the trader's rule library)
 
@@ -183,17 +188,9 @@ def build_thesis_prompt(input_data: ThesisInput) -> str:
 - ATR (14-day): {atr14} ({atr14_pct} of stock price)
 """
 
-    # Format the scores section
+    # Format the scores section — dispatches on active regime.
     scores = data["scores"]
-    scores_text = f"""
-**Scoring Summary**
-- Final Score: {scores['final']:.1f}/100
-- Premium Leverage Score: {scores['premium_leverage']:.1f}/100
-- Underlying Behavior Score: {scores['underlying_behavior']:.1f}/100
-- Setup Quality Score: {scores['setup_quality']:.1f}/100
-- Quality Tier: {data['quality_tier'] or 'N/A'}
-- Policy Version: {data.get('policy_version', 'N/A')}
-"""
+    scores_text = _format_scores_block(scores, data)
 
     # Format pillar contributors
     contributors_text = "\n**Key Scoring Factors**\n"
@@ -285,6 +282,41 @@ Respond with ONLY valid JSON matching this exact schema:
 Generate the trade thesis now:"""
 
     return prompt
+
+
+def _format_scores_block(scores: dict[str, Any], data: dict[str, Any]) -> str:
+    """Format the Scoring Summary — chooses v3 or v4 label set by regime."""
+    regime = scores.get("regime", "v3")
+    final = scores.get("final", 0.0) or 0.0
+    quality_tier = data.get("quality_tier") or "N/A"
+    policy_version = data.get("policy_version", "N/A")
+
+    if regime == "v4":
+        dc = scores.get("directional_conviction") or 0.0
+        mp = scores.get("move_potential") or 0.0
+        ts = scores.get("trade_structure") or 0.0
+        body = (
+            f"- Final Score (weighted geometric mean): {final:.1f}/100\n"
+            f"- Directional Conviction Score: {dc:.1f}/100 (exponent 0.40)\n"
+            f"- Move Potential Score: {mp:.1f}/100 (exponent 0.35)\n"
+            f"- Trade Structure Score: {ts:.1f}/100 (exponent 0.25)\n"
+        )
+    else:
+        pl = scores.get("premium_leverage") or 0.0
+        ub = scores.get("underlying_behavior") or 0.0
+        sq = scores.get("setup_quality") or 0.0
+        body = (
+            f"- Final Score (weighted arithmetic sum): {final:.1f}/100\n"
+            f"- Premium Leverage Score: {pl:.1f}/100\n"
+            f"- Underlying Behavior Score: {ub:.1f}/100\n"
+            f"- Setup Quality Score: {sq:.1f}/100\n"
+        )
+    return (
+        f"\n**Scoring Summary (regime={regime})**\n"
+        + body
+        + f"- Quality Tier: {quality_tier}\n"
+        + f"- Policy Version: {policy_version}\n"
+    )
 
 
 def parse_thesis_response(response: str) -> dict[str, Any]:
