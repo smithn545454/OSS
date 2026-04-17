@@ -274,3 +274,26 @@ class FinnhubClient:
         if not data.get("ticker") and not data.get("finnhubIndustry"):
             return None
         return data
+
+    async def get_earnings_history(
+        self, symbol: str
+    ) -> list[dict[str, Any]]:
+        """Fetch last ~4 quarters of EPS from /stock/earnings.
+
+        Unlike /calendar/earnings (free-tier returns only the next
+        upcoming event), /stock/earnings returns past quarters. Each
+        item carries the quarter-end ``period`` (YYYY-MM-DD) but NOT
+        the announcement date — callers resolve the announcement day
+        separately (typically via a volume-spike scan of price history
+        in the 2-6 week window after quarter-end).
+
+        Returns a list of dicts with keys: ``actual``, ``estimate``,
+        ``period``, ``quarter``, ``surprise``, ``surprisePercent``,
+        ``symbol``, ``year``. Most recent quarter first.
+        """
+        data = await self._rate_limited_request(
+            "/stock/earnings", {"symbol": symbol}
+        )
+        if isinstance(data, list):
+            return data
+        return []

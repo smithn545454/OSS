@@ -123,70 +123,169 @@ class EarningsCalendarService:
         *,
         as_of: Optional[date] = None,
     ) -> RefreshReport:
-        """Fetch past 18 months + next 90 days of earnings for a ticker.
+        """Fetch the last ~4 quarters of earnings + compute 1-day moves.
 
-        For each event with a known date and available price data, also
-        compute the 1-day post-announcement move and persist it.
+        Finnhub's free-tier ``/calendar/earnings`` endpoint only returns
+        the next upcoming event regardless of the date range, so we
+        use ``/stock/earnings`` which returns the past ~4 quarters with
+        EPS actuals but only a quarter-end ``period`` (not the
+        announcement date).
 
-        Returns a RefreshReport for this single ticker.
+        To locate the actual announcement day we scan the 14-45 day
+        window following each quarter-end in price history and pick
+        the highest-volume trading day — that's the announcement with
+        very high probability. From there we compute the close-to-close
+        1-day post-event move.
+
+        Future events are picked up separately via
+        ``/calendar/earnings`` so the next-event lookup still works.
         """
         if self._finnhub is None:
             raise RuntimeError("refresh_ticker requires a FinnhubClient")
 
         report = RefreshReport(tickers_attempted=1)
         as_of = as_of or date.today()
-        from_date = as_of - timedelta(days=self._BACKFILL_LOOKBACK_DAYS)
-        to_date = as_of + timedelta(days=self._FUTURE_LOOKAHEAD_DAYS)
-
-        try:
-            raw_events = await self._finnhub.get_earnings_calendar(
-                symbol=ticker, from_date=from_date, to_date=to_date
-            )
-        except Exception as e:  # pragma: no cover — defensive
-            report.tickers_failed = 1
-            report.failures.append(f"{ticker}: Finnhub error: {e}")
-            logger.exception(f"Finnhub fetch failed for {ticker}")
-            return report
 
         events: list[EarningsEvent] = []
-        for raw in raw_events:
-            event = self._parse_raw_event(ticker, raw)
-            if event is None:
+
+        # ---- 1. Historical quarters via /stock/earnings ----
+        try:
+            eps_rows = await self._finnhub.get_earnings_history(ticker)
+        except Exception as e:  # pragma: no cover — defensive
+            report.tickers_failed = 1
+            report.failures.append(f"{ticker}: Finnhub earnings error: {e}")
+            logger.exception(f"Finnhub earnings fetch failed for {ticker}")
+            return report
+
+        for row in eps_rows:
+            period_str = row.get("period")
+            if not period_str:
+                continue
+            try:
+                period_date = datetime.strptime(period_str, "%Y-%m-%d").date()
+            except ValueError:
                 continue
 
-            # Past events: try to compute the 1-day move from price history.
+            announcement_date: Optional[date] = None
+            move_data: Optional[tuple[float, float, float]] = None
             if self._price_history is not None:
-                event_date = datetime.strptime(
-                    event.earnings_date, "%Y-%m-%d"
-                ).date()
-                if event_date <= as_of:
+                announcement_date = await self._detect_announcement_date(
+                    ticker, period_date, as_of
+                )
+                if announcement_date is not None and announcement_date <= as_of:
                     move_data = await self._compute_one_day_move(
-                        ticker, event_date, event.time_of_day
+                        ticker, announcement_date, time_of_day=None
                     )
-                    if move_data is not None:
-                        pre_close, post_close, move_pct = move_data
-                        event = event.model_copy(
-                            update={
-                                "pre_earnings_close": pre_close,
-                                "post_earnings_close": post_close,
-                                "one_day_move_pct": move_pct,
-                            }
-                        )
-                        report.moves_computed += 1
 
-            events.append(event)
+            event_date = announcement_date or period_date
+            fiscal_period = None
+            q = row.get("quarter")
+            y = row.get("year")
+            if q and y:
+                fiscal_period = f"Q{q} {y}"
+
+            base = EarningsEvent(
+                ticker=ticker,
+                earnings_date=event_date.isoformat(),
+                fiscal_period=fiscal_period,
+                time_of_day=None,
+                eps_estimate=_as_float(row.get("estimate")),
+                eps_actual=_as_float(row.get("actual")),
+            )
+            if move_data is not None:
+                pre_close, post_close, move_pct = move_data
+                base = base.model_copy(update={
+                    "pre_earnings_close": pre_close,
+                    "post_earnings_close": post_close,
+                    "one_day_move_pct": move_pct,
+                })
+                report.moves_computed += 1
+            events.append(base)
+
+        # Note: next-upcoming event lookup is intentionally NOT done
+        # here. ``EarningsCacheService`` (hot-path ``/calendar/earnings``
+        # daily refresh) already tracks the next event; calling Finnhub
+        # twice per ticker here would double the backfill time without
+        # adding signal to Pillar v4's historical_move_magnitude.
 
         if events:
+            # Clear any stale events from prior runs before writing
+            # so re-running the backfill is idempotent — earlier
+            # heuristics may have stored different dates for the same
+            # quarter.
+            await EarningsHistoryTable.delete_all_for_ticker(ticker)
             await EarningsHistoryTable.put_batch(events)
             report.events_written = len(events)
             report.tickers_succeeded = 1
         else:
-            # No events returned isn't necessarily a failure — some
-            # tickers (e.g. ETFs) have no earnings. Count as success
-            # with zero writes to avoid inflating the failure rate.
+            # No events isn't necessarily a failure — ETFs and newly
+            # listed tickers legitimately have no earnings history.
             report.tickers_succeeded = 1
 
         return report
+
+    async def _detect_announcement_date(
+        self,
+        ticker: str,
+        period_date: date,
+        as_of: date,
+    ) -> Optional[date]:
+        """Return the likely earnings-announcement trading day.
+
+        US large-caps report 3-5 weeks after quarter-end. We pull a
+        15-day window [period+21, period+35] from price history and
+        pick the day with the highest composite score of
+        (daily volume) × (|daily return|) — the best single signal
+        available from bar data. Earnings days are simultaneously
+        high-volume AND high-return; either signal alone gives false
+        positives from product launches or macro events, but the
+        product of the two is dominated by earnings.
+
+        Returns None when we don't have enough bars (newly-IPO'd
+        tickers, missing history).
+        """
+        if self._price_history is None:
+            return None
+        window_start = period_date + timedelta(days=21)
+        window_end = min(period_date + timedelta(days=35), as_of)
+        if window_end <= window_start:
+            return None
+
+        # Pull a slightly larger window so we can compute prior-day
+        # returns for the first candidate bar.
+        bars = await self._price_history.get_bars(
+            ticker,
+            lookback_days=60,
+            as_of=window_end,
+            allow_fallback=False,
+        )
+        if len(bars) < 2:
+            return None
+
+        # Sort oldest-first and build (prev_close, bar) pairs so we
+        # can score the window candidates.
+        by_date_sorted = sorted(bars, key=lambda b: b.date)
+        best_date: Optional[str] = None
+        best_score = -1.0
+        for i in range(1, len(by_date_sorted)):
+            bar = by_date_sorted[i]
+            if not (window_start.isoformat() <= bar.date <= window_end.isoformat()):
+                continue
+            prev_close = by_date_sorted[i - 1].close
+            if prev_close <= 0:
+                continue
+            daily_ret = abs((bar.close - prev_close) / prev_close)
+            score = daily_ret * bar.volume
+            if score > best_score:
+                best_score = score
+                best_date = bar.date
+
+        if best_date is None:
+            return None
+        try:
+            return datetime.strptime(best_date, "%Y-%m-%d").date()
+        except ValueError:
+            return None
 
     async def refresh_tickers(
         self,
