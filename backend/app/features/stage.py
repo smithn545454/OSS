@@ -42,6 +42,8 @@ class FeatureComputationStage:
         catalyst_service: Optional[Any] = None,
         data_provider: Optional[Any] = None,
         as_of_date: Optional[date] = None,
+        sector_map: Optional[dict[str, str]] = None,
+        earnings_calendar_service: Optional[Any] = None,
     ) -> None:
         """Initialize the feature computation stage.
 
@@ -52,6 +54,10 @@ class FeatureComputationStage:
             catalyst_service: CatalystDataService for earnings/SEC filing data
             data_provider: Optional DataProvider for unified data access (backtest mode)
             as_of_date: Target date for backtesting (defaults to today)
+            sector_map: Pillar v4 — pre-fetched {ticker: sector} mapping.
+                Required for sector_rs_20d feature.
+            earnings_calendar_service: Pillar v4 — service that provides
+                historical_move_magnitude from oss-dev-earnings-history.
         """
         self._polygon = polygon_client
         self._orchestrator = orchestrator or PipelineOrchestrator()
@@ -64,6 +70,8 @@ class FeatureComputationStage:
             config=config,
             data_provider=data_provider,
             as_of_date=as_of_date,
+            sector_map=sector_map,
+            earnings_calendar_service=earnings_calendar_service,
         )
 
     async def execute(
@@ -241,6 +249,8 @@ async def run_feature_computation(
     persist_features: bool = True,
     data_provider: Optional[Any] = None,
     as_of_date: Optional[date] = None,
+    sector_map: Optional[dict[str, str]] = None,
+    earnings_calendar_service: Optional[Any] = None,
 ) -> list[FeatureSet]:
     """Convenience function to run feature computation stage.
 
@@ -266,6 +276,8 @@ async def run_feature_computation(
         catalyst_service=catalyst_service,
         data_provider=data_provider,
         as_of_date=as_of_date,
+        sector_map=sector_map,
+        earnings_calendar_service=earnings_calendar_service,
     )
     return await stage.execute(
         run_id=run_id,

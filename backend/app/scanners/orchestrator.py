@@ -683,6 +683,31 @@ class ScannerOrchestrator:
                         CatalystDataService(earnings_cache=earnings_cache)
                     )
 
+                # Pillar v4 services for sector_rs_20d + historical_move_magnitude.
+                # Both are read-only DDB lookups; no Polygon spend per evaluation.
+                feature_sector_map: dict[str, str] = {}
+                try:
+                    from app.db.tables import SP500TickerTable
+
+                    feature_sector_map = await SP500TickerTable.get_sector_map()
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.warning(f"Pillar v4 sector_map fetch failed: {e}")
+
+                feature_earnings_calendar = None
+                try:
+                    from app.services.earnings_calendar import (
+                        EarningsCalendarService,
+                    )
+                    from app.services.price_history import PriceHistoryService
+
+                    feature_earnings_calendar = EarningsCalendarService(
+                        price_history_service=PriceHistoryService(),
+                    )
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.warning(
+                        f"Pillar v4 earnings_calendar_service init failed: {e}"
+                    )
+
                 feature_sets: list[FeatureSet] = []
                 if not streaming and evaluations:
                     try:
@@ -697,6 +722,8 @@ class ScannerOrchestrator:
                             persist_features=True,
                             data_provider=data_provider,
                             as_of_date=effective_date,
+                            sector_map=feature_sector_map,
+                            earnings_calendar_service=feature_earnings_calendar,
                         )
 
                         logger.info(
