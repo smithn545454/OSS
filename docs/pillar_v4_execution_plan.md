@@ -1,7 +1,7 @@
 # Pillar v4 Execution Plan: Directional Conviction, Move Potential, Trade Structure
 
 **Author:** Principal engineering plan (Claude), revised after codebase audit with Nick 2026-04-16
-**Status:** Phase 1 + Phase 2 complete (2026-04-17). Phase 3 ready to start pending Nick sign-off.
+**Status:** Phase 1 + Phase 2 + Phase 3 complete (2026-04-17). Phase 4 ready to start pending Nick sign-off.
 **Trade universe:** S&P 500 **+ Russell 1000** (~1,500 tickers per scan)
 **Constraint:** ZERO tolerance for disruption. Frontend must not lose functionality. No shadow mode.
 
@@ -332,6 +332,54 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 - **Phase 1 known issues still stand** (CloudFormation drift + manual EventBridge rules). They only block Phase 7 activation, not Phases 3–6 Lambda-code deploys. Schedule the drift-cleanup session before Phase 7.
 - **`composite_formula` field is live but unused** until Phase 3 ships the `app/pillars/composite.py` dispatcher. Current v3.1.3 policy defaults it to `"weighted_sum"`, matching existing arithmetic behavior.
 - **Phase 3 entry point** = `app/pillars/calculator.py` orchestrator needs to discover which pillar configs are populated in the active policy (v3 vs v4) and dispatch accordingly. Registry refactor is the natural home; v3 code paths remain reachable until Phase 9.
+
+---
+
+## 7.6 Phase 3 Outcomes — v4 Compute Classes + Regime Dispatch (2026-04-17)
+
+**Shipped:** Lambda v236, commit `dcd1e5f`, merged to `main`. All new code is additive and unreachable until a v4 policy activates at Phase 7 — v3.1.3 remains the active policy with zero behavior change.
+
+### What shipped
+
+- **`app/pillars/composite.py`** — `compute_composite_score(pillar_results, config, scanner_source)` dispatches on `PillarConfig.composite_formula`: `"weighted_sum"` → v3 arithmetic, `"weighted_geometric_mean"` → v4 geometric. Exposes `weighted_sum` and `weighted_geometric_mean` as public helpers, plus `apply_v4_rules()` for the per-pillar **insufficient-data rule** (score=0 when <3 subscores available → geometric mean collapses composite to 0 → auto-REJECT) and **floor rule** (score=`max(1, weighted_avg)` when enough subscores present, preventing zero-collapse).
+- **Three new pillar compute modules** (each with a tagged accessor that exposes derived feature values to the scoring engine):
+  - `directional_conviction.py` — 6 subscores: Stage 2 Minervini trend template (computed on-the-fly, 7-criteria bullish/bearish), RS 20d, ADX × ±DI directional agreement, 52-week pivot proximity, OBV confirmation, sector RS. Tags: `STAGE_2_TREND`, `RS_LEADER`, `ADX_DIRECTIONAL_AGREE`, `NEAR_BREAKOUT`, `VOLUME_CONFIRMED`, `SECTOR_LEADER`.
+  - `move_potential.py` — 5 subscores: Move trigger (catalyst-window + breakout fallback), historical post-event move magnitude, IV/RV ratio, BB width percentile, expected/required move ratio. Tags: `CATALYST_IN_WINDOW`, `CHEAP_IV_EXPANSION`, `VOLATILITY_COMPRESSION`, `EXPECTED_MOVE_EXCEEDS_REQUIRED`, `LOW_HISTORICAL_CONFIDENCE`.
+  - `trade_structure.py` — 5 subscores: Delta sweet spot, gamma/theta ratio (`γ·S²·σ/|θ|`), catalyst-aware DTE sweet spot, IV rank, strike-to-pivot distance. Tags: `DELTA_SHARPSHOOTER`, `GAMMA_RICH`, `DTE_SWEETSPOT`, `IV_RANK_CHEAP`, `STRIKE_AT_PIVOT`.
+- **`ScoringContext` extended** — Phase 1 fields (`ma_150`, `ma_200`, `high_52w`, `low_52w`, `dist_to_52w_*_pct`, `bb_width`, `bb_width_percentile`, `sector`, `sector_rs_20d`, `historical_move_magnitude`, `historical_move_confidence`) plus `gamma`, `theta`, `vega`, `strike` from Evaluation. Both `from_evaluation_and_features` and `from_position_and_features` populate them, using `getattr(..., None)` fallbacks so historical positions without snapshot fields gracefully degrade.
+- **Orchestrator refactor** — `PillarCalculator` selects v3 or v4 registry by inspecting which pillar slots are populated on the active `PillarConfig`. Both regimes flow through the same batch paths. Regime-aware diagnostic logging ("Pillar v3/v4 data availability …").
+- **Module-level `compute_final_score(pl, ub, sq, config, scanner_source)`** — retained as the v3 positional API for rescore scripts, tests, paper-trading calls. New `compute_final_score_from_results(pillar_results, config, scanner_source)` accepts `PillarResult` objects directly and dispatches via the composite module. Both coexist through Phase 9.
+- **`DecisionCalculator` regime-aware** — `DecisionContext` carries v3 AND v4 scores as `Optional[float]`, `is_v4()` flips all downstream logic (composite formula, tier assignment kwargs, reason-code emission). Added v4 reason codes (`STRONG_/DECENT_/WEAK_/POOR_DIRECTIONAL_CONVICTION/MOVE_POTENTIAL/TRADE_STRUCTURE`), `SHARPSHOOTER_SETUP` (v4 tier_1), `INSUFFICIENT_DATA_*` (emitted when v4 min-subscore rule zeros a pillar). Legacy `compute_final_score` and positional `assign_quality_tier` preserved; new `assign_quality_tier(..., directional_conviction=..., ...)` kwargs added for v4.
+- **v3 Decision fields kept non-Optional** (per Phase 2 deferral) — v4 decisions populate v3 score fields with `0.0` as an inactive-regime sentinel. Phase 6 migrates readers to handle `Optional[float]`.
+- **LLM module regime-aware** — `ScoresData` gains a `regime` marker + optional v3/v4 pillar-score fields. `build_thesis_prompt` dispatches on regime: v3 renders arithmetic-sum composite with legacy labels; v4 renders weighted geometric mean with exponents and Sharpshooter labels. System prompt updated to document the geometric-mean insufficient-data behaviour so the LLM reasons about weak pillars correctly. `ThesisGenerator.build_input` infers regime from the Decision.
+- **`extract_pillar_scores_for_decision` is now regime-agnostic** — emits whichever snake_case keys are present on the results, no 50.0 default padding.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Backend test suite | 2275 passing, 0 new regressions |
+| New v4 tests (composite / 3 pillars / integration) | 80 passing, 91–98% coverage on new files |
+| Ruff on new files | 0 errors |
+| Ruff on pillars/decision/llm overall | +2 vs baseline (both in long-line existing patterns) |
+| CloudWatch ERROR logs post-deploy | none (pre-existing contract_selector parse errors predate v236) |
+| Health endpoint | `healthy` |
+| Post-deploy pipeline run | v3 dispatch confirmed via "Pillar v3 data availability" diagnostic; 100% coverage on adx_14/iv_percentile/iv_rv_ratio/rv20/feasibility |
+| v3.1.3 policy behavior | identical to pre-Phase 3 |
+
+### Phase 3 deferrals (by design) — track for later phases
+
+1. **Phase 5 still owes `PillarConfig.v4_default()` + seeded `v4_default_policy.json`.** Phase 3 leaves v4 configs to be constructed explicitly by callers (tests, Phase 5 seed script). Production cannot activate v4 until Phase 5 ships the JSON seed and `v4_default()` classmethod.
+2. **Decision v3 score fields remain non-Optional.** When a v4 decision is emitted, `premium_leverage_score` / `underlying_behavior_score` / `setup_quality_score` are filled with `0.0` as a sentinel. Phase 6 migrates the ~30 downstream readers to handle `Optional[float]` and flips the schema.
+3. **Reason-code v4 display mapping** — v4 reason codes (`STRONG_DIRECTIONAL_CONVICTION`, etc.) are emitted by the decision calculator; frontend display mapping ships in Phase 4 alongside `pillarMeta.ts`.
+4. **Per-scanner weight presets for v4** — Phase 5 policy seed should include per-scanner overrides (`scanner_weights`). Phase 3 ships the plumbing; calibrated values follow in Phase 8 tuning.
+
+### Heads-up items for Phase 4 kickoff
+
+- **Frontend starts here.** `pillarMeta.ts` creation, `EvaluationDetail` / `PolicyConfig` / paper-trading components must read pillars from a single display-metadata map so both v3 and v4 decisions render correctly. Types change: `PillarId` becomes a union of `PillarIdLegacy | PillarIdV4`.
+- **Visual smoke tests required.** Phase 4 is the first phase that touches user-facing surfaces — Playwright or manual visual verification on v3 historical records (no change) and a test v4 decision fixture (new labels / icons / colors) are in scope per plan Section 5.3.
+- **LLM Phase 3 changes are already live.** Once a v4 decision flows through the pipeline (Phase 7+), the thesis prompt automatically renders v4 labels. No frontend work needed for the thesis viewer — existing renderer shows whatever the LLM produces.
+- **Phase 1 CloudFormation drift still blocks Phase 7.** No change from Phase 2.
 
 ---
 
