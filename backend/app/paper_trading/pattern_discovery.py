@@ -32,8 +32,9 @@ SETUP_RULE_PK = "SETUP_RULE"
 # v2: Entry Quality added but before directional enhancement (April 1-2)
 # v3: Entry Quality structure, enhanced directional (EMA/RSI/ADX/OBV),
 #     interaction bonus, premium leverage subscore (April 3+)
-# v4: Sharpshooter regime — bumped by Phase 7 activation (not yet live)
-CURRENT_SCORING_REGIME = "v3"
+# v4: Sharpshooter regime (DIRECTIONAL_CONVICTION × MOVE_POTENTIAL × TRADE_STRUCTURE,
+#     weighted-geometric-mean composite). Activated 2026-04-17 with policy v4.0.0.
+CURRENT_SCORING_REGIME = "v4"
 
 # Abbreviations for token-efficient CSV encoding
 SCANNER_ABBREV = {

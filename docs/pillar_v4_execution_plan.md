@@ -133,12 +133,12 @@ Total active-engineering estimate: ~22-24 working days (original 10-14 understat
 | 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ✅ **Complete** (2026-04-17, commit a36b14c, CloudFront live) — see §7.7 |
 | 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | ✅ **Complete** (2026-04-17, commit b6b7102, v4.0.0 inactive on dev) — see §7.8 |
 | 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration + flip v3 Decision score fields to Optional | 3 days | ✅ **Complete** (2026-04-17, Lambda v238, commit 7667efa) — see §7.9 |
-| 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | ⏳ **Next up** (blocked) |
-| 8 | 2-week observation + tuning | 14 days | Pending |
+| 7 | CFN drift cleanup (3 v4 EventBridge rules imported via raw-CFN IMPORT change set) + v4.0.0 activation + same-day Phase 1 features wiring fix + CURRENT_SCORING_REGIME bump to v4 | 1 day | ✅ **Complete** (2026-04-17, Lambda v242 + post-fix; v4.0.0 active) — see §7.10 |
+| 8 | 2-week observation + tuning | 14 days | ⏳ **Next up** (kicks off 2026-04-18) |
 | 9 | v3 code removal | 2 days | Pending |
 | 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days | Pending |
 
-**Progress summary (end of 2026-04-17):** 6 of 10 phases complete. Backend Lambda v238 healthy with v3.1.3 policy still active; frontend CloudFront carries the dual-regime renderer (commit a36b14c); v4.0.0 seeded into `oss-dev-policies` as an inactive draft (commit b6b7102, `policy_hash=5f2380b8132b...`); backend read paths now regime-aware end-to-end (commit 7667efa). Zero behavior change for users; all v4 code paths unreachable until Phase 7 activates v4.0.0. Only remaining Phase 7 blocker is the CloudFormation drift on the two EventBridge rules.
+**Progress summary (end of 2026-04-17):** 7 of 10 phases complete. v4.0.0 active since `2026-04-17T19:50:24Z`; Lambda v242 (commit `61e00d0`); 36-42 v4 approvals per coordinator-fanned-out pipeline run; data-availability log shows all four Phase 1 features (`ma_200`, `high_52w`, `sector_rs_20d`, `historical_move_magnitude`) flowing at >85% coverage. `CURRENT_SCORING_REGIME` bumped from `"v3"` to `"v4"` in `pattern_discovery.py`, marking v3-era setup rules as stale (intended cut-over signal). Zero TIER_1 emergence yet — composites top out at 84 — Phase 8 calibration territory.
 
 ---
 
@@ -567,6 +567,76 @@ Pre-existing issue surfaced during verification, not caused by Phase 5: `GET /ap
 
 ---
 
+## 7.10 Phase 7 Outcomes — v4.0.0 Activation + Same-Day Phase 1 Wiring Fix (2026-04-17)
+
+**Activated:** v4.0.0 became the active policy at `2026-04-17T19:50:24Z`. `policy_hash=5f2380b8132bb331`, `composite_formula=weighted_geometric_mean`, weights `dc=0.40 / mp=0.35 / ts=0.25`. v3.1.3 retained as inactive draft for instant rollback.
+
+### What shipped
+
+**Pre-activation drift cleanup (raw-CFN IMPORT):**
+- 3 v4-era EventBridge rules (`oss-dev-daily-data-capture`, `oss-dev-price-history-refresh`, `oss-dev-earnings-history-refresh`) imported into the `oss-dev-backend` CloudFormation stack via change set `pillar-v4-rules-import-2026-04-17`. CFN required `Arn` (not `Name`) as the Events::Rule import identifier and `DeletionPolicy: Retain` on each. Tags + descriptions on the AWS rules synced to match the CDK template; drift detection re-run on the imported set returned `IN_SYNC`.
+- `oss-dev-nightly-scribe` rule was left in place at Nick's direction (orphaned, abandoned-feature payload — does not block rollback).
+- Manual Lambda invoke permissions for the imported rules remain outside CFN (acceptable temporary drift; rules fire correctly).
+
+**Activation (one curl):**
+```
+POST /api/policies/v4.0.0/activate
+```
+First scheduled run at 20:00 UTC produced 8 v4 APPROVE evaluations from a 180-contract chunk (vs 0 on the immediately preceding v3.1.3 baseline runs). Manual confirmation invoke at 20:02 produced another 9. All TIER_2 (composites 81–85). Frontend `pillarMeta.ts` rendered v4 pillar cards correctly; historical v3 evaluations in the same rolling window continued to display their v3 fields per the Phase 4 dual-regime renderer.
+
+**Same-day Phase 1 features wiring fix (Lambda v240/v242):**
+The first v4 run’s data-availability log (`app/pillars/calculator.py`) revealed four Phase 1 features at 0/N coverage despite the underlying tables being backfilled:
+
+```
+ma_200=0/33  high_52w=0/33  sector_rs_20d=0/33  historical_move_magnitude=0/33
+bb_width_percentile=33/33   days_to_earnings=27/33
+```
+
+Three causes (resolved together in commit `52b06fc`, with concurrent overlap in commits `7e45d00` + `6e1d502` from a parallel session, ultimately reconciled in merge commit `61e00d0`):
+
+1. **`historical_move_magnitude`** — `EarningsCalendarService` was never instantiated in the orchestrator. `_earnings_calendar` was `None` on every `FeatureComputer`. Fixed by passing `EarningsCalendarService(price_history_service=PriceHistoryService())` (read-only DDB) into `FeatureComputer` from both the batch (`scanners/orchestrator.py`) and streaming (`_run_stages_3_7_streaming`) paths and from the UV bridge (`main.py`).
+2. **`sector_rs_20d`** — `sector_map` was never populated from `SP500TickerTable.get_sector_map()`. Per-ticker sector lookup always returned `None` and `compute_features_batch` skipped fetching sector ETF bars. Same orchestrator paths fixed; `compute_features_batch` now adds the 11 sector ETFs (XLK/XLF/XLV/...) to its batch fetch automatically.
+3. **`ma_200` / `high_52w`** — Stage 4 fetched bars via Polygon’s grouped daily API at `days=252`. The grouped path skips holidays, returning ~200–243 bars per ticker — sufficient for SMA200 in some runs but never enough to clear the 252-bar threshold for `high_52w`. Fixed by switching the bar-fetch path to `PriceHistoryService` (Phase 1’s DDB-backed table holds the full 252-trading-day window with Polygon write-through fallback). New `price_history_service` kwarg threaded through `FeatureComputer` → `FeatureComputationStage` → `run_feature_computation` → all orchestrator call sites.
+
+**Cut-over hygiene (commit on this branch):**
+- `app/paper_trading/pattern_discovery.py`: `CURRENT_SCORING_REGIME = "v3"` → `"v4"`. Per the Phase 6 deferral §7.9 #2, this was explicitly held until v4 activated. Now that v4.0.0 is active, marking v3-era setup rules as `is_stale=True` is the correct signal for the rule UI.
+
+### Verification (post-fix Lambda v242)
+
+| Check | Result |
+|---|---|
+| Backend test suite | 2278 passing |
+| Ruff (touched files) | net delta 0 (12 pre-existing E501s elsewhere in `orchestrator.py`) |
+| CloudWatch ERRORs (post-deploy) | only pre-existing transient Polygon JSON parse errors; zero v4-related crashes |
+| Active policy | `v4.0.0`, `policy_hash=5f2380b8132bb331` |
+| Data availability (post-fix runs) | `ma_200`=87–100%, `high_52w`=87–100%, `sector_rs_20d`=60–90%, `historical_move_magnitude`=65–100%, `bb_width_percentile`=100%, `days_to_earnings`=23–70% |
+| Approvals per coordinator-fan-out run | 36–42 v4 APPROVE (19% approve rate on ~1970 contracts) |
+| Top APPROVE tickers (sample) | UAMY (84.51), LITE (82.17), NBIS (82.11), ALB (81.29), RKLB |
+
+### What Phase 7 did NOT achieve
+
+- **TIER_1 (Sharpshooter) still 0.** Pillar composites top out at 84; `tier_1_min_score` is 85 in the active policy. Need at least one position with all three pillars ≥ ~85 simultaneously. Either:
+  - The Russell 1000 universe genuinely doesn’t contain a Sharpshooter setup right now (markets are closed for the weekend; first chance for a fresh setup is Monday 13:00 UTC scheduled run), OR
+  - Breakpoints need re-tuning so a Sharpshooter trade actually crosses 85. Phase 8 calibration territory — do NOT change thresholds before observing Monday’s runs.
+- `days_to_earnings` coverage is still partial (23–70%, varies by chunk). `FinnhubClient` async-context-manager issue noted in CLAUDE.md “Known Issues / Watch Items” is the likely cause. Catalyst subscore (3.5% of total weight) defaults to 50 for missing entries — fails open, scoring impact is bounded.
+
+### Baseline + rollback
+
+- Tag: `pillar-stable-v4-2026-04-17` (commit `6938b29`, pre-fix Lambda v238). To pin the post-fix state: `pillar-stable-v4-2026-04-17-fixed` (commit `61e00d0`, Lambda v242).
+- Baseline doc: [baselines/2026-04-17-v4-README.md](../baselines/2026-04-17-v4-README.md) (pre-fix snapshot — accurate for activation but the “Phase 8 calibration finding” it documents was resolved later that day; the post-fix verification belongs in a follow-up README if the next session creates one).
+- Rollback to v3.1.3: `POST /api/policies/v3.1.3/activate` (instant, preserves all v4 historical data).
+- Rollback Lambda only: `./scripts/deploy.sh rollback` reverts to v241; `./scripts/deploy.sh rollback 240` reverts to the parallel-session’s wiring fix; `./scripts/deploy.sh rollback 238` reverts to pre-wiring-fix v4 (Phase 6 baseline).
+
+### Heads-up items for Phase 8 kickoff
+
+- **Observation window starts at Monday 2026-04-20 13:00 UTC** (next scheduled scan after weekend). Plan §8 expects 2 weeks of stability before Phase 9. Calibrate thresholds via the Policy page only — no code changes during observation.
+- **Watch the data-availability log on each run.** If `ma_200` or `high_52w` drop below 85% on a coordinator-fan-out run (1970+ contracts), investigate `PriceHistoryService` cache freshness — the daily refresh hook (`oss-dev-price-history-refresh` at 5am UTC Tue–Sat) appends yesterday’s bar; missed runs would degrade coverage over time.
+- **TIER_1 calibration:** if 7 trading days pass with zero TIER_1, lower `tier_1_min_score` from 85 toward 82 or revisit subscore breakpoints (curves currently designed for the 92+ Sharpshooter target). Plan §4.4 explicitly endorses Policy-page tuning as Phase 8 work.
+- **Per-scanner weight overrides** (`PillarConfig.scanner_weights`) are seeded with neutral defaults in v4.0.0. If signal emerges that one scanner reliably under- or over-fires, override only that scanner’s weights — leave globals alone.
+- **Phase 10 is now unblocked on the data-availability front.** Historical paper-position rescore can run against the post-fix `PriceHistoryService` / `EarningsCalendarService` wiring once a v4 rescore script is built.
+
+---
+
 ## 8. Key Sub-Rules (apply throughout)
 
 1. **Geometric mean insufficient-data rule:** a pillar with <3 available subscores returns score = 0. Composite then evaluates to 0 → auto-REJECT.
@@ -645,4 +715,4 @@ Follow `CLAUDE.md` deployment protocol (mandatory):
 
 ---
 
-**End of Plan. Phases 1-6 complete (2026-04-17). Phase 7 (v4.0.0 activation) blocked only on CloudFormation drift cleanup; all code paths on the backend and frontend handle both regimes transparently.**
+**End of Plan. Phases 1-7 complete (2026-04-17). v4.0.0 active; all four Phase 1 features flowing through the calculator at >85% coverage; Phase 8 observation kicks off Monday 2026-04-20.**
