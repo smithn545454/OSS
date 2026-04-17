@@ -112,12 +112,12 @@ Any failure caps composite at 89.
 
 The codebase audit surfaced six material items not in the original plan. All are folded into the phase schedule below.
 
-1. **Reason code generator** — `backend/app/decision/calculator.py:204-259` (`generate_supporting_reasons`) contains 13 hardcoded v3 reason codes (`STRONG_PREMIUM_LEVERAGE`, `WEAK_SETUP_QUALITY`, etc.). Needs v4 equivalent + display shim for historical records.
-2. **LLM prompt/model/generator** — `backend/app/llm/prompt.py:191-193`, `models.py:54-56, 131-133`, `generator.py:166-168` hardcode v3 pillar labels. Full rewrite, not a patch.
-3. **Pillar orchestrator is fully hardcoded** — `backend/app/pillars/calculator.py` has four functions that all explicitly reference v3 pillars. Refactor to registry pattern.
-4. **DecisionCalculator signature** — `compute_final_score()`, `assign_quality_tier()`, `compute_decision()` all take positional `premium_leverage, underlying_behavior, setup_quality` args. API reshape required.
-5. **PillarConfig validator forces v3 shape** — `schemas.py:982-998` asserts all three v3 pillars exist with correct pillar_id. Validator must be rewritten to allow v3-OR-v4.
-6. **Sector map may not cover Russell 1000** — `SP500TickerTable.get_sector_map()` returns tickers with non-empty `sector` field. Phase 1 includes a coverage audit + backfill if needed.
+1. ✅ **Reason code generator** (Phase 3) — `backend/app/decision/calculator.py:204-259` (`generate_supporting_reasons`) contained 13 hardcoded v3 reason codes. Rewritten to dispatch on `DecisionContext.is_v4()`: v4 emits `STRONG_/DECENT_/WEAK_/POOR_DIRECTIONAL_CONVICTION/MOVE_POTENTIAL/TRADE_STRUCTURE`, `SHARPSHOOTER_SETUP` (tier_1), and `INSUFFICIENT_DATA_*` for zero-scored pillars. V3 codes preserved for historical records.
+2. ✅ **LLM prompt/model/generator** (Phase 3) — Rewritten. `ScoresData` carries both regimes + a `regime` marker; `build_thesis_prompt` dispatches on regime (v3 → arithmetic composite with legacy labels; v4 → geometric mean with exponents and Sharpshooter labels); system prompt updated to document insufficient-data zero-collapse behaviour.
+3. ✅ **Pillar orchestrator is fully hardcoded** (Phase 3) — `backend/app/pillars/calculator.py` refactored to registry pattern. `PillarCalculator` selects `_V3_REGISTRY` or `_V4_REGISTRY` based on active config. Both regimes reachable through Phase 9.
+4. ✅ **DecisionCalculator signature** (Phase 3) — `compute_final_score` retained its v3 positional signature (backward-compat for rescore / tests / paper-trading); `compute_final_score_from_results(pillar_results, ...)` added for v4. `assign_quality_tier` accepts either v3 positional trio or v4 kwargs. `compute_decision` flips on `ctx.is_v4()`.
+5. ✅ **PillarConfig validator forces v3 shape** (Phase 2) — Rewritten. Now enforces exactly one regime (fully v3 OR fully v4) and gates on `composite_formula` matching the regime.
+6. ✅ **Sector map may not cover Russell 1000** (Phase 1) — Audit found 4.6% real coverage. `backfill_sectors.py` built using Finnhub `/stock/profile2` with a Finnhub-to-GICS taxonomy map. Post-backfill: 99.6% coverage (987 updated + 34 pre-existing / 1025 tickers).
 
 ---
 
@@ -125,18 +125,20 @@ The codebase audit surfaced six material items not in the original plan. All are
 
 Total active-engineering estimate: ~22-24 working days (original 10-14 understated scope).
 
-| Phase | Scope | Duration |
-|---|---|---|
-| 1 | Data foundation: price history + earnings history tables; backfills for ~1,500 tickers; new features (ma_150/200, high_52w, low_52w, bb_width_percentile, sector_rs_20d, historical_move_magnitude); sector map coverage validation | 4 days |
-| 2 | Schema extensions (PillarId enum, PillarWeights, PillarConfig, Decision, PaperPosition — additive) | 1 day |
-| 3 | v4 pillar classes + orchestrator registry refactor + LLM prompt/model/generator rewrite + composite formula + geometric-mean min-count rule + reason-code rewrite + tests | 5 days |
-| 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days |
-| 5 | v4.0.0 policy config build + seed | 1 day |
-| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) | 3 days |
-| 7 | Activation (Tuesday) | 1 day |
-| 8 | 2-week observation + tuning | 14 days |
-| 9 | v3 code removal | 2 days |
-| 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days |
+| Phase | Scope | Duration | Status |
+|---|---|---|---|
+| 1 | Data foundation: price history + earnings history tables; backfills for ~1,500 tickers; new features (ma_150/200, high_52w, low_52w, bb_width_percentile, sector_rs_20d, historical_move_magnitude); sector map coverage validation | 4 days | ✅ **Complete** (2026-04-17, Lambda v234) — see §7.4 |
+| 2 | Schema extensions (PillarId enum, PillarWeights, PillarConfig, Decision, PaperPosition — additive) | 1 day | ✅ **Complete** (2026-04-17, Lambda v235) — see §7.5 |
+| 3 | v4 pillar classes + orchestrator registry refactor + LLM prompt/model/generator rewrite + composite formula + geometric-mean min-count rule + reason-code rewrite + tests | 5 days | ✅ **Complete** (2026-04-17, Lambda v236) — see §7.6 |
+| 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ⏳ **Next up** |
+| 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | Pending |
+| 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) + flip v3 Decision score fields to Optional | 3 days | Pending |
+| 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | Blocked |
+| 8 | 2-week observation + tuning | 14 days | Pending |
+| 9 | v3 code removal | 2 days | Pending |
+| 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days | Pending |
+
+**Progress summary (end of 2026-04-17):** 3 of 10 phases complete. All three Lambda deploys (v234, v235, v236) verified healthy with v3.1.3 policy still active. Zero behavior change for users; all v4 code unreachable until a v4 policy activates at Phase 7.
 
 ---
 
@@ -257,7 +259,7 @@ Features are additive. If broken:
 2. Lambda rollback: `./scripts/deploy.sh rollback`
 3. Tables can stay — no data dependency yet
 
-### Phase 1 Actual Outcomes (2026-04-17)
+## 7.4 Phase 1 Actual Outcomes — Data Foundation (2026-04-17)
 
 | Metric | Target | Actual |
 |---|---|---|
@@ -271,7 +273,7 @@ Key mid-deploy course corrections:
 - **Finnhub /calendar/earnings free-tier limitation** — returns only the *next* upcoming event regardless of date range, so Phase 1's historical 1-day-move calculations needed a rewrite around `/stock/earnings` + volume-spike announcement detection (commit 0a1f509).
 - **Sector-map audit revealed 4.6% real coverage** on the combined S&P 500 + Russell 1000 universe, not the expected 95%. Resolved in-session by adding a `backfill_sectors.py` script using Finnhub's `/stock/profile2` endpoint with a 150-entry Finnhub-to-GICS taxonomy mapping.
 
-### Phase 1 Known Issues — MUST address before Phase 7 activation
+### Phase 1 Known Issues — MUST address before Phase 7 activation (still open at end of Phase 3)
 
 These items were discovered during the Phase 1 deploy (2026-04-17) and worked around with minimal-risk substitutes. None block Phase 2-6 (which only deploy Lambda code via `./scripts/deploy.sh backend`, not CDK). They **must** be cleaned up before Phase 7, when we flip the active policy to v4.0.0 and any deploy reliability issue becomes a production risk.
 
@@ -403,28 +405,40 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 
 ---
 
-## 10. Quick Reference — Current State of Key Files (verified 2026-04-16)
+## 10. Quick Reference — Original State of Key Files (baseline, verified 2026-04-16)
 
-| File | Lines | Finding |
-|---|---|---|
-| `backend/app/core/schemas.py` | 62-67 | PillarId enum with 3 v3 values |
-| `backend/app/core/schemas.py` | 728-752 | PillarWeights with v3.1.0 defaults (0.25/0.35/0.40) |
-| `backend/app/core/schemas.py` | 949-999 | PillarConfig validator — forces v3 shape |
-| `backend/app/core/schemas.py` | 437-523 | PaperPosition with v3 denormalized fields |
-| `backend/app/pillars/calculator.py` | 86-96 | Orchestrator — hardcoded v3 dispatch |
-| `backend/app/pillars/calculator.py` | 188-207 | get_pillar_scores_dict — hardcoded v3 |
-| `backend/app/pillars/calculator.py` | 210-243 | compute_final_score — hardcoded v3 weights |
-| `backend/app/decision/calculator.py` | 128-150 | Composite = weighted arithmetic sum |
-| `backend/app/decision/calculator.py` | 204-259 | 13 hardcoded v3 reason codes |
-| `backend/app/llm/prompt.py` | 191-193 | LLM prompt with v3 labels |
-| `backend/app/llm/models.py` | 54-56, 131-133 | LLM ScoreInput with v3 fields |
-| `backend/app/llm/generator.py` | 166-168 | LLM generator pulls v3 fields from Decision |
-| `backend/app/db/tables.py` | 1866-1967 | SP500TickerTable — sector/universe support |
-| `backend/app/features/underlying.py` | — | Needs ma_150, ma_200, high_52w, low_52w, bb_width_percentile |
-| `infrastructure/cdk/stacks/database_stack.py` | 282-292 | Existing earnings-cache table (PK=ticker only) |
-| Frontend `lib/types.ts` | 19, 157-160, 195-197, 419-423, 456-461 | Confirmed v3 pillar references |
-| Frontend `pages/EvaluationDetail.tsx` | 363-367, 411 | pillarConfig map + conditional on PREMIUM_LEVERAGE |
-| Frontend `pages/PolicyConfig.tsx` | 946 | Hardcoded pillar-key array |
+**This section is a frozen audit snapshot from before any phase executed.** Several locations have been restructured by Phases 1-3 — use it to understand where the work started, not the current state. Line numbers below will not match HEAD; consult §7.4-7.6 outcomes and `git log` for what's there now.
+
+| File | Lines (pre-work) | Original Finding | Status after Phase 3 |
+|---|---|---|---|
+| `backend/app/core/schemas.py` | 62-67 | PillarId enum with 3 v3 values | ✅ Phase 2 — extended with 3 v4 values alongside |
+| `backend/app/core/schemas.py` | 728-752 | PillarWeights with v3.1.0 defaults | ✅ Phase 2 — all fields Optional; `v3_default()` / `v4_default()` classmethods; regime validator |
+| `backend/app/core/schemas.py` | 949-999 | PillarConfig validator — forces v3 shape | ✅ Phase 2 — enforces exactly one regime, gates on `composite_formula` |
+| `backend/app/core/schemas.py` | 437-523 | PaperPosition with v3 denormalized fields | ✅ Phase 2 — added `pillar_directional_conviction / _move_potential / _trade_structure` (Optional) |
+| `backend/app/pillars/calculator.py` | 86-96 | Orchestrator — hardcoded v3 dispatch | ✅ Phase 3 — registry pattern, `_V3_REGISTRY` + `_V4_REGISTRY` |
+| `backend/app/pillars/calculator.py` | 188-207 | get_pillar_scores_dict — hardcoded v3 | ✅ Phase 3 — regime-agnostic, emits keys for whichever pillars are present |
+| `backend/app/pillars/calculator.py` | 210-243 | compute_final_score — hardcoded v3 weights | ✅ Phase 3 — v3 positional signature preserved; new `compute_final_score_from_results` for v4 |
+| `backend/app/decision/calculator.py` | 128-150 | Composite = weighted arithmetic sum | ✅ Phase 3 — regime-aware dispatch via `PillarConfig.composite_formula` |
+| `backend/app/decision/calculator.py` | 204-259 | 13 hardcoded v3 reason codes | ✅ Phase 3 — dispatches on `ctx.is_v4()`; v4 reason codes added (`SHARPSHOOTER_SETUP`, `STRONG_DIRECTIONAL_CONVICTION`, …) |
+| `backend/app/llm/prompt.py` | 191-193 | LLM prompt with v3 labels | ✅ Phase 3 — regime-aware formatter; v4 renders geometric-mean composite + exponents |
+| `backend/app/llm/models.py` | 54-56, 131-133 | LLM ScoreInput with v3 fields | ✅ Phase 3 — `ScoresData` carries both regimes + `regime` marker |
+| `backend/app/llm/generator.py` | 166-168 | LLM generator pulls v3 fields from Decision | ✅ Phase 3 — populates both regimes from Decision; infers active regime |
+| `backend/app/db/tables.py` | 1866-1967 | SP500TickerTable — sector/universe support | ✅ Phase 1 — backfilled to 99.6% real GICS coverage on S&P 500 + Russell 1000 |
+| `backend/app/features/underlying.py` | — | Needs ma_150, ma_200, high_52w, low_52w, bb_width_percentile | ✅ Phase 1 — all added; 99.5% coverage on combined universe |
+| `infrastructure/cdk/stacks/database_stack.py` | 282-292 | Existing earnings-cache table (PK=ticker only) | ✅ Phase 1 — new `oss-dev-price-history` + `oss-dev-earnings-history` tables added |
+| Frontend `lib/types.ts` | 19, 157-160, 195-197, 419-423, 456-461 | Confirmed v3 pillar references | ⏳ Phase 4 |
+| Frontend `pages/EvaluationDetail.tsx` | 363-367, 411 | pillarConfig map + conditional on PREMIUM_LEVERAGE | ⏳ Phase 4 |
+| Frontend `pages/PolicyConfig.tsx` | 946 | Hardcoded pillar-key array | ⏳ Phase 4 |
+
+**New in Phase 3 (not in original audit, worth knowing about):**
+
+| File | Purpose |
+|---|---|
+| `backend/app/pillars/composite.py` | v3 + v4 composite dispatch, `apply_v4_rules` (min-subscore + floor) |
+| `backend/app/pillars/directional_conviction.py` | v4 Directional Conviction pillar (6 subscores, Stage 2 template) |
+| `backend/app/pillars/move_potential.py` | v4 Move Potential pillar (5 subscores, catalyst-aware trigger) |
+| `backend/app/pillars/trade_structure.py` | v4 Trade Structure pillar (5 subscores, γ/θ ratio) |
+| `backend/tests/test_composite.py` + 4 more | 80 v4-specific tests (91-98% coverage on new files) |
 
 ---
 
@@ -440,4 +454,4 @@ Follow `CLAUDE.md` deployment protocol (mandatory):
 
 ---
 
-**End of Plan. Phase 1 in execution.**
+**End of Plan. Phases 1-3 complete (2026-04-17). Phase 4 (frontend types + `pillarMeta.ts` + regime-aware components) ready to start.**
