@@ -27,10 +27,30 @@ function corrColor(r: number, significant: boolean): string {
 
 function pillarBadge(pillar: string | null) {
   if (!pillar) return null
+  // Backend emits feature-pillar tags as lowercase semantic labels. Accept
+  // both the legacy set (directional / volatility / structure) and the
+  // v4 set (directional_conviction / move_potential / trade_structure) as
+  // well as the exact PillarId enum values. Unknown pillars fall through
+  // to a neutral palette so we never crash on unexpected backend labels.
   const colors: Record<string, string> = {
+    // Legacy v3 lowercase labels (pre-v4 feature importance reports)
     directional: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
     volatility: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
     structure: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    // Legacy v3 pillar IDs / snake_case
+    premium_leverage: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+    PREMIUM_LEVERAGE: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+    underlying_behavior: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+    UNDERLYING_BEHAVIOR: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+    setup_quality: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    SETUP_QUALITY: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    // v4 Sharpshooter pillars
+    directional_conviction: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    DIRECTIONAL_CONVICTION: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    move_potential: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    MOVE_POTENTIAL: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    trade_structure: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    TRADE_STRUCTURE: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   }
   return (
     <span className={clsx('text-[10px] px-1.5 py-0.5 rounded border', colors[pillar] || 'bg-oss-bg text-oss-muted')}>

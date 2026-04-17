@@ -20,7 +20,14 @@ import {
 } from 'lucide-react'
 import { usePolicies, useActivePolicy, useActivatePolicy, useCreatePolicy, usePolicyDiff } from '@/hooks/useApi'
 import { formatDate, formatDateTime } from '@/lib/formatTime'
-import type { Policy, PolicyConfig as PolicyConfigType } from '@/lib/types'
+import type { Policy, PolicyConfig as PolicyConfigType, PillarKey } from '@/lib/types'
+import {
+  activePillarKeys,
+  compositeFormulaDescription,
+  isV4PillarConfig,
+  pillarIdFromKey,
+  pillarMeta,
+} from '@/lib/pillarMeta'
 import clsx from 'clsx'
 
 // ============================================================================
@@ -167,6 +174,71 @@ function ConfigToggle({
         <span className="font-mono text-sm text-oss-text">
           {value ? 'enabled' : 'disabled'}
         </span>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Pillar Weights Editor — regime-aware (v3 legacy or v4 Sharpshooter)
+// ============================================================================
+
+interface PillarWeightsEditorProps {
+  config: PolicyConfigType
+  isEditing: boolean
+  onConfigChange: (path: string, value: number) => void
+  errors: Record<string, string>
+}
+
+function PillarWeightsEditor({
+  config,
+  isEditing,
+  onConfigChange,
+  errors,
+}: PillarWeightsEditorProps) {
+  const isV4 = isV4PillarConfig(config.pillars)
+  const keys: PillarKey[] = activePillarKeys(config.pillars)
+  const sectionLabel = isV4 ? 'Pillar Weights (v4 Sharpshooter)' : 'Pillar Weights'
+  const formula = config.pillars.composite_formula ?? (isV4 ? 'weighted_geometric_mean' : 'weighted_sum')
+
+  const total = keys.reduce((sum, k) => sum + (config.pillars.weights[k] ?? 0), 0)
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h4 className="text-xs font-medium uppercase text-oss-muted">{sectionLabel}</h4>
+        <span className="text-[10px] text-oss-muted italic">
+          {compositeFormulaDescription(formula)}
+        </span>
+      </div>
+      <div className="rounded-lg bg-oss-bg p-3">
+        {keys.map((key) => {
+          const meta = pillarMeta(pillarIdFromKey(key))
+          return (
+            <ConfigField
+              key={key}
+              label={meta.label}
+              value={(config.pillars.weights[key] ?? 0) * 100}
+              unit="%"
+              fieldPath={`pillars.weights.${key}`}
+              isEditing={isEditing}
+              onChange={(path, value) => onConfigChange(path, value / 100)}
+              min={0}
+              max={100}
+              step={2.5}
+              error={errors[`pillars.weights.${key}`]}
+            />
+          )
+        })}
+      </div>
+      {isEditing && (
+        <p className={clsx(
+          'text-xs mt-2',
+          Math.abs(total - 1) > 0.01 ? 'text-oss-reject' : 'text-oss-muted',
+        )}>
+          Total: {(total * 100).toFixed(0)}% (should equal 100%)
+          {isV4 && ' — v4 uses these as geometric-mean exponents'}
+        </p>
       )}
     </div>
   )
@@ -880,76 +952,27 @@ function EditablePolicyConfig({
         </div>
       </ConfigSection>
 
-      {/* Scoring Config (Policy v3.0.0) */}
+      {/* Scoring Config — renders v3 or v4 pillar set based on active policy */}
       <ConfigSection title="Scoring & Decision" icon={<BarChart3 className="h-4 w-4" />}>
         <div className="space-y-4">
-          <div>
-            <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-              Pillar Weights (v3.0.0)
-            </h4>
-            <div className="rounded-lg bg-oss-bg p-3">
-              <ConfigField
-                label="Premium Leverage"
-                value={displayConfig.pillars.weights.premium_leverage * 100}
-                unit="%"
-                fieldPath="pillars.weights.premium_leverage"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={2.5}
-                error={errors['pillars.weights.premium_leverage']}
-              />
-              <ConfigField
-                label="Underlying Behavior"
-                value={displayConfig.pillars.weights.underlying_behavior * 100}
-                unit="%"
-                fieldPath="pillars.weights.underlying_behavior"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={2.5}
-                error={errors['pillars.weights.underlying_behavior']}
-              />
-              <ConfigField
-                label="Setup Quality"
-                value={displayConfig.pillars.weights.setup_quality * 100}
-                unit="%"
-                fieldPath="pillars.weights.setup_quality"
-                isEditing={isEditing}
-                onChange={(path, value) => onConfigChange(path, value / 100)}
-                min={0}
-                max={100}
-                step={2.5}
-                error={errors['pillars.weights.setup_quality']}
-              />
-            </div>
-            {isEditing && (
-              <p className={clsx(
-                'text-xs mt-2',
-                Math.abs((displayConfig.pillars.weights.premium_leverage +
-                  displayConfig.pillars.weights.underlying_behavior +
-                  displayConfig.pillars.weights.setup_quality) - 1) > 0.01
-                  ? 'text-oss-reject'
-                  : 'text-oss-muted'
-              )}>
-                Total: {((displayConfig.pillars.weights.premium_leverage +
-                  displayConfig.pillars.weights.underlying_behavior +
-                  displayConfig.pillars.weights.setup_quality) * 100).toFixed(0)}%
-                (should equal 100%)
-              </p>
-            )}
-          </div>
+          <PillarWeightsEditor
+            config={displayConfig}
+            isEditing={isEditing}
+            onConfigChange={onConfigChange}
+            errors={errors}
+          />
 
-          {/* Read-only subscore summary for all 3 pillars */}
-          {(['premium_leverage', 'underlying_behavior', 'setup_quality'] as const).map((pillarKey) => {
+          {/* Read-only subscore summary — iterates over whichever pillar
+              set (v3 or v4) is populated on the active policy. */}
+          {activePillarKeys(displayConfig.pillars).map((pillarKey) => {
             const pillar = displayConfig.pillars[pillarKey]
+            if (!pillar) return null
+            const meta = pillarMeta(pillarIdFromKey(pillarKey))
             const allSubs = [...pillar.numeric_subscores, ...pillar.categorical_subscores]
             return (
               <div key={pillarKey}>
                 <h4 className="mb-2 text-xs font-medium uppercase text-oss-muted">
-                  {pillar.display_name} Subscores
+                  {pillar.display_name || meta.label} Subscores
                 </h4>
                 <div className="rounded-lg bg-oss-bg p-3 space-y-1.5">
                   {allSubs.map((sub) => (
@@ -1159,12 +1182,15 @@ export default function PolicyConfig() {
   const validateConfig = useCallback((config: PolicyConfigType): Record<string, string> => {
     const errors: Record<string, string> = {}
 
-    // Validate pillar weights sum to 1 (Policy v3.0.0)
-    const weightsSum = config.pillars.weights.premium_leverage +
-      config.pillars.weights.underlying_behavior +
-      config.pillars.weights.setup_quality
-    if (Math.abs(weightsSum - 1) > 0.01) {
-      errors['pillars.weights.premium_leverage'] = 'Weights must sum to 100%'
+    // Validate pillar weights sum to 1 — iterate whichever regime (v3 or v4)
+    // the active policy uses. First populated key carries the error.
+    const regimeKeys = activePillarKeys(config.pillars)
+    const weightsSum = regimeKeys.reduce(
+      (s, k) => s + (config.pillars.weights[k] ?? 0),
+      0,
+    )
+    if (Math.abs(weightsSum - 1) > 0.01 && regimeKeys.length > 0) {
+      errors[`pillars.weights.${regimeKeys[0]}`] = 'Weights must sum to 100%'
     }
 
     // Validate ranking weights sum to 1

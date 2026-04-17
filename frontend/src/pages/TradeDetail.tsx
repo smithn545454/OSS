@@ -15,10 +15,11 @@ import {
 import clsx from 'clsx'
 import { useTrade, useCloseTrade, usePaperComparison } from '@/hooks/useApi'
 import { formatDateTime } from '@/lib/formatTime'
-import type { TradeExitReason, StockTechnicalsResponse, ExitPlanThesis } from '@/lib/types'
+import type { TradeExitReason, StockTechnicalsResponse, ExitPlanThesis, PillarKey } from '@/lib/types'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
 import { ExitPlanCard } from '@/components/AITradeThesis'
 import PaperComparison from '@/components/trades/PaperComparison'
+import { PILLAR_KEYS_LEGACY, PILLAR_KEYS_V4, pillarIdFromKey, pillarMeta } from '@/lib/pillarMeta'
 
 const EXIT_REASONS: { value: TradeExitReason; label: string }[] = [
   { value: 'PROFIT_TARGET', label: 'Profit Target' },
@@ -467,9 +468,9 @@ export default function TradeDetail() {
           <h2 className="text-lg font-semibold text-oss-text mb-4">Decision Summary (at entry)</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <MetricItem label="Final Score" value={Number(finalScore).toFixed(0)} />
-            <MetricItem label="Directional" value={snapshot?.premium_leverage_score != null ? Number(snapshot.premium_leverage_score).toFixed(0) : '—'} />
-            <MetricItem label="Volatility" value={snapshot?.underlying_behavior_score != null ? Number(snapshot.underlying_behavior_score).toFixed(0) : '—'} />
-            <MetricItem label="Entry Quality" value={snapshot?.setup_quality_score != null ? Number(snapshot.setup_quality_score).toFixed(0) : '—'} />
+            {/* Render v4 scores if the snapshot has any; else v3 scores.
+                Snapshots from pre-v4 trades keep their v3 values forever. */}
+            {renderSnapshotPillarMetrics(snapshot)}
             {decidedAt && <MetricItem label="Decided At" value={formatDateTime(decidedAt)} />}
             {snapshot?.theta_adjusted_ev != null && (
               <MetricItem label="θ-Adj EV" value={`$${Number(snapshot.theta_adjusted_ev).toFixed(2)}`} />
@@ -491,4 +492,22 @@ function MetricItem({ label, value }: { label: string; value: string }) {
       <p className="text-sm font-mono text-oss-text">{value}</p>
     </div>
   )
+}
+
+/**
+ * Render the three pillar-score MetricItems on the trade snapshot. If the
+ * snapshot carries v4 scores (directional_conviction_score / move_potential_score
+ * / trade_structure_score), show those; otherwise fall back to the legacy v3
+ * scores. Historical trades never get rescored — their snapshot is immutable.
+ */
+function renderSnapshotPillarMetrics(snapshot: Record<string, unknown> | undefined) {
+  if (!snapshot) return null
+  const hasV4 = PILLAR_KEYS_V4.some((k) => snapshot[`${k}_score`] != null)
+  const keys: PillarKey[] = hasV4 ? [...PILLAR_KEYS_V4] : [...PILLAR_KEYS_LEGACY]
+  return keys.map((key) => {
+    const meta = pillarMeta(pillarIdFromKey(key))
+    const raw = snapshot[`${key}_score`]
+    const display = raw != null ? Number(raw).toFixed(0) : '—'
+    return <MetricItem key={key} label={meta.shortLabel} value={display} />
+  })
 }

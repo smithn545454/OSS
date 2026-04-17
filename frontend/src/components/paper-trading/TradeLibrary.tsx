@@ -16,7 +16,8 @@ import {
   ArrowDown,
 } from 'lucide-react'
 import { useBrowsePositions, usePositionSnapshots } from '@/hooks/useApi'
-import type { PaperPosition } from '@/lib/types'
+import type { PaperPosition, PillarKey } from '@/lib/types'
+import { PILLAR_KEYS_LEGACY, PILLAR_KEYS_V4, pillarIdFromKey, pillarMeta } from '@/lib/pillarMeta'
 
 const SCANNER_SHORT: Record<string, string> = {
   BREAKOUT: 'BRK',
@@ -108,7 +109,7 @@ function ExpandedDetail({ position }: { position: PaperPosition }) {
           </div>
         </div>
 
-        {/* Section B: Pillar Scores */}
+        {/* Section B: Pillar Scores — regime-aware rendering */}
         <div>
           <h4 className="text-xs text-oss-muted uppercase tracking-wider mb-2">Evaluation</h4>
           <div className="space-y-1">
@@ -116,18 +117,22 @@ function ExpandedDetail({ position }: { position: PaperPosition }) {
               <span className="text-oss-muted">Conviction: </span>
               <span className="font-mono text-oss-accent">{position.conviction_score ?? '--'}</span>
             </div>
-            <div>
-              <span className="text-oss-muted">Prem. Leverage: </span>
-              <span className="font-mono text-oss-text">{position.pillar_premium_leverage ?? '--'}</span>
-            </div>
-            <div>
-              <span className="text-oss-muted">Underlying: </span>
-              <span className="font-mono text-oss-text">{position.pillar_underlying_behavior ?? '--'}</span>
-            </div>
-            <div>
-              <span className="text-oss-muted">Setup Qual.: </span>
-              <span className="font-mono text-oss-text">{position.pillar_setup_quality ?? '--'}</span>
-            </div>
+            {(() => {
+              const fields = position as unknown as Record<string, number | null | undefined>
+              const hasV4 = PILLAR_KEYS_V4.some((k) => fields[`pillar_${k}`] != null)
+              const keys: PillarKey[] = hasV4 ? [...PILLAR_KEYS_V4] : [...PILLAR_KEYS_LEGACY]
+              return keys.map((key) => {
+                const meta = pillarMeta(pillarIdFromKey(key))
+                return (
+                  <div key={key}>
+                    <span className="text-oss-muted">{meta.shortLabel}: </span>
+                    <span className="font-mono text-oss-text">
+                      {fields[`pillar_${key}`] ?? '--'}
+                    </span>
+                  </div>
+                )
+              })
+            })()}
             <div>
               <span className="text-oss-muted">Verdict: </span>
               <span className="text-oss-text">{position.verdict_at_entry}</span>

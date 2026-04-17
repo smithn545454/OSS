@@ -7,7 +7,8 @@ import { useState, useMemo } from 'react'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { usePositionSnapshots, useAnalyzePosition } from '@/hooks/useApi'
-import type { EnrichedPosition } from '@/lib/types'
+import type { EnrichedPosition, PillarKey } from '@/lib/types'
+import { PILLAR_KEYS_LEGACY, PILLAR_KEYS_V4, pillarIdFromKey, pillarMeta } from '@/lib/pillarMeta'
 
 interface PositionTrackerProps {
   positions: EnrichedPosition[]
@@ -254,14 +255,23 @@ function ExpandedPanel({ position: pos }: { position: EnrichedPosition }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-oss-bg/30 border-b border-oss-border">
-      {/* Pillar Scores */}
+      {/* Pillar Scores — render v4 scores if the position carries them,
+          otherwise show the legacy v3 denormalized scores. */}
       <div className="space-y-2">
         <h4 className="text-xs font-medium text-oss-text uppercase tracking-wider mb-2">
           Pillar Scores
         </h4>
-        {pillarBar('Premium Leverage', pos.pillar_premium_leverage)}
-        {pillarBar('Underlying Behavior', pos.pillar_underlying_behavior)}
-        {pillarBar('Setup Quality', pos.pillar_setup_quality)}
+        {(() => {
+          const hasV4 = PILLAR_KEYS_V4.some(
+            (k) => (pos as unknown as Record<string, number | null | undefined>)[`pillar_${k}`] != null,
+          )
+          const keys: PillarKey[] = hasV4 ? [...PILLAR_KEYS_V4] : [...PILLAR_KEYS_LEGACY]
+          return keys.map((key) => {
+            const meta = pillarMeta(pillarIdFromKey(key))
+            const value = (pos as unknown as Record<string, number | null | undefined>)[`pillar_${key}`] ?? null
+            return <div key={key}>{pillarBar(meta.label, value)}</div>
+          })
+        })()}
         <div className="flex items-center gap-1 mt-2">
           <span className="text-xs text-oss-muted">Convergence:</span>
           {[0, 1, 2, 3].map((i) => (

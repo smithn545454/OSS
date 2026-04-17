@@ -16,7 +16,27 @@ export type OptionType = 'CALL' | 'PUT'
 
 export type DTEBucket = 'A' | 'B' | 'C' | 'D'
 
-export type PillarId = 'PREMIUM_LEVERAGE' | 'UNDERLYING_BEHAVIOR' | 'SETUP_QUALITY'
+// Legacy v3 pillar IDs — retained for historical data deserialization.
+export type PillarIdLegacy = 'PREMIUM_LEVERAGE' | 'UNDERLYING_BEHAVIOR' | 'SETUP_QUALITY'
+// v4 Sharpshooter pillars introduced by the Pillar v4 cutover.
+export type PillarIdV4 = 'DIRECTIONAL_CONVICTION' | 'MOVE_POTENTIAL' | 'TRADE_STRUCTURE'
+export type PillarId = PillarIdLegacy | PillarIdV4
+
+export const PILLAR_IDS_LEGACY: PillarIdLegacy[] = [
+  'PREMIUM_LEVERAGE',
+  'UNDERLYING_BEHAVIOR',
+  'SETUP_QUALITY',
+]
+export const PILLAR_IDS_V4: PillarIdV4[] = [
+  'DIRECTIONAL_CONVICTION',
+  'MOVE_POTENTIAL',
+  'TRADE_STRUCTURE',
+]
+
+// Snake-case keys corresponding to PillarId values on PillarConfig / PillarWeights.
+export type PillarKeyLegacy = 'premium_leverage' | 'underlying_behavior' | 'setup_quality'
+export type PillarKeyV4 = 'directional_conviction' | 'move_potential' | 'trade_structure'
+export type PillarKey = PillarKeyLegacy | PillarKeyV4
 
 export type Verdict = 'APPROVE' | 'WATCH' | 'REJECT'
 
@@ -149,15 +169,22 @@ export interface GateResult {
   notes: string | null
 }
 
-// Decision (Policy v3.0.0)
+// Decision — carries either v3 or v4 pillar scores depending on the active policy.
+// All pillar-score fields are optional; readers must tolerate either regime.
 export interface Decision {
   evaluation_id: string
   verdict: Verdict
   quality_tier: QualityTier | null
   final_score: number
-  premium_leverage_score: number
-  underlying_behavior_score: number
-  setup_quality_score: number
+  // Legacy v3 pillar scores (populated for historical records and while
+  // v3.x policy is active; null / 0 sentinel once v4 is active).
+  premium_leverage_score?: number | null
+  underlying_behavior_score?: number | null
+  setup_quality_score?: number | null
+  // v4 Sharpshooter pillar scores (populated once a v4 policy is active).
+  directional_conviction_score?: number | null
+  move_potential_score?: number | null
+  trade_structure_score?: number | null
   primary_reason_code: string
   supporting_reason_codes: string[]
   failed_gates: string[]
@@ -192,9 +219,15 @@ export interface PaperPosition {
   scanner_list: string[] | null
   convergence_count: number | null
   conviction_score: number | null
+  // Legacy v3 denormalized pillar scores (preserved for historical positions).
   pillar_premium_leverage: number | null
   pillar_underlying_behavior: number | null
   pillar_setup_quality: number | null
+  // v4 Sharpshooter denormalized pillar scores (populated for positions entered
+  // while a v4 policy is active).
+  pillar_directional_conviction?: number | null
+  pillar_move_potential?: number | null
+  pillar_trade_structure?: number | null
   strike: number | null
   option_type: OptionType | null
   expiration_date: string | null
@@ -415,12 +448,20 @@ export interface GateConfig {
   theta_burden_max: number
 }
 
-// Policy v3.0.0 pillar configuration
+// Pillar weights — optional per key so the same type can describe v3.x and v4.x
+// policies. Exactly one regime's keys are populated on any given policy.
 export interface PillarWeights {
-  premium_leverage: number
-  underlying_behavior: number
-  setup_quality: number
+  // Legacy v3 weights
+  premium_leverage?: number
+  underlying_behavior?: number
+  setup_quality?: number
+  // v4 Sharpshooter weights
+  directional_conviction?: number
+  move_potential?: number
+  trade_structure?: number
 }
+
+export type CompositeFormula = 'weighted_sum' | 'weighted_geometric_mean'
 
 export interface SubscoreBreakpoint {
   value: number
@@ -453,11 +494,23 @@ export interface PillarConfigV2 {
   categorical_subscores: CategoricalSubscoreConfig[]
 }
 
+// PillarConfig holds either the v3 pillar set (premium_leverage /
+// underlying_behavior / setup_quality) OR the v4 pillar set
+// (directional_conviction / move_potential / trade_structure). Exactly one
+// regime's slots are populated on any given policy; `composite_formula`
+// selects the composite to use.
 export interface PillarConfig {
   weights: PillarWeights
-  premium_leverage: PillarConfigV2
-  underlying_behavior: PillarConfigV2
-  setup_quality: PillarConfigV2
+  composite_formula?: CompositeFormula
+  // Legacy v3 pillar configs
+  premium_leverage?: PillarConfigV2
+  underlying_behavior?: PillarConfigV2
+  setup_quality?: PillarConfigV2
+  // v4 Sharpshooter pillar configs
+  directional_conviction?: PillarConfigV2
+  move_potential?: PillarConfigV2
+  trade_structure?: PillarConfigV2
+  scanner_weights?: Record<string, PillarWeights>
 }
 
 export interface DecisionConfig {
@@ -1061,7 +1114,7 @@ export interface OpportunityFilters {
  */
 export interface ApproveEvaluation extends Evaluation {
   decision: Decision
-  pillarScores: Record<PillarId, number>
+  pillarScores: Partial<Record<PillarId, number>>
   gateResults: GateResultDetail[]
   gateMargin: number
   scannerSource: ScannerType[]

@@ -70,11 +70,18 @@ const CRITERIA_GROUPS: CriteriaGroup[] = [
     id: 'scores',
     label: 'Scores & Quality',
     defaultExpanded: false,
+    // Supports both legacy v3 pillar minimums (for rules matched against
+    // pre-v4 positions) and v4 Sharpshooter pillar minimums (for rules
+    // matched against v4-era positions). Rule matcher uses whichever set
+    // the position actually has.
     fields: [
       { key: 'conviction_score_min', label: 'Conviction Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_premium_leverage_min', label: 'Premium Leverage Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_underlying_behavior_min', label: 'Underlying Behavior Min', type: 'number', placeholder: '0', step: '5' },
-      { key: 'pillar_setup_quality_min', label: 'Setup Quality Min', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_directional_conviction_min', label: 'Directional Conviction Min (v4)', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_move_potential_min', label: 'Move Potential Min (v4)', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_trade_structure_min', label: 'Trade Structure Min (v4)', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_premium_leverage_min', label: 'Premium Leverage Min (v3)', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_underlying_behavior_min', label: 'Underlying Behavior Min (v3)', type: 'number', placeholder: '0', step: '5' },
+      { key: 'pillar_setup_quality_min', label: 'Setup Quality Min (v3)', type: 'number', placeholder: '0', step: '5' },
       { key: 'gate_margin_min', label: 'Gate Margin Min', type: 'number', placeholder: '0', step: '0.1' },
     ],
   },

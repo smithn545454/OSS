@@ -19,7 +19,8 @@ import {
   Legend,
 } from 'recharts'
 import clsx from 'clsx'
-import type { EnrichedPosition } from '@/lib/types'
+import type { EnrichedPosition, PillarKey } from '@/lib/types'
+import { PILLAR_KEYS_LEGACY, PILLAR_KEYS_V4, pillarIdFromKey, pillarMeta } from '@/lib/pillarMeta'
 
 interface ScoreCalibrationProps {
   positions: EnrichedPosition[]
@@ -69,22 +70,29 @@ export default function ScoreCalibration({ positions }: ScoreCalibrationProps) {
     1
   )
 
+  // Pillar axes are regime-aware: show v4 Sharpshooter axes if any position
+  // carries v4 scores, otherwise show the legacy v3 axes. Mid-transition
+  // populations will briefly be mixed — prefer v4 so new positions dominate.
+  const hasV4Pillars = positions.some((p) =>
+    PILLAR_KEYS_V4.some(
+      (k) => (p as unknown as Record<string, number | null | undefined>)[`pillar_${k}`] != null,
+    ),
+  )
+  const pillarKeys: PillarKey[] = hasV4Pillars ? [...PILLAR_KEYS_V4] : [...PILLAR_KEYS_LEGACY]
+
+  const pillarAxes = pillarKeys.map((key) => {
+    const meta = pillarMeta(pillarIdFromKey(key))
+    const accessor = (p: EnrichedPosition) =>
+      (p as unknown as Record<string, number | null | undefined>)[`pillar_${key}`] ?? null
+    return {
+      axis: meta.label,
+      winners: avg(winners, accessor),
+      losers: avg(losers, accessor),
+    }
+  })
+
   const radarData = [
-    {
-      axis: 'Premium Leverage',
-      winners: avg(winners, (p) => p.pillar_premium_leverage),
-      losers: avg(losers, (p) => p.pillar_premium_leverage),
-    },
-    {
-      axis: 'Underlying Behavior',
-      winners: avg(winners, (p) => p.pillar_underlying_behavior),
-      losers: avg(losers, (p) => p.pillar_underlying_behavior),
-    },
-    {
-      axis: 'Setup Quality',
-      winners: avg(winners, (p) => p.pillar_setup_quality),
-      losers: avg(losers, (p) => p.pillar_setup_quality),
-    },
+    ...pillarAxes,
     {
       axis: 'Convergence',
       winners: avg(winners, (p) => ((p.convergence_count ?? 0) / 4) * 100),

@@ -6,13 +6,11 @@ import {
   CheckCircle,
   XCircle,
   Eye,
-  TrendingUp,
   DollarSign,
-  Activity,
-  Zap,
   Shield,
   BarChart3,
   Crosshair,
+  Zap,
 } from 'lucide-react'
 import { useEvaluationDetail, useGenerateThesis, useStockSummary, useGenerateStockSummary, useIsTradeTracked } from '@/hooks/useApi'
 import type {
@@ -23,6 +21,7 @@ import type {
   Verdict,
   QualityTier
 } from '@/lib/types'
+import { pillarMeta, reasonCodeLabel } from '@/lib/pillarMeta'
 import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
 import AIStockSummary from '@/components/evaluation/AIStockSummary'
@@ -360,14 +359,16 @@ interface PillarCardProps {
 }
 
 function PillarCard({ pillar }: PillarCardProps) {
-  const pillarConfig = {
-    PREMIUM_LEVERAGE: { icon: Zap, color: 'text-sky-400', label: 'Premium Leverage' },
-    UNDERLYING_BEHAVIOR: { icon: Activity, color: 'text-purple-400', label: 'Underlying Behavior' },
-    SETUP_QUALITY: { icon: BarChart3, color: 'text-amber-400', label: 'Setup Quality' },
-  }[pillar.pillar_id] || { icon: TrendingUp, color: 'text-oss-accent', label: pillar.pillar_id }
+  const meta = pillarMeta(pillar.pillar_id)
+  const Icon = meta.icon
+  // v3 pillars use the "premium_leverage" full-breakdown layout (all
+  // contributors + subscore × weight rows); v4 pillars (and any pillar with
+  // more than 3 contributors) show the same breakdown so every subscore is
+  // visible. This keeps display logic pillar-agnostic.
+  const showFullBreakdown = meta.legacy
+    ? pillar.pillar_id === 'PREMIUM_LEVERAGE'
+    : pillar.contributors.length <= 6
 
-  const Icon = pillarConfig.icon
-  
   const getScoreColor = (score: number) => {
     if (score >= 70) return 'text-oss-approve'
     if (score >= 55) return 'text-oss-watch'
@@ -377,8 +378,8 @@ function PillarCard({ pillar }: PillarCardProps) {
   return (
     <div className="rounded-xl border border-oss-border bg-oss-surface p-5">
       <div className="flex items-center gap-3 mb-4">
-        <Icon className={clsx('h-5 w-5', pillarConfig.color)} />
-        <h4 className="font-medium text-oss-text">{pillarConfig.label}</h4>
+        <Icon className={clsx('h-5 w-5', meta.color)} />
+        <h4 className="font-medium text-oss-text">{meta.label}</h4>
       </div>
 
       <div className="flex items-baseline gap-2 mb-4">
@@ -405,10 +406,10 @@ function PillarCard({ pillar }: PillarCardProps) {
 
       <div className="mt-4 pt-4 border-t border-oss-border">
         <p className="text-xs text-oss-muted mb-2">
-          {pillar.pillar_id === 'PREMIUM_LEVERAGE' ? 'Subscore Breakdown' : 'Top Contributors'}
+          {showFullBreakdown ? 'Subscore Breakdown' : 'Top Contributors'}
         </p>
         <div className="space-y-2">
-          {(pillar.pillar_id === 'PREMIUM_LEVERAGE'
+          {(showFullBreakdown
             ? pillar.contributors
             : pillar.contributors.slice(0, 3)
           ).map((c) => (
@@ -417,7 +418,7 @@ function PillarCard({ pillar }: PillarCardProps) {
                 {c.feature_name.replace(/_/g, ' ')}
               </span>
               <div className="flex items-center gap-2">
-                {pillar.pillar_id === 'PREMIUM_LEVERAGE' ? (
+                {showFullBreakdown ? (
                   <>
                     <span className={clsx(
                       'font-mono text-xs',
@@ -1055,7 +1056,7 @@ function DecisionExplanation({ decision }: DecisionExplanationProps) {
         <div>
           <p className="text-xs text-oss-muted mb-1">Primary Reason</p>
           <span className="inline-flex items-center rounded-lg bg-oss-bg px-3 py-1.5 text-sm font-medium text-oss-accent">
-            {decision.primary_reason_code.replace(/_/g, ' ')}
+            {reasonCodeLabel(decision.primary_reason_code)}
           </span>
         </div>
 
@@ -1064,11 +1065,11 @@ function DecisionExplanation({ decision }: DecisionExplanationProps) {
             <p className="text-xs text-oss-muted mb-2">Supporting Reasons</p>
             <div className="flex flex-wrap gap-2">
               {decision.supporting_reason_codes.map((code) => (
-                <span 
-                  key={code} 
+                <span
+                  key={code}
                   className="rounded-full bg-oss-bg px-2.5 py-1 text-xs text-oss-muted"
                 >
-                  {code.replace(/_/g, ' ')}
+                  {reasonCodeLabel(code)}
                 </span>
               ))}
             </div>

@@ -1,13 +1,19 @@
 /**
- * Conviction Score Calculator (Policy v3.0.0)
+ * Conviction Score Calculator
  *
- * Uses the pipeline's decision final_score directly (pillar-weighted composite)
- * with freshness decay applied. No additional frontend scoring formula.
+ * Uses the pipeline's decision.final_score directly — whatever composite the
+ * active policy produces — with freshness decay applied. No additional
+ * frontend scoring formula.
  *
- * The pipeline evaluates quality through 3 pillars:
- *   final_score = 0.375 × Premium Leverage
- *               + 0.455 × Underlying Behavior
- *               + 0.170 × Setup Quality
+ * Composite formula comes from the backend:
+ * - Policy v3.x (legacy): weighted arithmetic sum over Premium Leverage,
+ *   Underlying Behavior, Setup Quality.
+ * - Policy v4.x (Sharpshooter): weighted geometric mean over Directional
+ *   Conviction (0.40), Move Potential (0.35), Trade Structure (0.25). Any
+ *   pillar scoring 0 collapses the composite to 0 → auto-REJECT.
+ *
+ * Either way this module just reads final_score; regime selection happens
+ * server-side via the active policy's pillars.composite_formula field.
  *
  * Freshness decay ensures recent opportunities rank higher than stale ones.
  */

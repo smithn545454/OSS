@@ -68,9 +68,9 @@ function makeEval(overrides: Partial<ApproveEvaluation> = {}): ApproveEvaluation
       decided_at: '2025-02-09T12:00:00Z',
     },
     pillarScores: {
-      DIRECTIONAL: 75,
-      VOLATILITY: 80,
-      STRUCTURE: 85,
+      PREMIUM_LEVERAGE: 75,
+      UNDERLYING_BEHAVIOR: 80,
+      SETUP_QUALITY: 85,
     },
     gateResults: [],
     gateMargin: 60,
