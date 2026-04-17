@@ -295,6 +295,58 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for Pillar v4 daily price-history refresh.
+        # Appends yesterday's bar for every S&P 500 + Russell 1000 ticker
+        # (plus SPY and SPDR sector ETFs) via Polygon's grouped endpoint.
+        # Runs at 05:00 UTC Tue-Sat so Friday's close is available before
+        # the next pipeline scan on Monday.
+        self.price_history_refresh_rule = events.Rule(
+            self,
+            "PriceHistoryRefreshRule",
+            rule_name=f"{project_name}-{env_name}-price-history-refresh",
+            description="Append yesterday's daily bar for Pillar v4 price-history table",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="5",
+                week_day="TUE-SAT",
+            ),
+            enabled=True,
+        )
+        self.price_history_refresh_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "price_history_refresh",
+                }),
+            )
+        )
+
+        # EventBridge rule for Pillar v4 earnings-history 1-day-move
+        # backfill. Runs 60 minutes after the price-history refresh so
+        # yesterday's bars are guaranteed present when we compute moves.
+        self.earnings_history_refresh_rule = events.Rule(
+            self,
+            "EarningsHistoryRefreshRule",
+            rule_name=f"{project_name}-{env_name}-earnings-history-refresh",
+            description="Recompute 1-day moves for recently-concluded earnings events",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="6",
+                week_day="TUE-SAT",
+            ),
+            enabled=True,
+        )
+        self.earnings_history_refresh_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "earnings_history_refresh",
+                }),
+            )
+        )
+
         # EventBridge rule for daily market data capture for backtesting
         # Runs once daily at 5:00 PM ET (22:00 UTC) after market close on weekdays
         # Captures stock OHLCV, options chains, IV history, and market context to S3

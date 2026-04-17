@@ -940,6 +940,90 @@ async def _run_earnings_refresh() -> dict[str, Any]:
     return {"status": "success", **result}
 
 
+async def _resolve_backfill_universe() -> list[str]:
+    """Return the combined S&P 500 + Russell 1000 active-ticker list.
+
+    Used by the Pillar v4 daily refresh hooks so they stay aligned with
+    the same universe the pipeline scans.
+    """
+    from app.db.tables import SP500TickerTable
+
+    tickers: set[str] = set()
+    for universe in ("sp500", "russell1000"):
+        try:
+            tickers.update(
+                await SP500TickerTable.get_tickers_by_universe(universe)
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning(f"Failed to load {universe} tickers: {e}")
+    return sorted(tickers)
+
+
+async def _run_price_history_refresh() -> dict[str, Any]:
+    """Append yesterday's bar to ``oss-dev-price-history`` for every ticker.
+
+    Uses Polygon's grouped-daily endpoint (one API call for all US
+    equities) and a SPDR sector ETF list to keep the Pillar v4 cache
+    warm. Triggered by EventBridge Tue-Sat at ~5am UTC so Friday's
+    close lands before the next scan.
+    """
+    from app.features.relative_strength import SECTOR_ETF_MAP
+    from app.services.polygon import PolygonClient
+    from app.services.price_history import PriceHistoryService
+
+    tickers = await _resolve_backfill_universe()
+    if not tickers:
+        logger.warning("No tickers resolved for price-history refresh")
+        return {"status": "skipped", "reason": "empty_universe"}
+
+    # Sector ETFs must be refreshed alongside underlyings so sector_rs_20d
+    # stays current.
+    sector_etfs = sorted(set(SECTOR_ETF_MAP.values()) | {"SPY"})
+    all_tickers = sorted(set(tickers) | set(sector_etfs))
+
+    async with PolygonClient() as polygon:
+        service = PriceHistoryService(polygon_client=polygon)
+        report = await service.refresh_daily(all_tickers)
+
+    return {
+        "status": "success",
+        "tickers_attempted": report.tickers_attempted,
+        "tickers_succeeded": report.tickers_succeeded,
+        "tickers_failed": report.tickers_failed,
+        "bars_written": report.bars_written,
+    }
+
+
+async def _run_earnings_history_refresh() -> dict[str, Any]:
+    """Recompute 1-day post-event moves for earnings that just concluded.
+
+    Finds events dated within the last 2 days whose ``one_day_move_pct``
+    is unset (i.e., couldn't be computed at backfill time because price
+    history hadn't accumulated) and fills them in from the now-fresh
+    price cache. Triggered by EventBridge Tue-Sat at ~6am UTC after the
+    price-history refresh.
+    """
+    from app.services.earnings_calendar import EarningsCalendarService
+    from app.services.price_history import PriceHistoryService
+
+    tickers = await _resolve_backfill_universe()
+    if not tickers:
+        return {"status": "skipped", "reason": "empty_universe"}
+
+    price_svc = PriceHistoryService()  # read-only
+    earnings_svc = EarningsCalendarService(price_history_service=price_svc)
+    report = await earnings_svc.refresh_completed_events(tickers)
+
+    return {
+        "status": "success",
+        "tickers_attempted": report.tickers_attempted,
+        "tickers_succeeded": report.tickers_succeeded,
+        "tickers_failed": report.tickers_failed,
+        "events_written": report.events_written,
+        "moves_computed": report.moves_computed,
+    }
+
+
 async def _run_daily_data_capture(
     capture_date: Optional[str] = None,
     force: bool = False,
@@ -1429,6 +1513,16 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             # Daily earnings cache refresh from Finnhub
             logger.info("Received earnings_refresh event from EventBridge")
             return asyncio.run(_run_earnings_refresh())
+
+        elif action == "price_history_refresh":
+            # Pillar v4: append yesterday's bar to oss-dev-price-history.
+            logger.info("Received price_history_refresh event from EventBridge")
+            return asyncio.run(_run_price_history_refresh())
+
+        elif action == "earnings_history_refresh":
+            # Pillar v4: recompute 1-day moves for recently-concluded events.
+            logger.info("Received earnings_history_refresh event from EventBridge")
+            return asyncio.run(_run_earnings_history_refresh())
 
         elif action == "daily_data_capture":
             # Daily market data capture for backtesting
