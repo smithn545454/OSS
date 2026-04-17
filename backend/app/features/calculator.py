@@ -30,6 +30,7 @@ from app.features.volatility import compute_volatility_features
 from app.services.catalyst import CatalystDataService
 from app.services.earnings_calendar import EarningsCalendarService
 from app.services.polygon import DailyBar, PolygonClient
+from app.services.price_history import PriceHistoryService
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class FeatureComputer:
         as_of_date: Optional[date] = None,
         earnings_calendar_service: Optional[EarningsCalendarService] = None,
         sector_map: Optional[dict[str, str]] = None,
+        price_history_service: Optional[PriceHistoryService] = None,
     ) -> None:
         """Initialize the feature computer.
 
@@ -69,6 +71,13 @@ class FeatureComputer:
             sector_map: Pre-fetched {ticker: sector} mapping. Enables
                 sector_rs_20d feature when paired with pre-fetched
                 sector ETF bars. When omitted, sector_rs_20d is None.
+            price_history_service: Pillar v4 service — reads 252-day
+                daily bars from ``oss-dev-price-history`` with Polygon
+                write-through fallback. When provided, bar fetches
+                route through it (guarantees ma_200 / high_52w have
+                enough data) instead of hitting Polygon's grouped
+                daily API, which returns fewer than 252 bars after
+                market-holiday days are excluded.
         """
         self._polygon = polygon_client
         self._catalyst = catalyst_service
@@ -77,6 +86,7 @@ class FeatureComputer:
         self._as_of_date = as_of_date
         self._earnings_calendar = earnings_calendar_service
         self._sector_map: dict[str, str] = sector_map or {}
+        self._price_history = price_history_service
 
         # Cache for underlying bars (ticker -> bars)
         self._underlying_bars_cache: dict[str, list[DailyBar]] = {}
@@ -121,7 +131,11 @@ class FeatureComputer:
         if underlying_bars is None:
             underlying_bars = self._underlying_bars_cache.get(ticker)
             if underlying_bars is None:
-                if self._data_provider:
+                if self._price_history is not None:
+                    underlying_bars = await self._price_history.get_bars(
+                        ticker, lookback_days=252, as_of=effective_date,
+                    )
+                elif self._data_provider:
                     underlying_bars = await self._data_provider.get_daily_bars(
                         ticker, end_date=effective_date, lookback_days=252,
                     )
@@ -138,7 +152,13 @@ class FeatureComputer:
         # Get SPY bars if not provided
         if spy_bars is None:
             if self._spy_bars is None:
-                if self._data_provider:
+                if self._price_history is not None:
+                    self._spy_bars = await self._price_history.get_bars(
+                        self._config.rs_benchmark_ticker,
+                        lookback_days=252,
+                        as_of=effective_date,
+                    )
+                elif self._data_provider:
                     self._spy_bars = await self._data_provider.get_daily_bars(
                         self._config.rs_benchmark_ticker,
                         end_date=effective_date, lookback_days=252,
@@ -198,6 +218,11 @@ class FeatureComputer:
         sector_bars: Optional[list[DailyBar]] = None
         if sector_etf:
             sector_bars = self._sector_bars_cache.get(sector_etf)
+            if sector_bars is None and self._price_history is not None:
+                sector_bars = await self._price_history.get_bars(
+                    sector_etf, lookback_days=252, as_of=effective_date,
+                )
+                self._sector_bars_cache[sector_etf] = sector_bars
 
         rs_features = compute_relative_strength_features(
             underlying_return_5d=underlying_features.return_5d,
@@ -365,7 +390,28 @@ class FeatureComputer:
             f"({len(underlying_tickers)} underlyings, 1 benchmark, "
             f"{len(sector_etfs_needed)} sector ETFs)"
         )
-        if self._data_provider:
+        if self._price_history is not None:
+            # Pillar v4 path: read 252 trading-day bars from DynamoDB
+            # (oss-dev-price-history). The table is kept warm by the
+            # nightly refresh hook plus the Phase 1 backfill, so this
+            # returns ≥252 bars for covered tickers — enough for both
+            # ma_200 and high_52w. Fallback to Polygon is built into
+            # the service when the cache is sparse.
+            import asyncio as _asyncio
+
+            async def _fetch_one(t: str) -> tuple[str, list[DailyBar]]:
+                try:
+                    bars = await self._price_history.get_bars(
+                        t, lookback_days=252, as_of=effective_date
+                    )
+                    return t, bars
+                except Exception as e:  # defensive: never fail the whole batch
+                    logger.warning(f"price-history fetch failed for {t}: {e}")
+                    return t, []
+
+            results = await _asyncio.gather(*[_fetch_one(t) for t in tickers])
+            bars_by_ticker = {t: bars for t, bars in results}
+        elif self._data_provider:
             bars_by_ticker = await self._data_provider.get_daily_bars_batch(
                 tickers, end_date=effective_date, lookback_days=252,
             )

@@ -46,7 +46,13 @@ from app.core.schemas import (
     TradeThesis,
 )
 from app.core.watchlist import WatchlistManager
-from app.db.tables import EvaluationTable, IVHistoryTable, OpportunityTable, PolicyTable
+from app.db.tables import (
+    EvaluationTable,
+    IVHistoryTable,
+    OpportunityTable,
+    PolicyTable,
+    SP500TickerTable,
+)
 from app.filters.underlying import UnderlyingFilter
 from app.scanners.base import BaseScanner, ScanContext, ScanResult
 from app.scanners.breakout import BreakoutScanner
@@ -683,30 +689,18 @@ class ScannerOrchestrator:
                         CatalystDataService(earnings_cache=earnings_cache)
                     )
 
-                # Pillar v4 services for sector_rs_20d + historical_move_magnitude.
-                # Both are read-only DDB lookups; no Polygon spend per evaluation.
-                feature_sector_map: dict[str, str] = {}
+                # Pillar v4 wiring: DynamoDB-backed price history + sector map
+                # + earnings-history (historical_move_magnitude). All three
+                # read from tables populated by Phase 1 backfills.
+                from app.services.earnings_calendar import EarningsCalendarService
+                from app.services.price_history import PriceHistoryService
+                v4_price_history = PriceHistoryService(polygon_client=polygon)
+                v4_earnings_calendar = EarningsCalendarService()
                 try:
-                    from app.db.tables import SP500TickerTable
-
-                    feature_sector_map = await SP500TickerTable.get_sector_map()
-                except Exception as e:  # pragma: no cover — defensive
-                    logger.warning(f"Pillar v4 sector_map fetch failed: {e}")
-
-                feature_earnings_calendar = None
-                try:
-                    from app.services.earnings_calendar import (
-                        EarningsCalendarService,
-                    )
-                    from app.services.price_history import PriceHistoryService
-
-                    feature_earnings_calendar = EarningsCalendarService(
-                        price_history_service=PriceHistoryService(),
-                    )
-                except Exception as e:  # pragma: no cover — defensive
-                    logger.warning(
-                        f"Pillar v4 earnings_calendar_service init failed: {e}"
-                    )
+                    v4_sector_map = await SP500TickerTable.get_sector_map()
+                except Exception as e:
+                    logger.warning(f"Could not load sector map: {e}")
+                    v4_sector_map = {}
 
                 feature_sets: list[FeatureSet] = []
                 if not streaming and evaluations:
@@ -722,8 +716,9 @@ class ScannerOrchestrator:
                             persist_features=True,
                             data_provider=data_provider,
                             as_of_date=effective_date,
-                            sector_map=feature_sector_map,
-                            earnings_calendar_service=feature_earnings_calendar,
+                            earnings_calendar_service=v4_earnings_calendar,
+                            sector_map=v4_sector_map,
+                            price_history_service=v4_price_history,
                         )
 
                         logger.info(
@@ -1124,67 +1119,31 @@ class ScannerOrchestrator:
 
         # Pre-create a shared FeatureComputer for all evaluations.
         # Pre-fetch daily bars + IV history once to avoid per-eval S3 round-trips.
-        # Pillar v4 needs ≥252 bars (Stage 2 trend template, 52w high/low,
-        # BB-width percentile lookback) and a sector_map / earnings_calendar
-        # for sector_rs_20d and historical_move_magnitude.
         from app.features.calculator import FeatureComputer
-        from app.features.relative_strength import sector_etf_for
-
-        # Sector classification — drives sector_rs_20d. Read-only DDB lookup.
-        sector_map: dict[str, str] = {}
+        from app.services.earnings_calendar import EarningsCalendarService
+        from app.services.price_history import PriceHistoryService
         try:
-            from app.db.tables import SP500TickerTable
-
-            sector_map = await SP500TickerTable.get_sector_map()
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning(f"[Streaming] sector_map fetch failed: {e}")
-
-        # Earnings calendar — drives historical_move_magnitude. Read-only
-        # DDB-backed; no Polygon client needed (Phase 1 backfilled the table).
-        earnings_calendar_service = None
-        try:
-            from app.services.earnings_calendar import EarningsCalendarService
-            from app.services.price_history import PriceHistoryService
-
-            earnings_calendar_service = EarningsCalendarService(
-                price_history_service=PriceHistoryService(),
-            )
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning(
-                f"[Streaming] earnings_calendar_service init failed: {e}"
-            )
-
+            stream_sector_map = await SP500TickerTable.get_sector_map()
+        except Exception:
+            stream_sector_map = {}
         shared_feature_computer = FeatureComputer(
             config=policy_config.features,
             data_provider=data_provider,
             as_of_date=effective_date,
-            sector_map=sector_map,
-            earnings_calendar_service=earnings_calendar_service,
+            earnings_calendar_service=EarningsCalendarService(),
+            sector_map=stream_sector_map,
+            price_history_service=PriceHistoryService(polygon_client=polygon),
         )
-        # Pre-populate underlying bars cache for all tickers PLUS SPY and
-        # every sector ETF whose sector is represented in this batch.
-        sector_etfs_needed: set[str] = set()
-        for t in tickers:
-            etf = sector_etf_for(sector_map.get(t))
-            if etf:
-                sector_etfs_needed.add(etf)
-        all_bars_tickers = list(
-            set(tickers)
-            | {policy_config.features.rs_benchmark_ticker}
-            | sector_etfs_needed
-        )
+        # Pre-populate underlying bars cache for all tickers
+        all_tickers_plus_spy = tickers + [policy_config.features.rs_benchmark_ticker]
         if data_provider:
             bars_by_ticker = await data_provider.get_daily_bars_batch(
-                all_bars_tickers, end_date=effective_date, lookback_days=252,
+                all_tickers_plus_spy, end_date=effective_date, lookback_days=60,
             )
             shared_feature_computer._underlying_bars_cache.update(bars_by_ticker)
             shared_feature_computer._spy_bars = bars_by_ticker.get(
                 policy_config.features.rs_benchmark_ticker
             )
-            for etf in sector_etfs_needed:
-                etf_bars = bars_by_ticker.get(etf)
-                if etf_bars:
-                    shared_feature_computer._sector_bars_cache[etf] = etf_bars
         # Pre-fetch IV history for all tickers (one pass through cached parquets)
         shared_iv_history: dict = {}
         if data_provider and hasattr(data_provider, "get_iv_history"):
