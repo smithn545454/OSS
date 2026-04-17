@@ -1647,6 +1647,37 @@ class EarningsHistoryTable:
         return events
 
     @staticmethod
+    async def delete_all_for_ticker(ticker: str) -> int:
+        """Delete every earnings event for a ticker.
+
+        Used by the backfill + daily refresh hooks to make the
+        ``refresh_ticker`` operation idempotent — we rewrite the
+        ticker's history from scratch each run so stale events from
+        earlier detection heuristics don't linger.
+
+        Returns the number of rows deleted.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            EarningsHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=None,
+            scan_forward=True,
+        )
+        count = 0
+        for item in items:
+            sk = item.get("SK")
+            if not sk:
+                continue
+            await db.delete_item(
+                EarningsHistoryTable.TABLE,
+                f"TICKER#{ticker}",
+                sk,
+            )
+            count += 1
+        return count
+
+    @staticmethod
     async def get_recent_with_moves(
         ticker: str, n: int = 4
     ) -> list[EarningsEvent]:

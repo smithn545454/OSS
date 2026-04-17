@@ -104,12 +104,15 @@ async def backfill(
             )
 
         started = time.time()
+        from datetime import date, timedelta
+        dry_from = date.today() - timedelta(days=18 * 30)
+        dry_to = date.today() + timedelta(days=90)
         for i, ticker in enumerate(tickers, 1):
             attempted += 1
             try:
                 if dry_run:
                     raw = await finnhub.get_earnings_calendar(
-                        symbol=ticker, from_date=None, to_date=None
+                        symbol=ticker, from_date=dry_from, to_date=dry_to
                     )
                     logger.info(
                         f"[{i}/{len(tickers)}] {ticker}: {len(raw)} events "

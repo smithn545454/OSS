@@ -48,6 +48,16 @@ def _to_daily_bar(record: PriceHistory) -> DailyBar:
 
 
 def _to_price_history(bar: DailyBar) -> PriceHistory:
+    """Convert Polygon's in-memory ``DailyBar`` to the Pydantic schema.
+
+    Polygon returns split-adjusted volume as a float (e.g. 57130909.65).
+    ``PriceHistory.volume`` is declared ``int``; Pydantic v2 rejects
+    floats with a fractional part, so we round at the boundary rather
+    than relax the schema.
+    """
+    volume = bar.volume
+    if not isinstance(volume, int):
+        volume = int(round(float(volume)))
     return PriceHistory(
         ticker=bar.ticker,
         date=bar.date,
@@ -55,7 +65,7 @@ def _to_price_history(bar: DailyBar) -> PriceHistory:
         high=bar.high,
         low=bar.low,
         close=bar.close,
-        volume=bar.volume,
+        volume=volume,
         vwap=bar.vwap,
     )
 
