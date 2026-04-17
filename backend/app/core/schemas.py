@@ -1193,6 +1193,65 @@ class IVPercentile(OSSBaseModel):
 
 
 # ============================================================================
+# Price History (Pillar v4 foundation — 252-day daily bars)
+# ============================================================================
+
+
+class PriceHistory(OSSBaseModel):
+    """Historical daily OHLCV bar for a ticker.
+
+    Stored in the ``oss-dev-price-history`` table with PK=TICKER#{symbol},
+    SK=DATE#{YYYY-MM-DD}. Used by the Pillar v4 Directional Conviction
+    subscores (Stage 2 Minervini template, 52-week high/low proximity,
+    BB width percentile) and by the historical-move-magnitude calculation
+    in Move Potential. TTL retains ~280 days.
+    """
+
+    ticker: str
+    date: str  # YYYY-MM-DD
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    vwap: Optional[float] = None
+    recorded_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+# ============================================================================
+# Earnings History (Pillar v4 foundation — past 4 quarters of earnings events)
+# ============================================================================
+
+
+class EarningsEvent(OSSBaseModel):
+    """Historical earnings event with 1-day post-event price move.
+
+    Stored in the ``oss-dev-earnings-history`` table with PK=TICKER#{symbol},
+    SK=EARNINGS#{YYYY-MM-DD}. Used to compute the Move Potential
+    ``historical_move_magnitude`` subscore (mean absolute 1-day return
+    across the last 4 events). Distinct from the short-TTL
+    ``oss-dev-earnings-cache`` which only holds the next-earnings date.
+    """
+
+    ticker: str
+    earnings_date: str  # YYYY-MM-DD
+    fiscal_period: Optional[str] = None  # e.g. "Q1 2026"
+    time_of_day: Optional[str] = None  # "bmo" | "amc" | "unknown"
+    eps_estimate: Optional[float] = None
+    eps_actual: Optional[float] = None
+    revenue_estimate: Optional[float] = None
+    revenue_actual: Optional[float] = None
+    pre_earnings_close: Optional[float] = None
+    post_earnings_close: Optional[float] = None
+    one_day_move_pct: Optional[float] = None  # (post - pre) / pre * 100
+    last_updated: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+# ============================================================================
 # OI History (for OI 5-day change calculation)
 # ============================================================================
 

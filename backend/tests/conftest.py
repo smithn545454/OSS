@@ -407,6 +407,7 @@ def moto_dynamodb():
             "pillar-scores",
             "iv-history",
             "oi-history",
+            "price-history",
             "llm-usage",
             "calibration-reports",
             "scan-status",
@@ -512,6 +513,15 @@ def moto_dynamodb():
             TableName=f"{table_prefix}-earnings-cache",
             KeySchema=[{"AttributeName": "ticker", "KeyType": "HASH"}],
             AttributeDefinitions=[{"AttributeName": "ticker", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Earnings history: PK/SK + GSI1 (for date-range cross-ticker queries)
+        db.create_table(
+            TableName=f"{table_prefix}-earnings-history",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
+            GlobalSecondaryIndexes=gsi1,
             BillingMode="PAY_PER_REQUEST",
         )
 

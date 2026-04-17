@@ -291,6 +291,54 @@ class DatabaseStack(Stack):
             time_to_live_attribute="ttl",  # Enable TTL for automatic cleanup
         )
 
+        # 12a. Price history table (Pillar v4 foundation)
+        # Stores 252+ days of daily OHLCV bars per ticker for Stage 2 trend
+        # template, 52-week highs/lows, BB width percentile, and sector RS.
+        # PK=TICKER#{symbol}, SK=DATE#{YYYY-MM-DD}; TTL retains ~280 days.
+        self.price_history_table = dynamodb.Table(
+            self,
+            "PriceHistoryTable",
+            table_name=f"{self.table_prefix}-price-history",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+            time_to_live_attribute="ttl",
+        )
+
+        # 12b. Earnings history table (Pillar v4 foundation)
+        # Stores past N earnings events per ticker with 1-day post-event move
+        # data for Move Potential subscore. Distinct from earnings-cache
+        # which is a short-TTL next-earnings lookup.
+        # PK=TICKER#{symbol}, SK=EARNINGS#{YYYY-MM-DD}.
+        # GSI1 enables date-range queries across tickers (EARNINGS_DATE#{date}).
+        self.earnings_history_table = dynamodb.Table(
+            self,
+            "EarningsHistoryTable",
+            table_name=f"{self.table_prefix}-earnings-history",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.earnings_history_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         # ============================================================
         # Backtest S3 Bucket
         # ============================================================
@@ -492,6 +540,8 @@ class DatabaseStack(Stack):
             self.iv_history_table,
             self.oi_history_table,
             self.earnings_cache_table,
+            self.price_history_table,
+            self.earnings_history_table,
             self.backtest_runs_table,
             self.backtest_trades_table,
             self.backtest_pending_trades_table,

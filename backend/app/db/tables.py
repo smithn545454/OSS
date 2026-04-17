@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from app.core.schemas import (
     Decision,
+    EarningsEvent,
     Evaluation,
     FeatureValue,
     GateResult,
@@ -19,6 +20,7 @@ from app.core.schemas import (
     PillarScore,
     PipelineRun,
     Policy,
+    PriceHistory,
     RealTrade,
     StageEvent,
     StockSummary,
@@ -40,6 +42,8 @@ PILLAR_SCORES_TABLE = "pillar-scores"
 GATE_RESULTS_TABLE = "gate-results"
 IV_HISTORY_TABLE = "iv-history"
 OI_HISTORY_TABLE = "oi-history"
+PRICE_HISTORY_TABLE = "price-history"
+EARNINGS_HISTORY_TABLE = "earnings-history"
 TRADE_THESIS_TABLE = "trade-thesis"
 LLM_USAGE_TABLE = "llm-usage"
 PAPER_SNAPSHOTS_TABLE = "paper-snapshots"
@@ -1445,6 +1449,240 @@ class OIHistoryTable:
 
         change_pct = ((current_oi - oi_5d_ago) / oi_5d_ago) * 100
         return round(change_pct, 2)
+
+
+class PriceHistoryTable:
+    """Operations for the price-history table.
+
+    Stores daily OHLCV bars per ticker. Used by Pillar v4 Directional
+    Conviction subscores (Stage 2 Minervini trend template, 52-week
+    high/low, BB width percentile) and by historical-move-magnitude
+    in Move Potential.
+
+    PK=TICKER#{symbol}, SK=DATE#{YYYY-MM-DD}. TTL retains ~280 days.
+    """
+
+    TABLE = PRICE_HISTORY_TABLE
+    # TTL in seconds past epoch; ~280 days from write ensures we always
+    # have >252 trading-day lookback with headroom for weekends/holidays.
+    _TTL_SECONDS = 280 * 24 * 60 * 60
+
+    @staticmethod
+    def _ttl_for_now() -> int:
+        return int(datetime.now(timezone.utc).timestamp()) + PriceHistoryTable._TTL_SECONDS
+
+    @staticmethod
+    async def put(bar: PriceHistory) -> None:
+        """Store a single daily bar."""
+        db = get_dynamodb()
+        item = bar.to_dynamodb_item()
+        item["PK"] = f"TICKER#{bar.ticker}"
+        item["SK"] = f"DATE#{bar.date}"
+        item["ttl"] = PriceHistoryTable._ttl_for_now()
+        await db.put_item(PriceHistoryTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(records: list[PriceHistory]) -> None:
+        """Store many daily bars efficiently."""
+        db = get_dynamodb()
+        items = []
+        ttl = PriceHistoryTable._ttl_for_now()
+        for record in records:
+            item = record.to_dynamodb_item()
+            item["PK"] = f"TICKER#{record.ticker}"
+            item["SK"] = f"DATE#{record.date}"
+            item["ttl"] = ttl
+            items.append(item)
+
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(PriceHistoryTable.TABLE, batch)
+
+    @staticmethod
+    async def get(ticker: str, date: str) -> Optional[PriceHistory]:
+        """Get a single bar for a ticker/date."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            PriceHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            f"DATE#{date}",
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("ttl", None)
+            return PriceHistory(**item)
+        return None
+
+    @staticmethod
+    async def list_by_ticker(
+        ticker: str,
+        limit: int = 252,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        scan_forward: bool = True,
+    ) -> list[PriceHistory]:
+        """List bars for a ticker, optionally bounded by date range.
+
+        Args:
+            ticker: Ticker symbol.
+            limit: Max bars returned (default 252 for full Minervini window).
+            start_date: Optional YYYY-MM-DD lower bound (inclusive).
+            end_date: Optional YYYY-MM-DD upper bound (inclusive).
+            scan_forward: True returns oldest first (canonical for feature
+                computation); False returns most-recent first.
+
+        Returns:
+            List of PriceHistory records.
+        """
+        db = get_dynamodb()
+        sk_condition = None
+        if start_date and end_date:
+            sk_condition = {"between": [f"DATE#{start_date}", f"DATE#{end_date}"]}
+        elif start_date:
+            sk_condition = {"gte": f"DATE#{start_date}"}
+        elif end_date:
+            sk_condition = {"lte": f"DATE#{end_date}"}
+
+        items = await db.query(
+            PriceHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=limit,
+            scan_forward=scan_forward,
+            sk_condition=sk_condition,
+        )
+
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            item.pop("ttl", None)
+            records.append(PriceHistory(**item))
+        return records
+
+    @staticmethod
+    async def get_latest(ticker: str) -> Optional[PriceHistory]:
+        """Get the most recent bar for a ticker."""
+        items = await PriceHistoryTable.list_by_ticker(
+            ticker, limit=1, scan_forward=False
+        )
+        return items[0] if items else None
+
+
+class EarningsHistoryTable:
+    """Operations for the earnings-history table.
+
+    Stores past earnings events with 1-day post-event price moves.
+    Used by Pillar v4 Move Potential ``historical_move_magnitude``
+    subscore.
+
+    PK=TICKER#{symbol}, SK=EARNINGS#{YYYY-MM-DD}. GSI1 enables
+    date-range queries across tickers (GSI1PK=EARNINGS_DATE#{date}).
+    No TTL — historical data persists for auditability and backtesting.
+    """
+
+    TABLE = EARNINGS_HISTORY_TABLE
+
+    @staticmethod
+    async def put(event: EarningsEvent) -> None:
+        """Store a single earnings event."""
+        db = get_dynamodb()
+        item = event.to_dynamodb_item()
+        item["PK"] = f"TICKER#{event.ticker}"
+        item["SK"] = f"EARNINGS#{event.earnings_date}"
+        item["GSI1PK"] = f"EARNINGS_DATE#{event.earnings_date}"
+        item["GSI1SK"] = event.ticker
+        await db.put_item(EarningsHistoryTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(events: list[EarningsEvent]) -> None:
+        """Store many earnings events efficiently."""
+        db = get_dynamodb()
+        items = []
+        for event in events:
+            item = event.to_dynamodb_item()
+            item["PK"] = f"TICKER#{event.ticker}"
+            item["SK"] = f"EARNINGS#{event.earnings_date}"
+            item["GSI1PK"] = f"EARNINGS_DATE#{event.earnings_date}"
+            item["GSI1SK"] = event.ticker
+            items.append(item)
+
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(EarningsHistoryTable.TABLE, batch)
+
+    @staticmethod
+    async def get(ticker: str, earnings_date: str) -> Optional[EarningsEvent]:
+        """Get a single event by ticker/date."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            EarningsHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            f"EARNINGS#{earnings_date}",
+        )
+        if item:
+            for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(k, None)
+            return EarningsEvent(**item)
+        return None
+
+    @staticmethod
+    async def list_by_ticker(
+        ticker: str,
+        limit: int = 8,
+    ) -> list[EarningsEvent]:
+        """Return events for a ticker, most recent first."""
+        db = get_dynamodb()
+        items = await db.query(
+            EarningsHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=limit,
+            scan_forward=False,
+        )
+        events = []
+        for item in items:
+            for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(k, None)
+            events.append(EarningsEvent(**item))
+        return events
+
+    @staticmethod
+    async def get_recent_with_moves(
+        ticker: str, n: int = 4
+    ) -> list[EarningsEvent]:
+        """Return the last N events that have a computed 1-day move.
+
+        Used directly by the Move Potential subscore computation —
+        events without ``one_day_move_pct`` are skipped.
+        """
+        events = await EarningsHistoryTable.list_by_ticker(ticker, limit=n * 2)
+        with_move = [e for e in events if e.one_day_move_pct is not None]
+        return with_move[:n]
+
+    @staticmethod
+    async def get_next_event(ticker: str) -> Optional[EarningsEvent]:
+        """Return the first future-dated event for a ticker, if any.
+
+        Scans forward on SK so the lowest date >= today is returned.
+        The Finnhub daily refresh writes future events as they are
+        announced, so this is the canonical 'next earnings' lookup
+        when the event carries more than just a date.
+        """
+        today = datetime.now(timezone.utc).date().isoformat()
+        db = get_dynamodb()
+        items = await db.query(
+            EarningsHistoryTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=1,
+            scan_forward=True,
+            sk_condition={"gte": f"EARNINGS#{today}"},
+        )
+        if not items:
+            return None
+        item = items[0]
+        for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+            item.pop(k, None)
+        return EarningsEvent(**item)
 
 
 class TradeThesisTable:
