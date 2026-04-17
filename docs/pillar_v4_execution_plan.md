@@ -130,15 +130,15 @@ Total active-engineering estimate: ~22-24 working days (original 10-14 understat
 | 1 | Data foundation: price history + earnings history tables; backfills for ~1,500 tickers; new features (ma_150/200, high_52w, low_52w, bb_width_percentile, sector_rs_20d, historical_move_magnitude); sector map coverage validation | 4 days | ✅ **Complete** (2026-04-17, Lambda v234) — see §7.4 |
 | 2 | Schema extensions (PillarId enum, PillarWeights, PillarConfig, Decision, PaperPosition — additive) | 1 day | ✅ **Complete** (2026-04-17, Lambda v235) — see §7.5 |
 | 3 | v4 pillar classes + orchestrator registry refactor + LLM prompt/model/generator rewrite + composite formula + geometric-mean min-count rule + reason-code rewrite + tests | 5 days | ✅ **Complete** (2026-04-17, Lambda v236) — see §7.6 |
-| 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ⏳ **Next up** |
-| 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | Pending |
+| 4 | Frontend types, `pillarMeta.ts`, EvaluationDetail page (new names/weights/geometric-mean explanation), Policy page, paper trading components | 2 days | ✅ **Complete** (2026-04-17, commit a36b14c, CloudFront live) — see §7.7 |
+| 5 | v4.0.0 policy config build + seed (`PillarConfig.v4_default()` + `v4_default_policy.json`) | 1 day | ⏳ **Next up** |
 | 6 | Backend hardcoded-reference sweep (API routes, paper trading, rule matcher, calibration, scripts) + test fixture migration (334 occurrences / 27 files) + flip v3 Decision score fields to Optional | 3 days | Pending |
 | 7 | Activation (Tuesday) — **blocked on CloudFormation drift cleanup** (see §7.4 known issues) | 1 day | Blocked |
 | 8 | 2-week observation + tuning | 14 days | Pending |
 | 9 | v3 code removal | 2 days | Pending |
 | 10 | Historical paper-position rescore: Finnhub earnings-history backfill, batch rescore v4 over 15,505 positions; v4 fields replace v3 fields on `PaperPosition` | 2-3 days | Pending |
 
-**Progress summary (end of 2026-04-17):** 3 of 10 phases complete. All three Lambda deploys (v234, v235, v236) verified healthy with v3.1.3 policy still active. Zero behavior change for users; all v4 code unreachable until a v4 policy activates at Phase 7.
+**Progress summary (end of 2026-04-17):** 4 of 10 phases complete. Backend Lambda v234/v235/v236 healthy with v3.1.3 policy still active; frontend CloudFront now carries the dual-regime renderer (commit a36b14c) and will display whichever pillar set the active policy produces. Zero behavior change for users; all v4 code paths unreachable until a v4 policy activates at Phase 7.
 
 ---
 
@@ -385,6 +385,51 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 
 ---
 
+## 7.7 Phase 4 Outcomes — Frontend Dual-Regime Renderer (2026-04-17)
+
+**Shipped:** Frontend commit `a36b14c`, merged to `main`, deployed to CloudFront (bundle `index-D9A_PRMK.js`). Zero user-visible change — v3.1.3 policy still active — but the entire UI now renders through a single pillar-metadata source of truth and handles both v3 and v4 decisions.
+
+### What shipped
+
+- **`frontend/src/lib/pillarMeta.ts`** — the single display-metadata map. 306 lines. Covers all six `PillarId` values (three legacy marked `legacy: true`, three v4 Sharpshooter) with per-pillar label/shortLabel/icon (lucide-react: Zap/Activity/BarChart3 for v3, Compass/Rocket/Layers for v4)/color/badgeClass/defaultWeight/description. Exports helpers: `pillarMeta(id)`, `pillarIdFromKey`, `isV4PillarConfig`, `activePillarKeys`, `compositeFormulaDescription`, `PILLAR_KEYS_LEGACY` / `PILLAR_KEYS_V4`, plus `REASON_CODE_LABELS` + `reasonCodeLabel(code)` covering the full v4 reason-code vocabulary (SHARPSHOOTER_SETUP / STRONG|DECENT|WEAK|POOR_ per pillar / INSUFFICIENT_DATA_*) and the legacy v3 codes.
+- **`frontend/src/lib/types.ts`** — `PillarId` became `PillarIdLegacy | PillarIdV4`. `PillarWeights`, `PillarConfig`, `Decision.*_score`, and `PaperPosition.pillar_*` fields are now all Optional with both regimes' slots present. `PillarConfig.composite_formula` added. `ApproveEvaluation.pillarScores` widened to `Partial<Record<PillarId, number>>`.
+- **`EvaluationDetail.tsx` PillarCard** — reads `pillarMeta(pillar.pillar_id)` for icon/color/label. Subscore-vs-contributors toggle is now data-driven (uses `showFullBreakdown = meta.legacy ? pillar_id === 'PREMIUM_LEVERAGE' : contributors.length <= 6`), so v4 pillars render a full subscore breakdown like v3 Premium Leverage does. `DecisionExplanation` uses `reasonCodeLabel(code)` so v4 reason codes render with proper capitalization ("Sharpshooter Setup", "Strong Directional Conviction", …).
+- **`PolicyConfig.tsx`** — new `PillarWeightsEditor` component iterates `activePillarKeys(config.pillars)` dynamically and labels each weight via `pillarMeta`. Section header flips between "Pillar Weights" (v3) and "Pillar Weights (v4 Sharpshooter)" (v4). Composite formula is displayed via `compositeFormulaDescription(formula)`. Weight-sum validator is regime-aware; first populated key carries the error. Read-only subscore list also iterates the regime's populated pillar slots.
+- **`TradeDetail.tsx`** — new `renderSnapshotPillarMetrics()` helper checks the trade snapshot for v4 score fields first (`directional_conviction_score`, etc.), and falls back to v3 score fields if absent. Pre-v4 trades keep displaying their immutable v3 snapshot values forever.
+- **Paper-trading components** (all four): `PositionTracker.tsx` expanded panel, `ScoreCalibration.tsx` radar chart axes, `TradeLibrary.tsx` expanded detail — each uses `(p as unknown as Record<...>)[`pillar_${key}`]` lookups driven by whichever pillar set the position carries. Legacy positions continue to render with v3 pillars; v4-era positions will show v4 pillars. `ManualRuleForm.tsx` Scores & Quality group gains three v4 pillar-minimum fields (pillar_directional_conviction_min / pillar_move_potential_min / pillar_trade_structure_min) alongside the three v3 fields.
+- **`FeatureImportance.tsx`** — pillarBadge color map expanded to cover both the legacy lowercase semantic labels (directional / volatility / structure), the v3 PillarId and snake_case variants, and all v4 variants. Unknown values fall through to a neutral palette.
+- **`convictionScore.ts`** — doc-comment rewritten to describe both regimes (weighted arithmetic sum for v3, weighted geometric mean for v4 with zero-collapse behavior). Frontend logic unchanged: reads `decision.final_score` directly; regime selection happens server-side.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `tsc -b` | clean (0 errors) |
+| `vite build` | clean; 2,191 modules, 953 KB JS / 68 KB CSS bundle |
+| `eslint` | clean (1 pre-existing `react-refresh/only-export-components` warning on `FilterBar.tsx`, unrelated to Phase 4) |
+| New tests: `pillarMeta.test.ts` + updated `convictionScore.test.ts` | 47/47 passing (20 new pillarMeta tests covering all six IDs, regime detection, key→id mapping, composite-formula descriptions, v4+v3 reason-code labels, and unknown fallback) |
+| Pre-existing test-file failures | 4 suites fail to import because `@testing-library/react` isn't installed locally — confirmed to fail identically on `main` pre-change (stash + vitest run). Not a Phase 4 regression. 2 `scannerMetrics.test.ts` failures are pre-existing `-0 vs +0` and formatting drift, also unrelated. |
+| CloudFront bundle published | `index-D9A_PRMK.js` serving as of 2026-04-17 T18:14 UTC |
+| Bundle content check | `curl ... \| grep -E "Directional Conviction\|Move Potential\|Trade Structure\|Sharpshooter Setup\|weighted_geometric_mean\|DIRECTIONAL_CONVICTION\|MOVE_POTENTIAL\|TRADE_STRUCTURE"` returns all eight strings → v4 code shipped. |
+| CloudWatch ERRORs, 10 min post-deploy | none |
+| Health endpoint | `healthy` |
+| Pipeline Monitor post-deploy | 155 contracts in latest run, status `healthy`, v3.1.3 policy still active |
+
+### Phase 4 deferrals (by design) — track for later phases
+
+1. **Full visual regression pass requires a v4 fixture in production.** Until a v4 policy activates (Phase 7), there is no real v4 evaluation to render. The code paths are exercised by unit tests and by the shipped bundle's string content, but pixel-level QA of the v4 pillar cards / weight editor / paper-trading radar deferrals to Phase 7 verification. Rollback is a one-line `./scripts/deploy.sh rollback-frontend` if anything looks wrong.
+2. **`Policy page v4 section header copy`** currently reads "Pillar Weights (v4 Sharpshooter)" — Nick may want a different banner/explanation once the real v4.0.0 policy is seeded in Phase 5 (e.g. "Switch to geometric-mean composite", instructions for the grand-slam tier gates). Kept minimal here.
+3. **`FilterBar.tsx` react-refresh warning** is pre-existing and not pillar-related; leaving alone.
+
+### Heads-up items for Phase 5 kickoff
+
+- **Frontend is ready for v4 data as soon as Phase 5 seeds a v4 policy.** Activating that policy (Phase 7) will automatically render v4 pillar cards, Sharpshooter tier labels, and geometric-mean descriptions without any additional frontend work.
+- **`PillarConfig.v4_default()` classmethod still pending** — Phase 5's responsibility. The frontend expects a policy with `composite_formula: "weighted_geometric_mean"` and the three v4 pillar slots populated; seed script should produce exactly that shape.
+- **Per-scanner weight presets (`scanner_weights`)** — the `PillarConfig.scanner_weights` field is typed on the frontend (`Record<string, PillarWeights>`) but no UI editor exists yet. Phase 5 seed can populate neutral defaults; Phase 8 tuning may need a dedicated editor surface.
+- **Phase 1 CloudFormation drift still blocks Phase 7.** Unchanged from Phase 2 / 3.
+
+---
+
 ## 8. Key Sub-Rules (apply throughout)
 
 1. **Geometric mean insufficient-data rule:** a pillar with <3 available subscores returns score = 0. Composite then evaluates to 0 → auto-REJECT.
@@ -426,9 +471,9 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 | `backend/app/db/tables.py` | 1866-1967 | SP500TickerTable — sector/universe support | ✅ Phase 1 — backfilled to 99.6% real GICS coverage on S&P 500 + Russell 1000 |
 | `backend/app/features/underlying.py` | — | Needs ma_150, ma_200, high_52w, low_52w, bb_width_percentile | ✅ Phase 1 — all added; 99.5% coverage on combined universe |
 | `infrastructure/cdk/stacks/database_stack.py` | 282-292 | Existing earnings-cache table (PK=ticker only) | ✅ Phase 1 — new `oss-dev-price-history` + `oss-dev-earnings-history` tables added |
-| Frontend `lib/types.ts` | 19, 157-160, 195-197, 419-423, 456-461 | Confirmed v3 pillar references | ⏳ Phase 4 |
-| Frontend `pages/EvaluationDetail.tsx` | 363-367, 411 | pillarConfig map + conditional on PREMIUM_LEVERAGE | ⏳ Phase 4 |
-| Frontend `pages/PolicyConfig.tsx` | 946 | Hardcoded pillar-key array | ⏳ Phase 4 |
+| Frontend `lib/types.ts` | 19, 157-160, 195-197, 419-423, 456-461 | Confirmed v3 pillar references | ✅ Phase 4 — `PillarId` is now `PillarIdLegacy \| PillarIdV4`; Weights/Config/Decision/PaperPosition all have v4 slots Optional. `composite_formula` added. |
+| Frontend `pages/EvaluationDetail.tsx` | 363-367, 411 | pillarConfig map + conditional on PREMIUM_LEVERAGE | ✅ Phase 4 — PillarCard reads `pillarMeta(pillar.pillar_id)`; subscore-vs-contributors toggle is data-driven. |
+| Frontend `pages/PolicyConfig.tsx` | 946 | Hardcoded pillar-key array | ✅ Phase 4 — `PillarWeightsEditor` iterates `activePillarKeys(config.pillars)` dynamically; labels via `pillarMeta`. |
 
 **New in Phase 3 (not in original audit, worth knowing about):**
 
@@ -439,6 +484,15 @@ Nick confirmed: old v3 weights are **not** the future default. PillarWeights/Pil
 | `backend/app/pillars/move_potential.py` | v4 Move Potential pillar (5 subscores, catalyst-aware trigger) |
 | `backend/app/pillars/trade_structure.py` | v4 Trade Structure pillar (5 subscores, γ/θ ratio) |
 | `backend/tests/test_composite.py` + 4 more | 80 v4-specific tests (91-98% coverage on new files) |
+
+**New in Phase 4 (frontend):**
+
+| File | Purpose |
+|---|---|
+| `frontend/src/lib/pillarMeta.ts` | Single display-metadata source of truth: PILLAR_META + `pillarMeta()` + `pillarIdFromKey` + `isV4PillarConfig` / `activePillarKeys` + `compositeFormulaDescription` + `REASON_CODE_LABELS` / `reasonCodeLabel` |
+| `frontend/src/test/pillarMeta.test.ts` | 20 tests covering all six pillars, regime detection, reason-code labeling, unknown-id fallback |
+| Component `PillarWeightsEditor` in `PolicyConfig.tsx` | Regime-aware pillar-weights editor — iterates `activePillarKeys(config.pillars)`; labels via `pillarMeta`; composite-formula caption |
+| Helper `renderSnapshotPillarMetrics()` in `TradeDetail.tsx` | Prefers v4 snapshot fields, falls back to v3 — preserves historical trades forever |
 
 ---
 
@@ -454,4 +508,4 @@ Follow `CLAUDE.md` deployment protocol (mandatory):
 
 ---
 
-**End of Plan. Phases 1-3 complete (2026-04-17). Phase 4 (frontend types + `pillarMeta.ts` + regime-aware components) ready to start.**
+**End of Plan. Phases 1-4 complete (2026-04-17). Phase 5 (v4 default policy config build + seed) ready to start.**
