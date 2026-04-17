@@ -250,3 +250,27 @@ class FinnhubClient:
             days = (earnings_date - date.today()).days
             return max(0, days)
         return None
+
+    async def get_company_profile(
+        self, symbol: str
+    ) -> Optional[dict[str, Any]]:
+        """Fetch the `/stock/profile2` snapshot for a ticker.
+
+        Used by the Pillar v4 sector backfill to populate the GICS
+        sector on SP500TickerTable. Returns None on error or empty
+        response.
+
+        Returns a dict with keys including:
+            - finnhubIndustry (canonical sector, e.g. "Technology")
+            - gicsSubIndustry, gicsIndustry, gicsIndustryGroup (optional)
+            - ticker, name, marketCapitalization, ipo, exchange, ...
+        """
+        data = await self._rate_limited_request(
+            "/stock/profile2", {"symbol": symbol}
+        )
+        if not data:
+            return None
+        # Finnhub returns an empty dict {} for unknown tickers.
+        if not data.get("ticker") and not data.get("finnhubIndustry"):
+            return None
+        return data
