@@ -257,6 +257,20 @@ Features are additive. If broken:
 2. Lambda rollback: `./scripts/deploy.sh rollback`
 3. Tables can stay — no data dependency yet
 
+### Phase 1 Actual Outcomes (2026-04-17)
+
+| Metric | Target | Actual |
+|---|---|---|
+| Price history coverage | ≥99% | **99.5%** (1020/1025 tickers, 195,202 bars) |
+| Sector coverage (real GICS) | ≥95% | **99.6%** (987 updated + 34 pre-existing / 1025) |
+| Earnings coverage | ≥90% | In progress (expected ≥95% based on /stock/earnings availability) |
+| Full test suite | zero regressions | 2,192 passing |
+
+Key mid-deploy course corrections:
+- **Volume int/float bug** in `_to_price_history` caught 99% of first backfill attempt — Polygon returns split-adjusted fractional volume; Pydantic v2 strict-int rejected it. Fixed by rounding at the boundary (commit b607a30).
+- **Finnhub /calendar/earnings free-tier limitation** — returns only the *next* upcoming event regardless of date range, so Phase 1's historical 1-day-move calculations needed a rewrite around `/stock/earnings` + volume-spike announcement detection (commit 0a1f509).
+- **Sector-map audit revealed 4.6% real coverage** on the combined S&P 500 + Russell 1000 universe, not the expected 95%. Resolved in-session by adding a `backfill_sectors.py` script using Finnhub's `/stock/profile2` endpoint with a 150-entry Finnhub-to-GICS taxonomy mapping.
+
 ### Phase 1 Known Issues — MUST address before Phase 7 activation
 
 These items were discovered during the Phase 1 deploy (2026-04-17) and worked around with minimal-risk substitutes. None block Phase 2-6 (which only deploy Lambda code via `./scripts/deploy.sh backend`, not CDK). They **must** be cleaned up before Phase 7, when we flip the active policy to v4.0.0 and any deploy reliability issue becomes a production risk.
