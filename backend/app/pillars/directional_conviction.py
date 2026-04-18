@@ -90,7 +90,17 @@ class _DirectionalConvictionAccessor:
 
     @property
     def rs_20d(self) -> Optional[float]:
-        return self._ctx.rs_20d
+        """Relative strength, direction-aware.
+
+        CALL positions reward HIGH relative strength (leadership).
+        PUT positions reward LOW relative strength (weakness); we negate
+        so the monotonic-upward breakpoint curve rewards weakness on
+        puts the same way it rewards strength on calls.
+        """
+        raw = self._ctx.rs_20d
+        if raw is None:
+            return None
+        return raw if self._ctx.option_type == "CALL" else -raw
 
     @property
     def adx_directional_score(self) -> Optional[float]:
@@ -106,7 +116,16 @@ class _DirectionalConvictionAccessor:
 
     @property
     def sector_rs_20d(self) -> Optional[float]:
-        return self._ctx.sector_rs_20d
+        """Sector relative strength vs SPY, direction-aware.
+
+        CALL positions reward sector outperformance; PUT positions reward
+        sector underperformance. Negation flips the monotonic curve so
+        the same breakpoints serve both directions.
+        """
+        raw = self._ctx.sector_rs_20d
+        if raw is None:
+            return None
+        return raw if self._ctx.option_type == "CALL" else -raw
 
 
 # ============================================================================
@@ -276,10 +295,14 @@ def _generate_tags(
     if stage_2 is not None and stage_2 >= 70:
         tags.append("STAGE_2_TREND")
 
+    # RS_LEADER / RS_LAGGARD are framed from the option's direction:
+    # a CALL is a "leader" when rs_20d is strongly positive; a PUT is a
+    # "leader" (for puts) when rs_20d is strongly negative.
     if ctx.rs_20d is not None:
-        if ctx.rs_20d >= 5.0:
+        directional_rs = ctx.rs_20d if ctx.option_type == "CALL" else -ctx.rs_20d
+        if directional_rs >= 5.0:
             tags.append("RS_LEADER")
-        elif ctx.rs_20d <= -5.0:
+        elif directional_rs <= -5.0:
             tags.append("RS_LAGGARD")
 
     if (
@@ -301,7 +324,11 @@ def _generate_tags(
     if obv_score is not None and obv_score >= 80:
         tags.append("VOLUME_CONFIRMED")
 
-    if ctx.sector_rs_20d is not None and ctx.sector_rs_20d >= 2.0:
-        tags.append("SECTOR_LEADER")
+    if ctx.sector_rs_20d is not None:
+        directional_sector_rs = (
+            ctx.sector_rs_20d if ctx.option_type == "CALL" else -ctx.sector_rs_20d
+        )
+        if directional_sector_rs >= 2.0:
+            tags.append("SECTOR_LEADER")
 
     return tags

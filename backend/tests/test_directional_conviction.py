@@ -13,15 +13,14 @@ from app.core.schemas import (
     SubscoreBreakpoint,
 )
 from app.pillars.directional_conviction import (
-    _DirectionalConvictionAccessor,
     _adx_directional_agreement,
     _breakout_proximity,
+    _DirectionalConvictionAccessor,
     _obv_confirmation,
     _stage_2_trend_template,
     compute_directional_conviction_pillar,
 )
 from app.pillars.models import ScoringContext
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -279,3 +278,154 @@ class TestComputeDirectionalConviction:
         assert accessor.close == ctx.close
         # Derived attribute comes from the accessor
         assert accessor.stage_2_trend_score == _stage_2_trend_template(ctx)
+
+
+# ---------------------------------------------------------------------------
+# Direction-awareness symmetry tests for rs_20d + sector_rs_20d
+# ---------------------------------------------------------------------------
+
+
+class TestRs20dDirectionFlip:
+    """rs_20d must be read through the direction-aware accessor so that a
+    monotonic-upward breakpoint curve rewards strength on CALLs and
+    weakness on PUTs symmetrically.
+    """
+
+    def test_call_returns_raw_value(self) -> None:
+        ctx = _ctx(option_type="CALL", rs_20d=8.0)
+        assert _DirectionalConvictionAccessor(ctx).rs_20d == 8.0
+
+    def test_put_negates_value(self) -> None:
+        ctx = _ctx(option_type="PUT", rs_20d=8.0)
+        # For a PUT, rs_20d=+8 is bearish-unfavorable → accessor returns -8
+        assert _DirectionalConvictionAccessor(ctx).rs_20d == -8.0
+
+    def test_put_weakness_becomes_positive(self) -> None:
+        ctx = _ctx(option_type="PUT", rs_20d=-8.0)
+        # Weak stock + put = favorable → accessor returns +8
+        assert _DirectionalConvictionAccessor(ctx).rs_20d == 8.0
+
+    def test_none_propagates(self) -> None:
+        ctx = _ctx(option_type="PUT", rs_20d=None)
+        assert _DirectionalConvictionAccessor(ctx).rs_20d is None
+
+    def test_symmetric_call_vs_put(self) -> None:
+        """A CALL with rs_20d=+X and a PUT with rs_20d=-X should score identically."""
+        call_ctx = _ctx(option_type="CALL", rs_20d=6.0)
+        put_ctx = _ctx(option_type="PUT", rs_20d=-6.0)
+        assert (
+            _DirectionalConvictionAccessor(call_ctx).rs_20d
+            == _DirectionalConvictionAccessor(put_ctx).rs_20d
+        )
+
+
+class TestSectorRs20dDirectionFlip:
+    def test_call_returns_raw_value(self) -> None:
+        ctx = _ctx(option_type="CALL", sector_rs_20d=3.0)
+        assert _DirectionalConvictionAccessor(ctx).sector_rs_20d == 3.0
+
+    def test_put_negates_value(self) -> None:
+        ctx = _ctx(option_type="PUT", sector_rs_20d=3.0)
+        assert _DirectionalConvictionAccessor(ctx).sector_rs_20d == -3.0
+
+    def test_put_sector_weakness_becomes_positive(self) -> None:
+        ctx = _ctx(option_type="PUT", sector_rs_20d=-4.0)
+        assert _DirectionalConvictionAccessor(ctx).sector_rs_20d == 4.0
+
+    def test_none_propagates(self) -> None:
+        ctx = _ctx(option_type="PUT", sector_rs_20d=None)
+        assert _DirectionalConvictionAccessor(ctx).sector_rs_20d is None
+
+
+class TestFullPillarDirectionSymmetry:
+    """End-to-end: a bearish PUT setup and its mirror-image bullish CALL
+    setup should produce similar DC pillar scores. Before the direction
+    fix, the PUT would score ~20-30 points lower because rs_20d +
+    sector_rs_20d were not flipped.
+    """
+
+    def test_bearish_put_matches_bullish_call(self) -> None:
+        config = _pillar_config()
+        # Bullish CALL setup: stock in Stage 2, strong RS, positive sector RS
+        call_ctx = _ctx(
+            option_type="CALL",
+            close=180.0, sma50=160.0, ma_150=150.0, ma_200=145.0,
+            high_52w=185.0, low_52w=100.0,
+            rs_20d=6.0, adx_14=28.0, plus_di=30.0, minus_di=15.0,
+            obv_trend="RISING", sector_rs_20d=3.0,
+        )
+        # Mirror-image bearish PUT setup: stock in Stage 4 downtrend, weak
+        # RS, negative sector RS, OBV falling, -DI dominant
+        put_ctx = _ctx(
+            option_type="PUT",
+            close=100.0, sma50=120.0, ma_150=130.0, ma_200=140.0,
+            high_52w=180.0, low_52w=95.0,
+            rs_20d=-6.0, adx_14=28.0, plus_di=15.0, minus_di=30.0,
+            obv_trend="FALLING", sector_rs_20d=-3.0,
+        )
+        call_result = compute_directional_conviction_pillar(call_ctx, config)
+        put_result = compute_directional_conviction_pillar(put_ctx, config)
+        # Should score within 10 points of each other. Minor differences
+        # come from stage-2 template comparisons (which use ratios like
+        # "close is 30% above low_52w") and breakout-proximity curves
+        # that are NOT perfectly mirror-symmetric given fixture asymmetry.
+        # The core symmetry guarantee is that the PUT should NOT be ~20+
+        # points lower than the CALL (which was the pre-fix behavior).
+        assert abs(call_result.score - put_result.score) <= 10, (
+            f"Direction asymmetry: CALL={call_result.score:.1f} "
+            f"PUT={put_result.score:.1f}"
+        )
+        # Both should score high (>= 70) since both setups are favorable
+        # for their respective direction.
+        assert call_result.score >= 70, f"CALL score too low: {call_result.score}"
+        assert put_result.score >= 70, f"PUT score too low: {put_result.score}"
+
+    def test_wrong_direction_put_scores_low(self) -> None:
+        """A PUT on a stock in a Stage 2 uptrend should score LOW on DC
+        (everything is wrong for a short)."""
+        config = _pillar_config()
+        ctx = _ctx(
+            option_type="PUT",
+            close=180.0, sma50=160.0, ma_150=150.0, ma_200=145.0,
+            high_52w=185.0, low_52w=100.0,
+            rs_20d=6.0,  # Strong RS = bad for PUT
+            adx_14=28.0, plus_di=30.0, minus_di=15.0,  # +DI > -DI = bad
+            obv_trend="RISING",  # Rising OBV = bad for PUT
+            sector_rs_20d=3.0,  # Sector leader = bad for PUT
+        )
+        result = compute_directional_conviction_pillar(ctx, config)
+        assert result.score <= 30, (
+            f"Wrong-direction PUT should score low but got {result.score}"
+        )
+
+
+class TestDirectionAwareTags:
+    def test_call_rs_leader_tag_fires_on_positive_rs(self) -> None:
+        config = _pillar_config()
+        ctx = _ctx(option_type="CALL", rs_20d=8.0)
+        result = compute_directional_conviction_pillar(ctx, config)
+        assert "RS_LEADER" in result.tags
+        assert "RS_LAGGARD" not in result.tags
+
+    def test_put_rs_leader_tag_fires_on_negative_rs(self) -> None:
+        config = _pillar_config()
+        ctx = _ctx(option_type="PUT", rs_20d=-8.0)
+        result = compute_directional_conviction_pillar(ctx, config)
+        # Bearish PUT with weak stock → leader (for puts)
+        assert "RS_LEADER" in result.tags
+
+    def test_put_with_strong_stock_tags_laggard(self) -> None:
+        """A PUT on a stock with strong RS is anti-aligned → LAGGARD for puts."""
+        config = _pillar_config()
+        ctx = _ctx(option_type="PUT", rs_20d=8.0)
+        result = compute_directional_conviction_pillar(ctx, config)
+        assert "RS_LAGGARD" in result.tags
+
+    def test_sector_leader_tag_direction_aware(self) -> None:
+        config = _pillar_config()
+        call_ctx = _ctx(option_type="CALL", sector_rs_20d=3.0)
+        put_ctx = _ctx(option_type="PUT", sector_rs_20d=-3.0)
+        call_result = compute_directional_conviction_pillar(call_ctx, config)
+        put_result = compute_directional_conviction_pillar(put_ctx, config)
+        assert "SECTOR_LEADER" in call_result.tags
+        assert "SECTOR_LEADER" in put_result.tags
