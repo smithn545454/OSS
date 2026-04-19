@@ -1115,7 +1115,11 @@ class PillarConfig(OSSBaseModel):
 
     weights: PillarWeights
     scanner_weights: Optional[dict[str, PillarWeights]] = None
-    composite_formula: Literal["weighted_sum", "weighted_geometric_mean"] = "weighted_sum"
+    composite_formula: Literal[
+        "weighted_sum",
+        "weighted_geometric_mean",
+        "weighted_max",
+    ] = "weighted_sum"
     # v3 pillar definitions (retained through Phase 8; deleted at Phase 9)
     premium_leverage: Optional[PillarConfigV2] = None
     underlying_behavior: Optional[PillarConfigV2] = None
@@ -1239,10 +1243,13 @@ class PillarConfig(OSSBaseModel):
                     "PillarConfig has v4 pillar definitions but weights are "
                     "not v4-shaped"
                 )
-            if self.composite_formula != "weighted_geometric_mean":
+            if self.composite_formula not in (
+                "weighted_geometric_mean",
+                "weighted_max",
+            ):
                 raise ValueError(
-                    "v4 PillarConfig must use "
-                    "composite_formula='weighted_geometric_mean', "
+                    "v4 PillarConfig must use composite_formula in "
+                    "{'weighted_geometric_mean', 'weighted_max'}, "
                     f"got '{self.composite_formula}'"
                 )
             if dc.pillar_id != PillarId.DIRECTIONAL_CONVICTION:

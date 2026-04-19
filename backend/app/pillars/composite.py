@@ -100,6 +100,8 @@ def compute_composite_score(
     """
     weights = config.get_weights(scanner_source)
 
+    if config.composite_formula == "weighted_max":
+        return compute_weighted_max(pillar_results, weights)
     if config.composite_formula == "weighted_geometric_mean":
         return weighted_geometric_mean(pillar_results, weights)
     return weighted_sum(pillar_results, weights)
@@ -140,6 +142,48 @@ def weighted_geometric_mean(
             return 0.0
         product *= math.pow(pillar_score, w)
     return max(0.0, min(100.0, product))
+
+
+def compute_weighted_max(
+    pillar_results: Sequence[PillarResult],
+    weights: PillarWeights,
+    *,
+    max_weight: float = 0.6,
+    mean_weight: float = 0.4,
+    floor_penalty_threshold: float = 25.0,
+    floor_penalty_multiplier: float = 0.7,
+) -> float:
+    """v4.1.0 composite: ``max_weight × max(pillars) + mean_weight × weighted_mean``.
+
+    Grand-slam trades historically have one very strong pillar (typically
+    TS) with middling DC/MP. The geometric mean drags these to the middle;
+    the weighted-max surfaces them while still requiring all pillars to
+    clear a soft floor.
+
+    When any pillar falls below ``floor_penalty_threshold`` (default 25),
+    the composite is multiplied by ``floor_penalty_multiplier`` (default
+    0.7). Softer alternative to the v4.0.0 min-subscore zero-collapse.
+    """
+    scores_by_id = {r.pillar_id: r.score for r in pillar_results}
+    pillar_scores: list[float] = []
+    weighted_sum_val = 0.0
+    weight_total = 0.0
+    for pillar_id, weight in _pillar_weights_items(weights):
+        w = weight or 0.0
+        if w <= 0:
+            continue
+        score = scores_by_id.get(pillar_id, 0.0)
+        pillar_scores.append(score)
+        weighted_sum_val += w * score
+        weight_total += w
+    if not pillar_scores:
+        return 0.0
+    max_pillar = max(pillar_scores)
+    weighted_mean = weighted_sum_val / weight_total if weight_total > 0 else 0.0
+    composite = max_weight * max_pillar + mean_weight * weighted_mean
+    if min(pillar_scores) < floor_penalty_threshold:
+        composite *= floor_penalty_multiplier
+    return max(0.0, min(100.0, composite))
 
 
 def _pillar_weights_items(weights: PillarWeights) -> list[tuple[PillarId, float]]:
