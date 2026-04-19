@@ -191,12 +191,27 @@ def _stage_2_trend_template(ctx: ScoringContext) -> Optional[float]:
     return (met / len(checks)) * 100.0
 
 
+def _piecewise_linear(x: float, breakpoints: list[tuple[float, float]]) -> float:
+    if x <= breakpoints[0][0]:
+        return breakpoints[0][1]
+    if x >= breakpoints[-1][0]:
+        return breakpoints[-1][1]
+    for (x1, y1), (x2, y2) in zip(breakpoints, breakpoints[1:]):
+        if x1 <= x <= x2:
+            if x2 == x1:
+                return y1
+            return y1 + (x - x1) / (x2 - x1) * (y2 - y1)
+    return 50.0
+
+
 def _adx_directional_agreement(ctx: ScoringContext) -> Optional[float]:
     """Combine ADX magnitude with ±DI sign agreement → 0-100 score.
 
-    Strong ADX (>25) combined with +DI > -DI for CALLs (or -DI > +DI for
-    PUTs) gives high scores. ADX > 40 caps, weak trends (<15) floor.
-    Disagreement penalises regardless of ADX magnitude.
+    v4.1.0: ADX→base-score mapping is an inverted-U peaking at ADX=22 (the
+    empirical home-run sweet spot). Established trends (ADX > 40) are
+    penalised — by that point the move is late-stage and premium typically
+    too expensive for convex reward. Very weak trends (ADX < 10) are also
+    penalised — no direction to trade.
     """
     adx = ctx.adx_14
     plus_di = ctx.plus_di
@@ -204,17 +219,17 @@ def _adx_directional_agreement(ctx: ScoringContext) -> Optional[float]:
     if adx is None or plus_di is None or minus_di is None:
         return None
 
-    # Map ADX to a 0-100 base score: weak trend ~15 → 30, strong trend ~40 → 85.
-    adx_clamped = max(0.0, min(50.0, float(adx)))
-    base = 30.0 + (adx_clamped - 15.0) * (85.0 - 30.0) / (40.0 - 15.0)
-    base = max(0.0, min(100.0, base))
+    breakpoints = [
+        (0.0, 20.0), (10.0, 50.0), (18.0, 85.0), (22.0, 100.0),
+        (30.0, 80.0), (40.0, 55.0), (55.0, 30.0), (80.0, 15.0),
+    ]
+    base = _piecewise_linear(float(adx), breakpoints)
 
     bullish = ctx.option_type == "CALL"
     dominant_di = plus_di if bullish else minus_di
     opposing_di = minus_di if bullish else plus_di
-    di_diff = dominant_di - opposing_di  # positive when agreement
+    di_diff = dominant_di - opposing_di
 
-    # Agreement bonus: +15 when dominant DI leads by 10+, -25 penalty when losing.
     if di_diff >= 10:
         bonus = 15.0
     elif di_diff >= 0:

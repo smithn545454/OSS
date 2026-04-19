@@ -147,10 +147,11 @@ class TestStage2Template:
 
 class TestAdxDirectionalAgreement:
     def test_strong_trend_with_agreement_scores_high(self) -> None:
+        # v4.1.0: ADX=35 is past the peak (22), so expectation relaxed to >=70.
         ctx = _ctx(adx_14=35.0, plus_di=35.0, minus_di=15.0)
         score = _adx_directional_agreement(ctx)
         assert score is not None
-        assert score >= 80
+        assert score >= 70
 
     def test_strong_trend_with_disagreement_scores_low(self) -> None:
         # Strong ADX but +DI < -DI for a CALL → penalized.
@@ -160,13 +161,54 @@ class TestAdxDirectionalAgreement:
         assert score <= 60
 
     def test_weak_trend_scores_moderate(self) -> None:
+        # v4.1.0 inverted-U: ADX=10 → base=50, small +DI lead adds ~5 bonus.
         ctx = _ctx(adx_14=10.0, plus_di=20.0, minus_di=18.0)
         score = _adx_directional_agreement(ctx)
         assert score is not None
-        assert 0 <= score <= 50
+        assert 40 <= score <= 65
 
     def test_returns_none_without_adx(self) -> None:
         assert _adx_directional_agreement(_ctx(adx_14=None)) is None
+
+
+class TestAdxInvertedU:
+    """v4.1.0 ADX curve: inverted-U peak at 22, decline beyond 30."""
+
+    def test_peak_at_22(self) -> None:
+        ctx = _ctx(adx_14=22.0, plus_di=35.0, minus_di=15.0)
+        score = _adx_directional_agreement(ctx)
+        assert score is not None
+        assert score >= 95
+
+    def test_very_weak_trend_scores_low(self) -> None:
+        ctx = _ctx(adx_14=5.0, plus_di=20.0, minus_di=20.0)
+        score = _adx_directional_agreement(ctx)
+        assert score is not None
+        assert 30 <= score <= 50
+
+    def test_very_strong_trend_scores_lower_than_peak(self) -> None:
+        # ADX=50 is late-stage → should be well below the peak.
+        ctx = _ctx(adx_14=50.0, plus_di=35.0, minus_di=15.0)
+        score = _adx_directional_agreement(ctx)
+        assert score is not None
+        assert 45 <= score <= 70
+
+    def test_late_stage_trend_penalized_vs_early_stage(self) -> None:
+        early = _adx_directional_agreement(
+            _ctx(adx_14=22.0, plus_di=30.0, minus_di=15.0)
+        )
+        late = _adx_directional_agreement(
+            _ctx(adx_14=48.0, plus_di=30.0, minus_di=15.0)
+        )
+        assert early is not None and late is not None
+        assert early > late
+
+    def test_piecewise_linear_interpolation(self) -> None:
+        # ADX=15 sits between (10,50) and (18,85); neutral DI → small +5 bonus.
+        ctx = _ctx(adx_14=15.0, plus_di=22.0, minus_di=20.0)
+        score = _adx_directional_agreement(ctx)
+        assert score is not None
+        assert 68 <= score <= 85
 
 
 class TestBreakoutProximity:
@@ -394,7 +436,9 @@ class TestFullPillarDirectionSymmetry:
             sector_rs_20d=3.0,  # Sector leader = bad for PUT
         )
         result = compute_directional_conviction_pillar(ctx, config)
-        assert result.score <= 30, (
+        # v4.1.0: ADX base at 28 is higher under the inverted-U curve; the
+        # wrong-direction penalty still keeps the overall pillar low (<=35).
+        assert result.score <= 35, (
             f"Wrong-direction PUT should score low but got {result.score}"
         )
 
