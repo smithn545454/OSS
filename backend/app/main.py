@@ -531,6 +531,10 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
                 check_concentration=True,
                 pillar_config=policy_config.pillars,
                 generate_theses=False,
+                archetypes_config=policy_config.archetypes,
+                anti_archetypes_config=policy_config.anti_archetypes,
+                feature_sets=feature_sets,
+                opportunities=opportunities,
             )
 
             approve_count = sum(1 for d in decisions.values() if d.verdict == Verdict.APPROVE)

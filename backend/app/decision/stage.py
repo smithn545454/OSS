@@ -13,6 +13,8 @@ import logging
 from typing import Any, Optional, Sequence
 
 from app.core.schemas import (
+    AntiArchetypeConfig,
+    ArchetypeConfig,
     Decision,
     DecisionConfig,
     Evaluation,
@@ -57,6 +59,8 @@ class DecisionStage:
         pillar_weights: Optional[PillarWeights] = None,
         thesis_config: Optional[ThesisConfig] = None,
         pillar_config: Optional[PillarConfig] = None,
+        archetypes_config: Optional[ArchetypeConfig] = None,
+        anti_archetypes_config: Optional[AntiArchetypeConfig] = None,
     ) -> None:
         """Initialize the decision stage.
 
@@ -75,8 +79,91 @@ class DecisionStage:
         self._calculator = DecisionCalculator(
             decision_config, pillar_weights, pillar_config=pillar_config
         )
+        self._archetypes_config = archetypes_config
+        self._anti_archetypes_config = anti_archetypes_config
         self._thesis_generator = None  # Lazy init to avoid import if not needed
     
+    def _compute_archetype_results(
+        self,
+        evaluations: Sequence[Evaluation],
+        pillar_results: dict[str, Sequence[PillarResult]],
+        feature_sets: dict[str, Any],
+        opportunities: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Run archetype matcher + anti-archetype gates per evaluation.
+
+        Returns a dict ``{eval_id: {archetype_matched, archetype_match_score,
+        archetype_all_fits, anti_archetype_triggered}}``. Empty dict when
+        neither archetypes nor anti-archetypes are configured on the policy
+        (preserves pre-v4.1.0 behavior).
+        """
+        if self._archetypes_config is None and self._anti_archetypes_config is None:
+            return {}
+
+        from app.archetypes.gates import check_anti_archetypes
+        from app.archetypes.matcher import compute_archetype_match
+        from app.pillars.models import ScoringContext
+
+        results: dict[str, dict[str, Any]] = {}
+        for evaluation in evaluations:
+            eval_id = evaluation.evaluation_id
+            try:
+                ctx = ScoringContext.from_evaluation_and_features(
+                    evaluation=evaluation,
+                    feature_set=feature_sets.get(eval_id),
+                    opportunity=opportunities.get(evaluation.underlying_ticker),
+                )
+                pillars = pillar_results.get(eval_id, [])
+                pillar_scores: dict[str, float] = {}
+                for pr in pillars:
+                    pid = (
+                        pr.pillar_id.value
+                        if hasattr(pr.pillar_id, "value")
+                        else str(pr.pillar_id)
+                    )
+                    pillar_scores[pid] = pr.score
+                    # Short aliases for archetype conditions referencing
+                    # ts_score / mp_score / dc_score.
+                    short = {
+                        "TRADE_STRUCTURE": "TS",
+                        "MOVE_POTENTIAL": "MP",
+                        "DIRECTIONAL_CONVICTION": "DC",
+                    }.get(pid)
+                    if short:
+                        pillar_scores[short] = pr.score
+
+                entry: dict[str, Any] = {
+                    "archetype_matched": None,
+                    "archetype_match_score": None,
+                    "archetype_all_fits": None,
+                    "anti_archetype_triggered": None,
+                }
+
+                if self._anti_archetypes_config is not None:
+                    aa = check_anti_archetypes(
+                        ctx,
+                        self._anti_archetypes_config,
+                        pillar_scores=pillar_scores,
+                    )
+                    if aa.triggered:
+                        entry["anti_archetype_triggered"] = aa.anti_archetype_id
+
+                if self._archetypes_config is not None:
+                    match = compute_archetype_match(
+                        ctx, self._archetypes_config, pillar_scores=pillar_scores
+                    )
+                    entry["archetype_all_fits"] = match.all_fits
+                    if match.best is not None:
+                        entry["archetype_matched"] = match.best.archetype_id
+                        entry["archetype_match_score"] = match.best_match_score
+
+                results[eval_id] = entry
+            except Exception as exc:
+                logger.warning(
+                    "archetype computation failed for %s: %s", eval_id, exc
+                )
+        return results
+
     async def execute(
         self,
         run_id: str,
@@ -88,6 +175,8 @@ class DecisionStage:
         persist_decisions: bool = True,
         check_concentration: bool = True,
         generate_theses: bool = True,
+        feature_sets: Optional[dict[str, Any]] = None,
+        opportunities: Optional[dict[str, Any]] = None,
     ) -> tuple[dict[str, Decision], list[TradeThesis]]:
         """Execute decision logic stage.
         
@@ -128,11 +217,22 @@ class DecisionStage:
             )
             return {}, theses
         
+        # v4.1.0: compute archetype matches + anti-archetype gates per
+        # evaluation when configured. Uses ScoringContext reconstituted
+        # from evaluation + features. No-op when either config is None.
+        archetype_results = self._compute_archetype_results(
+            evaluations=evaluations,
+            pillar_results=pillar_results,
+            feature_sets=feature_sets or {},
+            opportunities=opportunities or {},
+        )
+
         # Step 1: Compute initial decisions
         decisions = self._calculator.compute_decisions_batch(
             evaluations=evaluations,
             pillar_results=pillar_results,
             gate_evaluations=gate_evaluations,
+            archetype_results=archetype_results,
         )
         
         # Step 2: Check concentration warnings if enabled
@@ -477,6 +577,10 @@ async def run_decision_logic(
     check_concentration: bool = True,
     generate_theses: bool = True,
     pillar_config: Optional[PillarConfig] = None,
+    archetypes_config: Optional[ArchetypeConfig] = None,
+    anti_archetypes_config: Optional[AntiArchetypeConfig] = None,
+    feature_sets: Optional[dict[str, Any]] = None,
+    opportunities: Optional[dict[str, Any]] = None,
 ) -> tuple[dict[str, Decision], list[TradeThesis]]:
     """Convenience function to run decision logic stage.
 
@@ -505,6 +609,8 @@ async def run_decision_logic(
         pillar_weights=pillar_weights,
         thesis_config=thesis_config,
         pillar_config=pillar_config,
+        archetypes_config=archetypes_config,
+        anti_archetypes_config=anti_archetypes_config,
     )
     return await stage.execute(
         run_id=run_id,
@@ -516,6 +622,8 @@ async def run_decision_logic(
         persist_decisions=persist_decisions,
         check_concentration=check_concentration,
         generate_theses=generate_theses,
+        feature_sets=feature_sets,
+        opportunities=opportunities,
     )
 
 

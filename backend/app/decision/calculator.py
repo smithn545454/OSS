@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from app.core.schemas import (
     Decision,
@@ -457,9 +457,21 @@ class DecisionCalculator:
         pillar_results: dict[str, Sequence[PillarResult]],
         gate_evaluations: dict[str, GateEvaluation],
         concentration_warnings: Optional[dict[str, list[str]]] = None,
+        archetype_results: Optional[dict[str, dict[str, Any]]] = None,
     ) -> dict[str, Decision]:
+        """Compute decisions for a batch of evaluations.
+
+        ``archetype_results`` is an optional per-evaluation dict of the form
+        ``{eval_id: {"archetype_matched": str|None,
+                     "archetype_match_score": float|None,
+                     "archetype_all_fits": dict|None,
+                     "anti_archetype_triggered": str|None}}``.
+        When present, the fields are threaded into DecisionContext and the
+        calculator's anti-archetype short-circuit handles REJECT semantics.
+        """
         decisions: dict[str, Decision] = {}
         warnings = concentration_warnings or {}
+        archetype_map = archetype_results or {}
 
         for evaluation in evaluations:
             try:
@@ -467,13 +479,19 @@ class DecisionCalculator:
                 pillars = pillar_results.get(eval_id, [])
                 gate_eval = gate_evaluations.get(eval_id)
                 eval_warnings = warnings.get(eval_id, [])
+                arch = archetype_map.get(eval_id, {})
 
-                decision = self.compute_decision_from_evaluation(
+                ctx = DecisionContext.from_evaluation_and_results(
                     evaluation=evaluation,
                     pillar_results=pillars,
                     gate_evaluation=gate_eval,
-                    concentration_warnings=eval_warnings,
                 )
+                if arch:
+                    ctx.archetype_matched = arch.get("archetype_matched")
+                    ctx.archetype_match_score = arch.get("archetype_match_score")
+                    ctx.archetype_all_fits = arch.get("archetype_all_fits")
+                    ctx.anti_archetype_triggered = arch.get("anti_archetype_triggered")
+                decision = self.compute_decision(ctx, eval_warnings)
                 decisions[eval_id] = decision
 
             except Exception as e:
