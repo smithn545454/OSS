@@ -590,6 +590,15 @@ class PaperPosition(OSSBaseModel):
     archetype_all_fits: Optional[dict[str, float]] = None
     anti_archetype_triggered: Optional[str] = None
 
+    # Scoring-version tracking. "v4.0" for positions opened under v4.0 policy,
+    # "v4.1.0" after the archetype-aware rescore. Older v3 positions leave
+    # this None (they aren't eligible for v4.1.0 rescore).
+    scoring_version: Optional[str] = None
+    # v4.0 tier snapshot preserved during the v4.1.0 rescore. Conviction
+    # score isn't snapshotted because v4.1.0 leaves the composite formula
+    # unchanged — only the tier can be promoted by archetype_match_score.
+    quality_tier_v40: Optional[QualityTier] = None
+
 
 # ============================================================================
 # Pipeline Run & Stage Events

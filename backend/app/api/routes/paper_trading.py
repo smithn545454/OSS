@@ -2206,6 +2206,236 @@ async def rescore_paper_positions(
 
 
 # ============================================================================
+# Batch Rescore v4.1.0 (archetype-aware)
+# ============================================================================
+
+
+@router.post("/rescore-v4.1.0")
+async def rescore_paper_positions_v41(
+    batch_size: int = 200,
+    status_filter: str = "all",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Apply v4.1.0 archetype-aware scoring to existing v4.0 paper positions.
+
+    For each position scored under v4.0, runs the archetype matcher and
+    anti-archetype gates, then reassigns ``quality_tier_at_entry`` using
+    the archetype-aware tier rules. The v4.0 tier is snapshotted into
+    ``quality_tier_v40`` before being overwritten; ``scoring_version`` is
+    set to ``"v4.1.0"`` so re-running the endpoint skips done rows.
+
+    Pillar scores and the composite conviction score are unchanged in
+    v4.1.0 — only the archetype overlay and tier assignment move. Call
+    repeatedly until ``remaining == 0``.
+
+    Only positions with v4 pillar scores populated are eligible. v3
+    positions (pillar_premium_leverage et al.) are skipped.
+
+    Args:
+        batch_size: Max positions to process per call (default 200).
+        status_filter: "all", "open", or "closed".
+        dry_run: If true, compute new archetype/tier but don't write.
+
+    Returns:
+        Summary with rescored/skipped/errors counts and sample deltas.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from app.archetypes.gates import check_anti_archetypes
+    from app.archetypes.matcher import compute_archetype_match
+    from app.core.policy import PolicyService
+    from app.core.schemas import QualityTier
+    from app.db.tables import FeatureValueTable
+    from app.decision.calculator import DecisionCalculator
+    from app.features.models import FeatureSet
+    from app.pillars.models import ScoringContext
+
+    policy = await PolicyService().get_active()
+    if not policy:
+        raise HTTPException(status_code=500, detail="No active policy found")
+    if policy.config.archetypes is None and policy.config.anti_archetypes is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Active policy has no archetype/anti-archetype config. "
+                "Activate a v4.1.0 policy before running this rescore."
+            ),
+        )
+
+    decision_config = policy.config.decision
+    calculator = DecisionCalculator(decision_config)
+    rescore_marker = datetime.now(timezone.utc).isoformat()
+
+    all_positions: list = []
+    if status_filter in ("all", "open"):
+        all_positions.extend(await PaperPositionTable.list_open())
+    if status_filter in ("all", "closed"):
+        all_positions.extend(await PaperPositionTable.list_closed())
+
+    def _is_v4_position(p: Any) -> bool:
+        return (
+            p.pillar_directional_conviction is not None
+            and p.pillar_move_potential is not None
+            and p.pillar_trade_structure is not None
+        )
+
+    needs_rescore = [
+        p for p in all_positions
+        if _is_v4_position(p) and getattr(p, "scoring_version", None) != "v4.1.0"
+    ]
+    batch = needs_rescore[:batch_size]
+    total_needing = len(needs_rescore)
+
+    if not batch:
+        return {
+            "rescored": 0,
+            "skipped": 0,
+            "errors": 0,
+            "remaining": 0,
+            "total_needing_rescore": 0,
+            "sample_deltas": [],
+        }
+
+    semaphore = asyncio.Semaphore(50)
+
+    async def _fetch_features(eval_id: str):
+        async with semaphore:
+            return eval_id, await FeatureValueTable.list_by_evaluation(eval_id)
+
+    feature_tasks = [_fetch_features(p.evaluation_id) for p in batch]
+    feature_results = await asyncio.gather(*feature_tasks, return_exceptions=True)
+
+    feature_map: dict[str, FeatureSet] = {}
+    for result in feature_results:
+        if isinstance(result, Exception):
+            continue
+        eval_id, fv_list = result
+        if fv_list:
+            feature_map[eval_id] = FeatureSet.from_feature_values(eval_id, fv_list)
+
+    rescored = 0
+    skipped = 0
+    errors = 0
+    samples: list[dict[str, Any]] = []
+
+    for pos in batch:
+        try:
+            feature_set = feature_map.get(pos.evaluation_id)
+            ctx = ScoringContext.from_position_and_features(pos, feature_set)
+
+            dc = float(pos.pillar_directional_conviction or 0.0)
+            mp = float(pos.pillar_move_potential or 0.0)
+            ts = float(pos.pillar_trade_structure or 0.0)
+            pillar_scores = {
+                "DIRECTIONAL_CONVICTION": dc,
+                "MOVE_POTENTIAL": mp,
+                "TRADE_STRUCTURE": ts,
+                "DC": dc,
+                "MP": mp,
+                "TS": ts,
+            }
+
+            anti_id: Optional[str] = None
+            if policy.config.anti_archetypes is not None:
+                aa = check_anti_archetypes(
+                    ctx,
+                    policy.config.anti_archetypes,
+                    pillar_scores=pillar_scores,
+                )
+                if aa.triggered:
+                    anti_id = aa.anti_archetype_id
+
+            archetype_matched: Optional[str] = None
+            archetype_score: Optional[float] = None
+            all_fits: Optional[dict[str, float]] = None
+            if policy.config.archetypes is not None:
+                match = compute_archetype_match(
+                    ctx, policy.config.archetypes, pillar_scores=pillar_scores
+                )
+                all_fits = match.all_fits
+                if match.best is not None:
+                    archetype_matched = match.best.archetype_id
+                    archetype_score = (
+                        round(match.best_match_score, 2)
+                        if match.best_match_score is not None
+                        else None
+                    )
+
+            conviction = float(pos.conviction_score or 0.0)
+            new_tier: Optional[QualityTier] = None
+            if (
+                anti_id is None
+                and conviction >= decision_config.approve_threshold
+            ):
+                new_tier = calculator.assign_quality_tier(
+                    conviction,
+                    spread_pct=float(pos.entry_spread_pct or 0.0),
+                    directional_conviction=dc,
+                    move_potential=mp,
+                    trade_structure=ts,
+                    archetype_match_score=archetype_score,
+                )
+
+            old_tier = pos.quality_tier_at_entry
+            old_tier_val = (
+                old_tier.value if hasattr(old_tier, "value") else old_tier
+            )
+            new_tier_val = (
+                new_tier.value if new_tier is not None else None
+            )
+
+            if len(samples) < 5:
+                samples.append({
+                    "ticker": pos.underlying_ticker,
+                    "position_id": pos.position_id,
+                    "old_tier": old_tier_val,
+                    "new_tier": new_tier_val,
+                    "archetype_matched": archetype_matched,
+                    "archetype_match_score": archetype_score,
+                    "anti_archetype_triggered": anti_id,
+                })
+
+            if dry_run:
+                rescored += 1
+                continue
+
+            updates: dict[str, Any] = {
+                "archetype_matched": archetype_matched,
+                "archetype_match_score": archetype_score,
+                "archetype_all_fits": all_fits,
+                "anti_archetype_triggered": anti_id,
+                "scoring_version": "v4.1.0",
+                "rescored_at": rescore_marker,
+            }
+            # Snapshot v4.0 tier only once — don't overwrite on repeat runs.
+            if pos.quality_tier_v40 is None and old_tier_val is not None:
+                updates["quality_tier_v40"] = old_tier_val
+            if new_tier_val is not None:
+                updates["quality_tier_at_entry"] = new_tier_val
+
+            await PaperPositionTable.update(pos, updates)
+            rescored += 1
+
+        except Exception as e:
+            logger.warning(
+                f"v4.1.0 rescore error for position {pos.position_id}: {e}"
+            )
+            errors += 1
+
+    remaining = total_needing - len(batch)
+    return {
+        "rescored": rescored,
+        "skipped": skipped,
+        "errors": errors,
+        "remaining": max(0, remaining),
+        "total_needing_rescore": total_needing,
+        "dry_run": dry_run,
+        "sample_deltas": samples,
+    }
+
+
+# ============================================================================
 # Scanner Performance Analysis (AI-Powered)
 # ============================================================================
 
