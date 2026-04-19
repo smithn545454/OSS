@@ -42,6 +42,22 @@ export type Verdict = 'APPROVE' | 'WATCH' | 'REJECT'
 
 export type QualityTier = 'TIER_1' | 'TIER_2' | 'TIER_3'
 
+// v4.1.0 archetype identifiers (string-open for forward-compat).
+export type ArchetypeId =
+  | 'UV_LOTTERY_CALL'
+  | 'UV_STRUCTURAL'
+  | 'UV_REVERSAL_PUT'
+  | 'CHEAP_COMPRESSION'
+  | 'CHEAP_VOL_REVERSAL'
+  | 'CHEAP_ULTRA_CALL'
+  | string
+
+export type AntiArchetypeId =
+  | 'BREAKOUT_MP_ELITE'
+  | 'UV_LONG_DATED'
+  | 'CHEAP_DC_ELITE'
+  | string
+
 export type GateOperator = 'gte' | 'lte' | 'between' | 'equals'
 
 export type ExitReason = 'PROFIT_TARGET' | 'STOP_LOSS' | 'TIME_EXIT' | 'EXPIRATION' | 'MANUAL'
@@ -191,6 +207,11 @@ export interface Decision {
   concentration_warnings: string[]
   policy_version: string
   decided_at: string
+  // v4.1.0 archetype matcher output (null for pre-v4.1.0 decisions).
+  archetype_matched?: ArchetypeId | null
+  archetype_match_score?: number | null
+  archetype_all_fits?: Record<string, number> | null
+  anti_archetype_triggered?: AntiArchetypeId | null
 }
 
 // Paper Position (includes denormalized enrichment fields from backend)
@@ -240,6 +261,11 @@ export interface PaperPosition {
   theta_adj_ev: number | null
   matched_rule_ids: string[] | null
   matched_rules: MatchedRule[] | null
+  // v4.1.0 archetype matcher (denormalized from Decision at entry).
+  archetype_matched?: ArchetypeId | null
+  archetype_match_score?: number | null
+  archetype_all_fits?: Record<string, number> | null
+  anti_archetype_triggered?: AntiArchetypeId | null
 }
 
 // Enriched position — now just an alias since enrichment is on PaperPosition

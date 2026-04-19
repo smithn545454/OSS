@@ -26,6 +26,7 @@ import clsx from 'clsx'
 import AITradeThesis from '@/components/AITradeThesis'
 import AIStockSummary from '@/components/evaluation/AIStockSummary'
 import TrackTradeModal from '@/components/TrackTradeModal'
+import { ArchetypeMatchCard } from '@/components/ArchetypeMatchCard'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
@@ -1445,6 +1446,20 @@ export default function EvaluationDetail() {
 
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />
+
+      {/* v4.1.0: Archetype match (when present). Skipped for pre-v4.1.0
+          decisions which don't carry archetype data. */}
+      {decision &&
+        (decision.archetype_matched ||
+          decision.anti_archetype_triggered ||
+          decision.archetype_all_fits) && (
+          <ArchetypeMatchCard
+            archetypeId={decision.archetype_matched}
+            matchScore={decision.archetype_match_score}
+            allFits={decision.archetype_all_fits}
+            antiArchetypeTriggered={decision.anti_archetype_triggered}
+          />
+        )}
 
       {/* Pillar Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
