@@ -1399,6 +1399,14 @@ class DecisionConfig(OSSBaseModel):
     tier_1_max_spread: float = 5.0
     tier_2_min_pillar: int = 55
 
+    # v4.1.0: archetype match score can promote the tier independently of
+    # the pillar composite. TIER_1 when archetype_match_score ≥
+    # archetype_tier_1_threshold (default 80); TIER_2 when ≥
+    # archetype_tier_2_threshold (default 70). Only applies to decisions
+    # that have a matched archetype; composite-path tiering is unchanged.
+    archetype_tier_1_threshold: float = 80.0
+    archetype_tier_2_threshold: float = 70.0
+
 
 class TrackingConfig(OSSBaseModel):
     """Paper trading configuration."""

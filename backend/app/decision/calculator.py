@@ -244,6 +244,7 @@ class DecisionCalculator:
         directional_conviction: Optional[float] = None,
         move_potential: Optional[float] = None,
         trade_structure: Optional[float] = None,
+        archetype_match_score: Optional[float] = None,
     ) -> Optional[QualityTier]:
         """Assign quality tier for APPROVE verdicts.
 
@@ -276,14 +277,27 @@ class DecisionCalculator:
             )
         min_pillar = min(p1, p2, p3)
 
-        if (
+        composite_tier_1 = (
             final_score >= self._config.tier_1_min_score
             and min_pillar >= self._config.tier_1_min_pillar
             and spread_pct <= self._config.tier_1_max_spread
-        ):
+        )
+        # v4.1.0: archetype match can promote to TIER_1/TIER_2 independently
+        # of the pillar composite. Only triggers when a match score is
+        # provided (None on v3 or pre-v4.1.0 paths).
+        archetype_tier_1 = (
+            archetype_match_score is not None
+            and archetype_match_score >= self._config.archetype_tier_1_threshold
+        )
+        archetype_tier_2 = (
+            archetype_match_score is not None
+            and archetype_match_score >= self._config.archetype_tier_2_threshold
+        )
+
+        if composite_tier_1 or archetype_tier_1:
             return QualityTier.TIER_1
 
-        if min_pillar >= self._config.tier_2_min_pillar:
+        if min_pillar >= self._config.tier_2_min_pillar or archetype_tier_2:
             return QualityTier.TIER_2
 
         return QualityTier.TIER_3
@@ -381,6 +395,7 @@ class DecisionCalculator:
                     directional_conviction=p1,
                     move_potential=p2,
                     trade_structure=p3,
+                    archetype_match_score=ctx.archetype_match_score,
                 )
             else:
                 quality_tier = self.assign_quality_tier(
