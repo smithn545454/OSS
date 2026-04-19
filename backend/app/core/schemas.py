@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -454,6 +454,13 @@ class Decision(OSSBaseModel):
                 data.pop("structure_score", None)
         return data
 
+    # v4.1.0: archetype matching (secondary scoring axis). All optional —
+    # None on historical records (v3, v4.0.0, v4.0.1).
+    archetype_matched: Optional[str] = None
+    archetype_match_score: Optional[float] = None
+    archetype_all_fits: Optional[dict[str, float]] = None
+    anti_archetype_triggered: Optional[str] = None
+
     def is_v4(self) -> bool:
         """Return True if this decision carries the v4 pillar trio."""
         return (
@@ -576,6 +583,12 @@ class PaperPosition(OSSBaseModel):
 
     # Batch rescore tracking
     rescored_at: Optional[str] = None  # ISO timestamp set by POST /rescore
+
+    # v4.1.0: archetype matching (denormalized from Decision at creation)
+    archetype_matched: Optional[str] = None
+    archetype_match_score: Optional[float] = None
+    archetype_all_fits: Optional[dict[str, float]] = None
+    anti_archetype_triggered: Optional[str] = None
 
 
 # ============================================================================
@@ -947,6 +960,103 @@ class CategoricalSubscoreConfig(OSSBaseModel):
                     f"Category {cat} score {score} out of range [0, 100]"
                 )
         return self
+
+
+# ============================================================================
+# Archetype Matcher (Policy v4.1.0)
+# ============================================================================
+
+
+class ArchetypeCondition(OSSBaseModel):
+    """One boolean condition within an archetype definition.
+
+    Evaluates a feature against a rule and returns a *graded fit score*
+    (0-100). Exactly one of {between, lte, gte, eq, in_values} must be set.
+    ``feather`` widens numeric boundaries with linear fall-off; discrete
+    ops ignore it. ``required=False`` lets a missing feature score 50.
+    """
+
+    condition_id: str
+    display_name: str
+    feature_field: str
+
+    between: Optional[list[float]] = None
+    lte: Optional[float] = None
+    gte: Optional[float] = None
+    eq: Optional[Union[str, float]] = None
+    in_values: Optional[list[Union[str, float]]] = None
+
+    feather: Optional[float] = None
+    required: bool = True
+
+    @model_validator(mode="after")
+    def _validate_exactly_one_op(self) -> "ArchetypeCondition":
+        ops = [self.between, self.lte, self.gte, self.eq, self.in_values]
+        n_set = sum(1 for o in ops if o is not None)
+        if n_set != 1:
+            raise ValueError(
+                f"ArchetypeCondition '{self.condition_id}' must set exactly "
+                f"one of between/lte/gte/eq/in_values (got {n_set})"
+            )
+        if self.between is not None and len(self.between) != 2:
+            raise ValueError(
+                f"ArchetypeCondition '{self.condition_id}' between must have "
+                f"exactly 2 elements (got {len(self.between)})"
+            )
+        return self
+
+
+class ArchetypeDefinition(OSSBaseModel):
+    """A named home-run archetype defined as an AND of conditions.
+
+    Fit for a given trade is the MIN of all condition fit scores (weakest
+    link gates). Matched when fit ≥ ``min_fit_to_match``.
+    """
+
+    archetype_id: str
+    display_name: str
+    description: str
+    conditions: list[ArchetypeCondition]
+
+    historical_n: int
+    historical_hr200_rate: float
+    historical_win_rate: float
+    historical_mean_pnl_pct: float
+
+    min_fit_to_match: float = 75.0
+    match_score_multiplier: float = 1.0
+
+
+class ArchetypeConfig(OSSBaseModel):
+    """Collection of archetype definitions. The best-matching (highest fit)
+    archetype becomes the trade's archetype_match.
+    """
+
+    archetypes: list[ArchetypeDefinition]
+
+
+class AntiArchetypeDefinition(OSSBaseModel):
+    """A named losing pattern that REJECTS a trade when all conditions hold.
+
+    Binary: either all conditions match (REJECT) or not (trade proceeds).
+    Feather values on conditions are ignored — strict-match only.
+    """
+
+    anti_archetype_id: str
+    display_name: str
+    description: str
+    conditions: list[ArchetypeCondition]
+
+    historical_n: int
+    historical_win_rate: float
+    historical_mean_pnl_pct: float
+
+    rejection_reason: str
+    enabled: bool = True
+
+
+class AntiArchetypeConfig(OSSBaseModel):
+    anti_archetypes: list[AntiArchetypeDefinition]
 
 
 class PillarConfigV2(OSSBaseModel):
@@ -1365,6 +1475,9 @@ class PolicyConfig(OSSBaseModel):
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     thesis: ThesisConfig = Field(default_factory=ThesisConfig)  # Phase 10: LLM Integration
+    # v4.1.0: archetype matcher + anti-archetype gates. None = disabled.
+    archetypes: Optional[ArchetypeConfig] = None
+    anti_archetypes: Optional[AntiArchetypeConfig] = None
 
 
 class PolicyChangelog(OSSBaseModel):
@@ -2042,6 +2155,12 @@ class EvaluationSnapshot(OSSBaseModel):
     supporting_reason_codes: list[str]
     failed_gates: list[str]
     concentration_warnings: list[str] = Field(default_factory=list)
+
+    # v4.1.0: archetype matching snapshot
+    archetype_matched: Optional[str] = None
+    archetype_match_score: Optional[float] = None
+    archetype_all_fits: Optional[dict[str, float]] = None
+    anti_archetype_triggered: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

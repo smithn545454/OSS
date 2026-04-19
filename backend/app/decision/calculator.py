@@ -63,6 +63,13 @@ class DecisionContext:
     # Scanner source for per-scanner weight lookup
     scanner_source: Optional[str] = None
 
+    # v4.1.0: pre-computed archetype matcher output (orchestrator populates
+    # these when PolicyConfig.archetypes/anti_archetypes is configured).
+    archetype_matched: Optional[str] = None
+    archetype_match_score: Optional[float] = None
+    archetype_all_fits: Optional[dict[str, float]] = None
+    anti_archetype_triggered: Optional[str] = None
+
     def is_v4(self) -> bool:
         """True when all three v4 pillar scores are populated."""
         return (
@@ -402,6 +409,10 @@ class DecisionCalculator:
             concentration_warnings=concentration_warnings or [],
             policy_version=ctx.policy_version,
             decided_at=datetime.now(timezone.utc).isoformat(),
+            archetype_matched=ctx.archetype_matched,
+            archetype_match_score=_round_opt(ctx.archetype_match_score),
+            archetype_all_fits=ctx.archetype_all_fits,
+            anti_archetype_triggered=ctx.anti_archetype_triggered,
         )
 
     def compute_decision_from_evaluation(
