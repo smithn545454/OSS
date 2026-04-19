@@ -365,6 +365,13 @@ class DecisionCalculator:
             ctx.all_gates_passed,
         )
 
+        # v4.1.0: anti-archetype short-circuit. When an anti-archetype has
+        # fired (populated upstream by the orchestrator), force REJECT
+        # regardless of score or gate status.
+        if ctx.anti_archetype_triggered:
+            verdict = Verdict.REJECT
+            primary_reason = f"ANTI_ARCHETYPE_{ctx.anti_archetype_triggered}"
+
         quality_tier = None
         if verdict == Verdict.APPROVE:
             if ctx.is_v4():
