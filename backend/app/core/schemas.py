@@ -461,6 +461,28 @@ class Decision(OSSBaseModel):
     archetype_all_fits: Optional[dict[str, float]] = None
     anti_archetype_triggered: Optional[str] = None
 
+    # v5.0.0: dual-conviction scoring. All optional — None on pre-v5 records.
+    # HR conviction (0–20 scale): P(MFE ≥ 200%) × fit × regime × 100.
+    hr_conviction: Optional[float] = None
+    hr_archetype_matched: Optional[str] = None
+    hr_archetype_fit: Optional[float] = None
+    hr_p_point: Optional[float] = None        # Point HR200 estimate, [0, 1]
+    hr_p_lower: Optional[float] = None        # Wilson lower bound
+    hr_p_upper: Optional[float] = None        # Wilson upper bound
+    hr_n_trades: Optional[int] = None         # Effective sample size for HR rate
+    # P conviction (0–100 scale): Wilson_lower(P_win) × normalized_pnl × fit × regime.
+    p_conviction: Optional[float] = None
+    p_archetype_matched: Optional[str] = None
+    p_archetype_fit: Optional[float] = None
+    p_win_point: Optional[float] = None       # Point win-rate estimate, [0, 1]
+    p_win_lower: Optional[float] = None       # Wilson lower bound on win rate
+    p_mean_pnl_estimate: Optional[float] = None  # % (as observed in cohort)
+    # Shared
+    regime_alignment: Optional[float] = None  # Multiplier in [0.5, 1.5]
+    gbm_hr_score: Optional[float] = None      # GBM P(HR200) × 100, 0–100
+    gbm_p_score: Optional[float] = None       # GBM P(profit) × 100, 0–100
+    v5_scoring_version: Optional[str] = None  # "v5.0.0" when v5 was the writer
+
     def is_v4(self) -> bool:
         """Return True if this decision carries the v4 pillar trio."""
         return (
@@ -589,6 +611,26 @@ class PaperPosition(OSSBaseModel):
     archetype_match_score: Optional[float] = None
     archetype_all_fits: Optional[dict[str, float]] = None
     anti_archetype_triggered: Optional[str] = None
+
+    # v5.0.0: dual-conviction (denormalized from Decision at creation).
+    # All optional — None on pre-v5 positions.
+    hr_conviction: Optional[float] = None
+    hr_archetype_matched: Optional[str] = None
+    hr_archetype_fit: Optional[float] = None
+    hr_p_point: Optional[float] = None
+    hr_p_lower: Optional[float] = None
+    hr_p_upper: Optional[float] = None
+    hr_n_trades: Optional[int] = None
+    p_conviction: Optional[float] = None
+    p_archetype_matched: Optional[str] = None
+    p_archetype_fit: Optional[float] = None
+    p_win_point: Optional[float] = None
+    p_win_lower: Optional[float] = None
+    p_mean_pnl_estimate: Optional[float] = None
+    regime_alignment: Optional[float] = None
+    gbm_hr_score: Optional[float] = None
+    gbm_p_score: Optional[float] = None
+    v5_scoring_version: Optional[str] = None
 
     # Scoring-version tracking. "v4.0" for positions opened under v4.0 policy,
     # "v4.1.0" after the archetype-aware rescore. Older v3 positions leave
@@ -1068,6 +1110,31 @@ class AntiArchetypeConfig(OSSBaseModel):
     anti_archetypes: list[AntiArchetypeDefinition]
 
 
+class V5CalibrationConfig(OSSBaseModel):
+    """Calibration parameters for v5 dual-conviction scoring.
+
+    Controls how archetype rates are estimated from closed paper positions
+    (rolling window, EWMA half-life, Wilson confidence) and how the regime
+    alignment multiplier is computed from market state.
+
+    All fields tunable via Policy without code changes.
+    """
+
+    # Rolling window for per-archetype rate estimation
+    rolling_window_n: int = 500           # Effective sample size cap
+    ewma_half_life_n: int = 250           # Half-life in trade count
+    wilson_confidence: float = 0.95        # Wilson CI confidence level
+
+    # Regime alignment
+    regime_window_days: int = 20           # SPY return lookback
+    regime_multiplier_min: float = 0.5     # Lower clamp on regime multiplier
+    regime_multiplier_max: float = 1.5     # Upper clamp on regime multiplier
+
+    # P-conviction normalization
+    pnl_normalize_floor_pct: float = -50.0  # mean P&L floor for 0× multiplier
+    pnl_normalize_ceiling_pct: float = 50.0  # mean P&L ceiling for 2× multiplier
+
+
 class PillarConfigV2(OSSBaseModel):
     """A single pillar's configuration (Policy v3.0.0).
 
@@ -1495,6 +1562,19 @@ class PolicyConfig(OSSBaseModel):
     # v4.1.0: archetype matcher + anti-archetype gates. None = disabled.
     archetypes: Optional[ArchetypeConfig] = None
     anti_archetypes: Optional[AntiArchetypeConfig] = None
+
+    # v5.0.0: dual-conviction scoring. All optional for backwards compat —
+    # when v5_active is False the decision pipeline behaves exactly as v4.1.0.
+    v5_active: bool = False                                # Master kill switch for v5 verdict path
+    v5_active_scanners: list[str] = Field(default_factory=list)  # Scanners where v5 drives the verdict
+    v5_calibration: Optional[V5CalibrationConfig] = None
+    v5_hr_archetypes: Optional[ArchetypeConfig] = None     # HR-target archetype library
+    v5_p_archetypes: Optional[ArchetypeConfig] = None      # Profitability-target archetype library
+    v5_hr_threshold: float = 7.0                           # APPROVE floor for hr_conviction
+    v5_p_threshold: float = 50.0                           # APPROVE floor for p_conviction
+    v5_gbm_enabled: bool = False                           # GBM co-scorer kill switch
+    v5_gbm_hr_weight: float = 0.5                          # Cap on GBM HR contribution
+    v5_gbm_p_weight: float = 0.7                           # Cap on GBM P contribution
 
 
 class PolicyChangelog(OSSBaseModel):
@@ -2178,6 +2258,26 @@ class EvaluationSnapshot(OSSBaseModel):
     archetype_match_score: Optional[float] = None
     archetype_all_fits: Optional[dict[str, float]] = None
     anti_archetype_triggered: Optional[str] = None
+
+    # v5.0.0: dual-conviction snapshot (denormalized from Decision).
+    # All optional — None on pre-v5 evaluations.
+    hr_conviction: Optional[float] = None
+    hr_archetype_matched: Optional[str] = None
+    hr_archetype_fit: Optional[float] = None
+    hr_p_point: Optional[float] = None
+    hr_p_lower: Optional[float] = None
+    hr_p_upper: Optional[float] = None
+    hr_n_trades: Optional[int] = None
+    p_conviction: Optional[float] = None
+    p_archetype_matched: Optional[str] = None
+    p_archetype_fit: Optional[float] = None
+    p_win_point: Optional[float] = None
+    p_win_lower: Optional[float] = None
+    p_mean_pnl_estimate: Optional[float] = None
+    regime_alignment: Optional[float] = None
+    gbm_hr_score: Optional[float] = None
+    gbm_p_score: Optional[float] = None
+    v5_scoring_version: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
