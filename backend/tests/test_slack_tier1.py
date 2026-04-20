@@ -1,8 +1,12 @@
-"""Tests for Tier 1 fast-path Slack alerts.
+"""Tests for the v5 dual-conviction Slack alert service.
 
-Verifies that Tier 1 opportunities bypass soft filters (score threshold,
-urgency/convergence, quiet hours) while still respecting hard checks
-(enabled, webhooks, daily cap, cooldown).
+Covers:
+- Hard checks (enabled / webhooks / verdict / daily cap / cooldown)
+- Tier 1 (Sharpshooter) fast-path bypass
+- HR vs P conviction gating
+- require_hr_archetype (sharpshooter-only mode)
+- min_archetype_fit, min_regime_alignment
+- infer_verdict_driver
 """
 
 from __future__ import annotations
@@ -20,59 +24,82 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
 os.environ.setdefault("POLYGON_API_KEY", "fake-test-key")
 
-from app.services.slack import SlackAlertService
+from app.services.slack import (  # noqa: E402
+    SlackAlertService,
+    V5_HR_FLOOR,
+    V5_P_FLOOR,
+    infer_verdict_driver,
+)
 
 
 def _make_config(**overrides):
-    """Build a test alert config with sensible defaults."""
+    """Build a v5 test alert config with sensible defaults."""
     base = {
         "enabled": True,
-        "score_threshold": 75,
-        "require_urgency_or_convergence": True,
+        "hr_conviction_min": 10.0,
+        "p_conviction_min": 70.0,
+        "require_hr_archetype": False,
+        "min_archetype_fit": 60.0,
+        "min_regime_alignment": 0.0,
+        "max_premium": None,
+        "tier_1_bypass": True,
         "cooldown_minutes": 30,
         "daily_cap": 10,
         "quiet_hours_start": "22:00",
         "quiet_hours_end": "08:00",
-        "webhook_channels": [{"channel_name": "#test", "url": "https://hooks.slack.com/test"}],
-        "setup_rule_filter_ids": [],
+        "webhook_channels": [
+            {"channel_name": "#test", "url": "https://hooks.slack.com/test"}
+        ],
         "verdicts": ["APPROVE"],
-        "max_premium": None,
-        "cheap_gem_enabled": False,
-        "cheap_gem_threshold": 60,
-        "cheap_gem_max_premium": 1.50,
-        "tier_1_bypass": True,
     }
     base.update(overrides)
     return base
 
 
 def _make_service(config=None):
-    """Create a SlackAlertService with pre-loaded config."""
     svc = SlackAlertService()
     svc.configure(config or _make_config())
     return svc
 
 
+# Sensible baseline v5 decision — clears HR track cleanly (above both
+# user's default 10.0 min AND system 7.0 APPROVE floor).
+_HR_PASS_KW = dict(
+    hr_conviction=12.0,
+    p_conviction=40.0,
+    hr_archetype_matched="HR_MOMENTUM",
+    hr_archetype_fit=85.0,
+    p_archetype_fit=30.0,
+    regime_alignment=1.1,
+)
+
+# Sensible baseline v5 decision — clears P track cleanly.
+_P_PASS_KW = dict(
+    hr_conviction=3.0,
+    p_conviction=80.0,
+    hr_archetype_matched=None,
+    hr_archetype_fit=0.0,
+    p_archetype_fit=88.0,
+    regime_alignment=1.05,
+)
+
+
+# ============================================================================
+# Tier 1 fast path
+# ============================================================================
+
+
 class TestTier1FastPath:
-    """Tier 1 bypasses soft filters but respects hard checks."""
+    """TIER_1 (Sharpshooter) bypasses soft filters."""
 
     @pytest.mark.asyncio
-    async def test_tier1_bypasses_score_threshold(self):
-        svc = _make_service(_make_config(score_threshold=90))
-        # Score 60 would normally fail the 90 threshold
+    async def test_tier1_bypasses_conviction_thresholds(self):
+        svc = _make_service(_make_config(hr_conviction_min=19, p_conviction_min=99))
+        # Neither track would normally clear these absurd thresholds
         result, reason = await svc.should_alert(
-            conviction_score=60, urgency="patient", convergence=1,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
-        )
-        assert result is True
-        assert reason == "tier_1"
-
-    @pytest.mark.asyncio
-    async def test_tier1_bypasses_urgency_convergence(self):
-        svc = _make_service(_make_config(require_urgency_or_convergence=True))
-        # Single scanner + patient urgency would normally fail
-        result, reason = await svc.should_alert(
-            conviction_score=90, urgency="patient", convergence=1,
+            hr_conviction=1.0, p_conviction=1.0,
+            hr_archetype_matched=None, hr_archetype_fit=0.0,
+            p_archetype_fit=0.0, regime_alignment=1.0,
             contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is True
@@ -83,9 +110,25 @@ class TestTier1FastPath:
         svc = _make_service()
         with patch.object(svc, "_is_within_quiet_hours", return_value=True):
             result, reason = await svc.should_alert(
-                conviction_score=90, urgency="patient", convergence=1,
+                hr_conviction=15.0, p_conviction=60.0,
+                hr_archetype_matched="HR_X", hr_archetype_fit=90.0,
+                p_archetype_fit=0.0, regime_alignment=1.0,
                 contract_id="AAPL-C-200", quality_tier="TIER_1",
             )
+        assert result is True
+        assert reason == "tier_1"
+
+    @pytest.mark.asyncio
+    async def test_tier1_bypasses_archetype_requirement(self):
+        """Sharpshooter-only mode is ignored for TIER_1 (it's already a sharpshooter)."""
+        svc = _make_service(_make_config(require_hr_archetype=True))
+        result, reason = await svc.should_alert(
+            hr_conviction=15.0, p_conviction=60.0,
+            hr_archetype_matched=None,  # no HR archetype — but TIER_1
+            hr_archetype_fit=0.0, p_archetype_fit=80.0,
+            regime_alignment=1.0,
+            contract_id="AAPL-C-200", quality_tier="TIER_1",
+        )
         assert result is True
         assert reason == "tier_1"
 
@@ -93,8 +136,7 @@ class TestTier1FastPath:
     async def test_tier1_respects_enabled_false(self):
         svc = _make_service(_make_config(enabled=False))
         result, reason = await svc.should_alert(
-            conviction_score=90, urgency="act_now", convergence=3,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
+            **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is False
         assert reason == "Alerts disabled"
@@ -104,8 +146,7 @@ class TestTier1FastPath:
         svc = _make_service(_make_config(webhook_channels=[]))
         svc._legacy_webhook_url = None
         result, reason = await svc.should_alert(
-            conviction_score=90, urgency="act_now", convergence=3,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
+            **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is False
         assert reason == "No webhook URLs configured"
@@ -116,8 +157,7 @@ class TestTier1FastPath:
         svc._daily_count = 5
         svc._last_reset_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         result, reason = await svc.should_alert(
-            conviction_score=90, urgency="act_now", convergence=3,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
+            **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is False
         assert "Daily alert cap" in reason
@@ -127,183 +167,215 @@ class TestTier1FastPath:
         svc = _make_service(_make_config(cooldown_minutes=30))
         svc._alert_timestamps["AAPL-C-200"] = datetime.now(timezone.utc)
         result, reason = await svc.should_alert(
-            conviction_score=90, urgency="act_now", convergence=3,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
+            **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is False
         assert "cooldown" in reason
 
     @pytest.mark.asyncio
     async def test_tier1_bypass_disabled_via_config(self):
+        """tier_1_bypass=False → TIER_1 gets the normal soft-filter treatment."""
         svc = _make_service(_make_config(
-            tier_1_bypass=False,
-            score_threshold=90,
-            require_urgency_or_convergence=True,
+            tier_1_bypass=False, hr_conviction_min=15, p_conviction_min=90,
         ))
-        # Without bypass, score 60 + patient/1 convergence → fails
         result, reason = await svc.should_alert(
-            conviction_score=60, urgency="patient", convergence=1,
+            hr_conviction=5.0, p_conviction=20.0,
+            hr_archetype_matched=None, hr_archetype_fit=0.0,
+            p_archetype_fit=0.0, regime_alignment=1.0,
             contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
         assert result is False
-        assert "Score" in reason
+        assert "Neither track passed" in reason
 
 
-class TestNonTier1Unchanged:
-    """Non-Tier-1 evaluations behave exactly as before."""
+# ============================================================================
+# HR / P conviction gating (non-Tier-1)
+# ============================================================================
 
-    @pytest.mark.asyncio
-    async def test_tier2_does_not_bypass(self):
-        svc = _make_service(_make_config(score_threshold=90))
-        result, reason = await svc.should_alert(
-            conviction_score=60, urgency="patient", convergence=1,
-            contract_id="AAPL-C-200", quality_tier="TIER_2",
-        )
-        assert result is False
-        assert "Score" in reason
+
+class TestConvictionGating:
+    """Soft-filter behavior under v5 dual-conviction."""
 
     @pytest.mark.asyncio
-    async def test_none_tier_does_not_bypass(self):
-        svc = _make_service(_make_config(score_threshold=90))
+    async def test_hr_track_passes_alone(self):
+        svc = _make_service(_make_config(hr_conviction_min=10, p_conviction_min=99))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "HR"
+
+    @pytest.mark.asyncio
+    async def test_p_track_passes_alone(self):
+        svc = _make_service(_make_config(hr_conviction_min=19, p_conviction_min=70))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_P_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "P"
+
+    @pytest.mark.asyncio
+    async def test_both_tracks_fail_when_below_mins(self):
+        svc = _make_service(_make_config(hr_conviction_min=15, p_conviction_min=85))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=8.0, p_conviction=55.0,
+                hr_archetype_matched="HR_X", hr_archetype_fit=90.0,
+                p_archetype_fit=90.0, regime_alignment=1.0,
+                contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "Neither track passed" in reason
+
+    @pytest.mark.asyncio
+    async def test_conviction_passes_but_fit_too_low(self):
+        """High HR conviction but weak archetype fit is rejected."""
+        svc = _make_service(_make_config(
+            hr_conviction_min=10, min_archetype_fit=75,
+        ))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=14.0, p_conviction=20.0,
+                hr_archetype_matched="HR_X", hr_archetype_fit=50.0,  # < 75
+                p_archetype_fit=30.0, regime_alignment=1.0,
+                contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "Neither track passed" in reason
+
+    @pytest.mark.asyncio
+    async def test_require_hr_archetype_blocks_p_only(self):
+        """Sharpshooter-only mode filters out pure-P trades."""
+        svc = _make_service(_make_config(require_hr_archetype=True))
         result, reason = await svc.should_alert(
-            conviction_score=60, urgency="patient", convergence=1,
-            contract_id="AAPL-C-200",
+            **_P_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
         )
         assert result is False
-        assert "Score" in reason
+        assert "sharpshooter-only" in reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_require_hr_archetype_allows_hr_trade(self):
+        svc = _make_service(_make_config(require_hr_archetype=True))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "HR"
+
+    @pytest.mark.asyncio
+    async def test_regime_headwind_filter(self):
+        svc = _make_service(_make_config(min_regime_alignment=1.0))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=12.0, p_conviction=80.0,
+                hr_archetype_matched="HR_X", hr_archetype_fit=90.0,
+                p_archetype_fit=90.0, regime_alignment=0.85,  # headwind
+                contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "Regime alignment" in reason
+
+    @pytest.mark.asyncio
+    async def test_regime_filter_off_by_default(self):
+        """min_regime_alignment=0 accepts any regime, including 0.5× headwind."""
+        svc = _make_service()  # default min_regime_alignment=0
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **{**_HR_PASS_KW, "regime_alignment": 0.5},
+                contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "HR"
+
+    @pytest.mark.asyncio
+    async def test_max_premium_blocks_expensive_contract(self):
+        svc = _make_service(_make_config(max_premium=5.0))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW, contract_id="AAPL-C-200",
+                quality_tier="TIER_2", premium=10.0,
+            )
+        assert result is False
+        assert "above max" in reason
 
     @pytest.mark.asyncio
     async def test_non_tier1_blocked_by_quiet_hours(self):
         svc = _make_service()
         with patch.object(svc, "_is_within_quiet_hours", return_value=True):
             result, reason = await svc.should_alert(
-                conviction_score=80, urgency="act_now", convergence=2,
-                contract_id="AAPL-C-200", quality_tier="TIER_2",
+                **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
             )
         assert result is False
         assert reason == "Within quiet hours"
 
-    @pytest.mark.asyncio
-    async def test_normal_approve_passes_all_checks(self):
-        svc = _make_service(_make_config(
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=80, urgency="patient", convergence=1,
-                contract_id="AAPL-C-200",
-            )
-        assert result is True
-        assert reason is None
+
+# ============================================================================
+# infer_verdict_driver
+# ============================================================================
 
 
-class TestPerScannerThresholds:
-    """Tests for per-scanner threshold overrides and excluded scanners."""
+class TestInferVerdictDriver:
+    """HR vs P driver attribution mirrors the thesis generator."""
 
-    @pytest.mark.asyncio
-    async def test_per_scanner_threshold_overrides_global(self):
-        """BREAKOUT at 72 passes when per_scanner has BREAKOUT:70, global is 75."""
-        svc = _make_service(_make_config(
-            score_threshold=75,
-            per_scanner_thresholds={"BREAKOUT": 70},
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=72, urgency="patient", convergence=1,
-                contract_id="AAPL-C-200", scanners=["BREAKOUT"],
-            )
-        assert result is True
+    def test_hr_only_cleared(self):
+        assert infer_verdict_driver(10.0, 20.0) == "HR"
 
-    @pytest.mark.asyncio
-    async def test_per_scanner_threshold_falls_back_to_global(self):
-        """UV at 72 fails when only BREAKOUT has override, global is 75."""
-        svc = _make_service(_make_config(
-            score_threshold=75,
-            per_scanner_thresholds={"BREAKOUT": 70},
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=72, urgency="patient", convergence=1,
-                contract_id="AAPL-C-200", scanners=["UNUSUAL_VOLUME"],
-            )
-        assert result is False
-        assert "Score" in reason
+    def test_p_only_cleared(self):
+        assert infer_verdict_driver(3.0, 80.0) == "P"
 
-    @pytest.mark.asyncio
-    async def test_excluded_scanner_blocked(self):
-        """COMPRESSION_EXPANSION blocked when in excluded_scanners."""
-        svc = _make_service(_make_config(
-            score_threshold=50,
-            excluded_scanners=["COMPRESSION_EXPANSION"],
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=90, urgency="act_now", convergence=3,
-                contract_id="AAPL-C-200", scanners=["COMPRESSION_EXPANSION"],
-            )
-        assert result is False
-        assert "excluded" in reason
+    def test_both_cleared_hr_margin_larger(self):
+        # hr=14 vs floor 7 → 100% margin; p=55 vs floor 50 → 10% margin
+        assert infer_verdict_driver(14.0, 55.0) == "HR"
 
-    @pytest.mark.asyncio
-    async def test_multi_scanner_uses_lowest_threshold(self):
-        """Convergent BREAKOUT+UV uses BREAKOUT's lower threshold."""
-        svc = _make_service(_make_config(
-            score_threshold=80,
-            per_scanner_thresholds={"BREAKOUT": 65, "UNUSUAL_VOLUME": 75},
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=68, urgency="patient", convergence=2,
-                contract_id="AAPL-C-200", scanners=["BREAKOUT", "UNUSUAL_VOLUME"],
-            )
-        assert result is True
+    def test_both_cleared_p_margin_larger(self):
+        # hr=7.5 vs floor 7 → 7% margin; p=95 vs floor 50 → 90% margin
+        assert infer_verdict_driver(7.5, 95.0) == "P"
 
-    @pytest.mark.asyncio
-    async def test_excluded_scanner_not_blocked_when_other_scanner_present(self):
-        """Convergent BREAKOUT+COMP passes when only COMP is excluded."""
-        svc = _make_service(_make_config(
-            score_threshold=70,
-            excluded_scanners=["COMPRESSION_EXPANSION"],
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=75, urgency="patient", convergence=2,
-                contract_id="AAPL-C-200", scanners=["BREAKOUT", "COMPRESSION_EXPANSION"],
-            )
-        assert result is True
+    def test_both_cleared_equal_margin_defaults_hr(self):
+        # Equal margins → HR wins the tiebreak (sharpshooter-biased).
+        hr = V5_HR_FLOOR * 1.5
+        p = V5_P_FLOOR * 1.5
+        assert infer_verdict_driver(hr, p) == "HR"
 
-    @pytest.mark.asyncio
-    async def test_tier1_still_bypasses_with_per_scanner(self):
-        """Tier 1 bypass still works even when per-scanner thresholds are set."""
-        svc = _make_service(_make_config(
-            score_threshold=90,
-            per_scanner_thresholds={"BREAKOUT": 80},
-        ))
-        result, reason = await svc.should_alert(
-            conviction_score=60, urgency="patient", convergence=1,
-            contract_id="AAPL-C-200", quality_tier="TIER_1",
-            scanners=["BREAKOUT"],
-        )
-        assert result is True
-        assert reason == "tier_1"
+    def test_neither_cleared(self):
+        assert infer_verdict_driver(3.0, 20.0) is None
 
-    @pytest.mark.asyncio
-    async def test_no_scanners_uses_global_threshold(self):
-        """When scanners is None, global threshold applies."""
-        svc = _make_service(_make_config(
-            score_threshold=75,
-            per_scanner_thresholds={"BREAKOUT": 60},
-            require_urgency_or_convergence=False,
-        ))
-        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
-            result, reason = await svc.should_alert(
-                conviction_score=72, urgency="patient", convergence=1,
-                contract_id="AAPL-C-200", scanners=None,
-            )
-        assert result is False
-        assert "Score" in reason
+    def test_handles_none_values(self):
+        assert infer_verdict_driver(None, None) is None
+        assert infer_verdict_driver(None, 80.0) == "P"
+        assert infer_verdict_driver(15.0, None) == "HR"
+
+
+# ============================================================================
+# Legacy config keys are stripped
+# ============================================================================
+
+
+class TestConfigMigration:
+    """Legacy v3/v4 config keys must not leak into the v5 service."""
+
+    def test_configure_strips_legacy_keys(self):
+        svc = SlackAlertService()
+        svc.configure({
+            "enabled": True,
+            "hr_conviction_min": 12.0,
+            # Retired keys — should be ignored silently:
+            "score_threshold": 75,
+            "require_urgency_or_convergence": True,
+            "cheap_gem_enabled": True,
+            "per_scanner_thresholds": {"BREAKOUT": 60},
+            "excluded_scanners": ["CHEAP_OPTIONS"],
+            "setup_rule_filter_ids": ["rule-1"],
+        })
+        assert svc._config is not None
+        assert "score_threshold" not in svc._config
+        assert "cheap_gem_enabled" not in svc._config
+        assert "per_scanner_thresholds" not in svc._config
+        assert "excluded_scanners" not in svc._config
+        assert "setup_rule_filter_ids" not in svc._config
+        assert "require_urgency_or_convergence" not in svc._config
+        # v5 keys carried through
+        assert svc._config["hr_conviction_min"] == 12.0

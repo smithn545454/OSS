@@ -9,7 +9,7 @@ import {
   Trash2,
   Plus,
   BarChart3,
-  Filter,
+  Target,
   Clock,
   History,
 } from 'lucide-react'
@@ -19,10 +19,14 @@ import {
   useAlertPreview,
   useAlertHistory,
   useTestAlert,
-  useSetupRules,
 } from '@/hooks/useApi'
-import type { AlertConfig, WebhookChannel, SetupRule } from '@/lib/types'
+import type { AlertConfig, WebhookChannel } from '@/lib/types'
 import clsx from 'clsx'
+
+// v5 scoring thresholds (mirrors app/services/slack.py constants).
+const V5_HR_FLOOR = 7.0
+const V5_HR_TIER1 = 14.0
+const V5_P_FLOOR = 50.0
 
 // ============================================================================
 // Section Component
@@ -63,10 +67,11 @@ function Section({
 }
 
 // ============================================================================
-// Score Threshold Slider
+// HR Conviction Slider — the grand-slam knob. Displays v5 floor + TIER_1
+// marks so the user knows where their threshold sits in system terms.
 // ============================================================================
 
-function ScoreSlider({
+function HrConvictionSlider({
   value,
   onChange,
 }: {
@@ -74,39 +79,181 @@ function ScoreSlider({
   onChange: (v: number) => void
 }) {
   const color =
-    value >= 85
+    value >= V5_HR_TIER1
       ? 'text-cyan-400'
-      : value >= 75
+      : value >= 10
         ? 'text-green-400'
-        : value >= 65
+        : value >= V5_HR_FLOOR
           ? 'text-yellow-400'
           : 'text-amber-400'
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-sm text-oss-muted">Minimum Conviction Score</span>
-        <span className={clsx('font-mono text-lg font-bold', color)}>{value}</span>
+        <div>
+          <div className="text-sm text-oss-text">
+            HR Conviction minimum <span className="text-oss-muted">(grand-slam track)</span>
+          </div>
+          <div className="text-xs text-oss-muted mt-0.5">
+            Wilson-lower P(MFE ≥ 200%) × fit × regime — hunt home runs.
+          </div>
+        </div>
+        <span className={clsx('font-mono text-lg font-bold', color)}>{value.toFixed(1)}</span>
       </div>
       <input
         type="range"
-        min={50}
-        max={95}
-        step={5}
+        min={0}
+        max={20}
+        step={0.5}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-oss-accent"
       />
       <div className="flex justify-between text-xs text-oss-muted">
-        <span>50 (more alerts)</span>
-        <span>95 (fewer alerts)</span>
+        <span>0 (any)</span>
+        <span className="text-yellow-400">{V5_HR_FLOOR.toFixed(1)} (APPROVE floor)</span>
+        <span className="text-cyan-400">{V5_HR_TIER1.toFixed(1)} (Sharpshooter)</span>
       </div>
     </div>
   )
 }
 
 // ============================================================================
-// Max Premium Slider
+// P Conviction Slider — the grinder track. Policy APPROVE floor is 50.0.
+// ============================================================================
+
+function PConvictionSlider({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  const color =
+    value >= 80
+      ? 'text-green-400'
+      : value >= 70
+        ? 'text-yellow-400'
+        : value >= V5_P_FLOOR
+          ? 'text-amber-400'
+          : 'text-oss-muted'
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-oss-text">
+            P Conviction minimum <span className="text-oss-muted">(grinder track)</span>
+          </div>
+          <div className="text-xs text-oss-muted mt-0.5">
+            Wilson-lower P(win) × normalized P&L × fit × regime — high base-rate edge.
+          </div>
+        </div>
+        <span className={clsx('font-mono text-lg font-bold', color)}>{value.toFixed(0)}</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-oss-accent"
+      />
+      <div className="flex justify-between text-xs text-oss-muted">
+        <span>0 (any)</span>
+        <span className="text-amber-400">{V5_P_FLOOR.toFixed(0)} (APPROVE floor)</span>
+        <span>100 (strict)</span>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Archetype-fit slider — weakest-link gate on pattern match.
+// ============================================================================
+
+function ArchetypeFitSlider({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-oss-text">Minimum archetype fit</div>
+          <div className="text-xs text-oss-muted mt-0.5">
+            Reject trades where the matched archetype's weakest condition scores below this.
+          </div>
+        </div>
+        <span className="font-mono text-lg font-bold text-oss-text">{value.toFixed(0)}</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-oss-accent"
+      />
+      <div className="flex justify-between text-xs text-oss-muted">
+        <span>0 (any match)</span>
+        <span>60 (solid fit)</span>
+        <span>100 (perfect)</span>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Regime Alignment Slider — optional tailwind filter.
+// ============================================================================
+
+function RegimeAlignmentSlider({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-oss-text">Minimum regime alignment</div>
+          <div className="text-xs text-oss-muted mt-0.5">
+            Regime multiplier is clamped to [0.5, 1.5]. 0 = accept any; 1.0 = neutral-or-better;
+            1.1 = only alert with clear tailwind.
+          </div>
+        </div>
+        <span className="font-mono text-lg font-bold text-oss-text">
+          {value === 0 ? 'Off' : `${value.toFixed(2)}×`}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={1.5}
+        step={0.05}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-oss-accent"
+      />
+      <div className="flex justify-between text-xs text-oss-muted">
+        <span>Off</span>
+        <span>1.0 (neutral)</span>
+        <span>1.5 (strong tailwind)</span>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Max Premium Slider (kept as optional convenience filter)
 // ============================================================================
 
 function PremiumSlider({
@@ -124,7 +271,7 @@ function PremiumSlider({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-sm text-oss-muted">Maximum Premium</span>
+          <span className="text-sm text-oss-text">Maximum option premium</span>
           <button
             onClick={() => onToggle(!enabled)}
             className={clsx(
@@ -140,7 +287,12 @@ function PremiumSlider({
             />
           </button>
         </div>
-        <span className={clsx('font-mono text-lg font-bold', enabled ? 'text-oss-text' : 'text-oss-muted')}>
+        <span
+          className={clsx(
+            'font-mono text-lg font-bold',
+            enabled ? 'text-oss-text' : 'text-oss-muted',
+          )}
+        >
           {enabled ? `$${value.toFixed(2)}` : 'Off'}
         </span>
       </div>
@@ -156,8 +308,8 @@ function PremiumSlider({
             className="w-full accent-oss-accent"
           />
           <div className="flex justify-between text-xs text-oss-muted">
-            <span>$0.50 (cheaper)</span>
-            <span>$30.00 (any price)</span>
+            <span>$0.50</span>
+            <span>$30.00</span>
           </div>
         </>
       )}
@@ -195,9 +347,7 @@ function VolumePreview() {
       </div>
 
       <div>
-        <div className="text-3xl font-bold text-oss-text">
-          ~{estimatedAlertsPerDay}
-        </div>
+        <div className="text-3xl font-bold text-oss-text">~{estimatedAlertsPerDay}</div>
         <div className="text-sm text-oss-muted">
           alerts per day (based on last {daysAnalyzed} days)
         </div>
@@ -205,27 +355,35 @@ function VolumePreview() {
 
       <div className="space-y-1.5 text-xs">
         <div className="flex justify-between text-oss-muted">
-          <span>Total evaluations scanned</span>
+          <span>Total APPROVE evaluations</span>
           <span className="font-mono">{breakdown.totalEvaluations}</span>
         </div>
+        {breakdown.tier1Bypassed > 0 && (
+          <div className="flex justify-between text-oss-muted">
+            <span>⭐ Tier 1 bypass</span>
+            <span className="font-mono text-cyan-400">{breakdown.tier1Bypassed}</span>
+          </div>
+        )}
+        {breakdown.missingHrArchetype > 0 && (
+          <div className="flex justify-between text-oss-muted">
+            <span>No HR archetype</span>
+            <span className="font-mono text-oss-reject">{breakdown.missingHrArchetype}</span>
+          </div>
+        )}
+        {breakdown.regimeHeadwind > 0 && (
+          <div className="flex justify-between text-oss-muted">
+            <span>Regime headwind</span>
+            <span className="font-mono text-oss-reject">{breakdown.regimeHeadwind}</span>
+          </div>
+        )}
         <div className="flex justify-between text-oss-muted">
-          <span>Below score threshold</span>
-          <span className="font-mono text-oss-reject">{breakdown.belowScoreThreshold}</span>
+          <span>Both tracks failed</span>
+          <span className="font-mono text-oss-reject">{breakdown.bothTracksFailed}</span>
         </div>
         {breakdown.aboveMaxPremium > 0 && (
           <div className="flex justify-between text-oss-muted">
             <span>Above max premium</span>
             <span className="font-mono text-oss-reject">{breakdown.aboveMaxPremium}</span>
-          </div>
-        )}
-        <div className="flex justify-between text-oss-muted">
-          <span>Failed urgency/convergence</span>
-          <span className="font-mono text-amber-400">{breakdown.failedUrgencyConvergence}</span>
-        </div>
-        {breakdown.noMatchingSetupRule > 0 && (
-          <div className="flex justify-between text-oss-muted">
-            <span>No matching setup rule</span>
-            <span className="font-mono text-amber-400">{breakdown.noMatchingSetupRule}</span>
           </div>
         )}
         <div className="flex justify-between text-oss-text font-medium border-t border-oss-border pt-1.5 mt-1.5">
@@ -331,67 +489,6 @@ function WebhookManager({
 }
 
 // ============================================================================
-// Setup Rule Filter
-// ============================================================================
-
-function SetupRuleFilter({
-  selectedIds,
-  onChange,
-}: {
-  selectedIds: string[]
-  onChange: (ids: string[]) => void
-}) {
-  const { data } = useSetupRules()
-  const rules: SetupRule[] = data ?? []
-  const activeRules = rules.filter((r) => r.is_active)
-
-  if (activeRules.length === 0) {
-    return (
-      <div className="text-sm text-oss-muted py-2">
-        No active setup rules. Create rules in the Paper Trading page to use this filter.
-      </div>
-    )
-  }
-
-  const toggle = (ruleId: string) => {
-    if (selectedIds.includes(ruleId)) {
-      onChange(selectedIds.filter((id) => id !== ruleId))
-    } else {
-      onChange([...selectedIds, ruleId])
-    }
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="text-xs text-oss-muted mb-2">
-        {selectedIds.length === 0
-          ? 'No filter — all opportunities are eligible for alerts'
-          : `Alerting only when evaluation matches one of ${selectedIds.length} selected rule(s)`}
-      </div>
-      {activeRules.map((rule) => (
-        <label
-          key={rule.rule_id}
-          className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-oss-bg cursor-pointer transition-colors"
-        >
-          <input
-            type="checkbox"
-            checked={selectedIds.includes(rule.rule_id)}
-            onChange={() => toggle(rule.rule_id)}
-            className="rounded border-oss-border text-oss-accent focus:ring-oss-accent"
-          />
-          <div className="flex-1">
-            <div className="text-sm text-oss-text">{rule.name}</div>
-            <div className="text-xs text-oss-muted">
-              {rule.mode === 'production' ? 'Production' : 'Test'} mode
-            </div>
-          </div>
-        </label>
-      ))}
-    </div>
-  )
-}
-
-// ============================================================================
 // Alert History Table
 // ============================================================================
 
@@ -415,34 +512,52 @@ function AlertHistoryTable() {
           <tr className="border-b border-oss-border text-left text-xs text-oss-muted">
             <th className="py-2 pr-3">Time</th>
             <th className="py-2 pr-3">Ticker</th>
-            <th className="py-2 pr-3">Score</th>
+            <th className="py-2 pr-3">Driver</th>
+            <th className="py-2 pr-3">HR</th>
+            <th className="py-2 pr-3">P</th>
             <th className="py-2 pr-3">Channel</th>
             <th className="py-2">Status</th>
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry, i) => (
-            <tr key={i} className="border-b border-oss-border/50">
-              <td className="py-2 pr-3 font-mono text-xs text-oss-muted">
-                {entry.timestamp?.slice(11, 19) || '—'}
-              </td>
-              <td className="py-2 pr-3 font-medium text-oss-text">{entry.ticker}</td>
-              <td className="py-2 pr-3 font-mono">{entry.conviction_score?.toFixed(0)}</td>
-              <td className="py-2 pr-3 text-oss-muted">{entry.channel}</td>
-              <td className="py-2">
-                <span
-                  className={clsx(
-                    'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                    entry.status === 'sent'
-                      ? 'bg-oss-approve/10 text-oss-approve'
-                      : 'bg-oss-reject/10 text-oss-reject',
-                  )}
-                >
-                  {entry.status}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {entries.map((entry, i) => {
+            const driverLabel =
+              entry.driver === 'tier_1'
+                ? '⭐'
+                : entry.driver === 'HR'
+                  ? '🎯 HR'
+                  : entry.driver === 'P'
+                    ? '💰 P'
+                    : '—'
+            return (
+              <tr key={i} className="border-b border-oss-border/50">
+                <td className="py-2 pr-3 font-mono text-xs text-oss-muted">
+                  {entry.timestamp?.slice(11, 19) || '—'}
+                </td>
+                <td className="py-2 pr-3 font-medium text-oss-text">{entry.ticker}</td>
+                <td className="py-2 pr-3 text-oss-text">{driverLabel}</td>
+                <td className="py-2 pr-3 font-mono text-oss-muted">
+                  {entry.hr_conviction != null ? entry.hr_conviction.toFixed(1) : '—'}
+                </td>
+                <td className="py-2 pr-3 font-mono text-oss-muted">
+                  {entry.p_conviction != null ? entry.p_conviction.toFixed(0) : '—'}
+                </td>
+                <td className="py-2 pr-3 text-oss-muted">{entry.channel}</td>
+                <td className="py-2">
+                  <span
+                    className={clsx(
+                      'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
+                      entry.status === 'sent'
+                        ? 'bg-oss-approve/10 text-oss-approve'
+                        : 'bg-oss-reject/10 text-oss-reject',
+                    )}
+                  >
+                    {entry.status}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -458,11 +573,9 @@ export default function AlertsConfig() {
   const { data: config, isLoading } = useAlertConfig()
   const updateConfig = useUpdateAlertConfig()
 
-  // Local draft state
   const [draft, setDraft] = useState<Partial<AlertConfig> | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // Initialize draft from loaded config
   useEffect(() => {
     if (config && !draft) {
       setDraft({ ...config })
@@ -509,13 +622,12 @@ export default function AlertsConfig() {
           <div>
             <h1 className="text-2xl font-bold text-oss-text">Slack Alerts</h1>
             <p className="text-sm text-oss-muted">
-              Get notified when high-conviction opportunities are found
+              Get notified on sharpshooter (⭐), HR-driven (🎯), or P-driven (💰) opportunities
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Enable/Disable toggle */}
           <label className="flex items-center gap-2 cursor-pointer">
             <span className="text-sm text-oss-muted">
               {draft.enabled ? 'Enabled' : 'Disabled'}
@@ -536,7 +648,6 @@ export default function AlertsConfig() {
             </button>
           </label>
 
-          {/* Save button */}
           {hasChanges && (
             <button
               onClick={handleSave}
@@ -560,46 +671,67 @@ export default function AlertsConfig() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Settings */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Alert Filters */}
-          <Section title="Alert Filters" icon={<Bell className="h-4 w-4" />}>
+          {/* Conviction gates */}
+          <Section title="Conviction Gates" icon={<Target className="h-4 w-4" />}>
             <div className="space-y-6">
-              <ScoreSlider
-                value={draft.score_threshold ?? 75}
-                onChange={(v) => updateDraft('score_threshold', v)}
+              <HrConvictionSlider
+                value={draft.hr_conviction_min ?? 10}
+                onChange={(v) => updateDraft('hr_conviction_min', v)}
+              />
+              <PConvictionSlider
+                value={draft.p_conviction_min ?? 70}
+                onChange={(v) => updateDraft('p_conviction_min', v)}
+              />
+              <ArchetypeFitSlider
+                value={draft.min_archetype_fit ?? 60}
+                onChange={(v) => updateDraft('min_archetype_fit', v)}
               />
 
-              <PremiumSlider
-                value={draft.max_premium ?? 10}
-                enabled={draft.max_premium != null}
-                onChangeValue={(v) => updateDraft('max_premium', v)}
-                onToggle={(on) => updateDraft('max_premium', on ? (draft.max_premium ?? 10) : null)}
-              />
-
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 border-t border-oss-border/50 pt-4">
                 <div>
                   <div className="text-sm text-oss-text">
-                    Require urgency or scanner convergence
+                    Sharpshooter-only mode
                   </div>
                   <div className="text-xs text-oss-muted mt-0.5">
-                    Only alert if urgency is Act Now OR 2+ scanners fired
+                    Require an HR archetype match — filters out pure P-driven grinders.
                   </div>
                 </div>
                 <button
                   onClick={() =>
-                    updateDraft(
-                      'require_urgency_or_convergence',
-                      !draft.require_urgency_or_convergence,
-                    )
+                    updateDraft('require_hr_archetype', !draft.require_hr_archetype)
                   }
                   className={clsx(
                     'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                    draft.require_urgency_or_convergence ? 'bg-oss-accent' : 'bg-oss-border',
+                    draft.require_hr_archetype ? 'bg-oss-accent' : 'bg-oss-border',
                   )}
                 >
                   <span
                     className={clsx(
                       'inline-block h-4 w-4 rounded-full bg-white transition-transform',
-                      draft.require_urgency_or_convergence ? 'translate-x-6' : 'translate-x-1',
+                      draft.require_hr_archetype ? 'translate-x-6' : 'translate-x-1',
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <div className="text-sm text-oss-text">Tier 1 (Sharpshooter) bypass</div>
+                  <div className="text-xs text-oss-muted mt-0.5">
+                    Always alert on TIER_1 regardless of above thresholds.
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateDraft('tier_1_bypass', !draft.tier_1_bypass)}
+                  className={clsx(
+                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                    draft.tier_1_bypass ? 'bg-oss-accent' : 'bg-oss-border',
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                      draft.tier_1_bypass ? 'translate-x-6' : 'translate-x-1',
                     )}
                   />
                 </button>
@@ -607,90 +739,25 @@ export default function AlertsConfig() {
             </div>
           </Section>
 
-          {/* Cheap Gem Alerts */}
-          <Section title="Cheap Gem Alerts" icon={<span className="text-base">💎</span>} defaultOpen={false}>
-            <div className="space-y-4">
-              <div className="text-xs text-oss-muted">
-                Alert on cheap premium options with strong setups, even if they don't
-                meet the main conviction threshold. These fleeting opportunities often
-                have the best return-on-capital.
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <div className="text-sm text-oss-text">Enable cheap gem alerts</div>
-                  <div className="text-xs text-oss-muted mt-0.5">
-                    Lower conviction bar for cheap options
-                  </div>
-                </div>
-                <button
-                  onClick={() =>
-                    updateDraft('cheap_gem_enabled', !draft.cheap_gem_enabled)
-                  }
-                  className={clsx(
-                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                    draft.cheap_gem_enabled ? 'bg-oss-accent' : 'bg-oss-border',
-                  )}
-                >
-                  <span
-                    className={clsx(
-                      'inline-block h-4 w-4 rounded-full bg-white transition-transform',
-                      draft.cheap_gem_enabled ? 'translate-x-6' : 'translate-x-1',
-                    )}
-                  />
-                </button>
-              </div>
-
-              {draft.cheap_gem_enabled && (
-                <>
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-oss-muted">Conviction threshold</span>
-                      <span className="text-sm font-mono text-oss-text">
-                        {draft.cheap_gem_threshold ?? 60}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={40}
-                      max={75}
-                      value={draft.cheap_gem_threshold ?? 60}
-                      onChange={(e) =>
-                        updateDraft('cheap_gem_threshold', Number(e.target.value))
-                      }
-                      className="w-full accent-oss-accent"
-                    />
-                    <div className="flex justify-between text-xs text-oss-muted mt-1">
-                      <span>40 (permissive)</span>
-                      <span>75 (strict)</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-oss-muted">Max premium</span>
-                      <span className="text-sm font-mono text-oss-text">
-                        ${(draft.cheap_gem_max_premium ?? 1.50).toFixed(2)}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={25}
-                      max={500}
-                      step={25}
-                      value={(draft.cheap_gem_max_premium ?? 1.50) * 100}
-                      onChange={(e) =>
-                        updateDraft('cheap_gem_max_premium', Number(e.target.value) / 100)
-                      }
-                      className="w-full accent-oss-accent"
-                    />
-                    <div className="flex justify-between text-xs text-oss-muted mt-1">
-                      <span>$0.25</span>
-                      <span>$5.00</span>
-                    </div>
-                  </div>
-                </>
-              )}
+          {/* Regime + premium filters */}
+          <Section
+            title="Regime & Premium Filters"
+            icon={<Bell className="h-4 w-4" />}
+            defaultOpen={false}
+          >
+            <div className="space-y-6">
+              <RegimeAlignmentSlider
+                value={draft.min_regime_alignment ?? 0}
+                onChange={(v) => updateDraft('min_regime_alignment', v)}
+              />
+              <PremiumSlider
+                value={draft.max_premium ?? 10}
+                enabled={draft.max_premium != null}
+                onChangeValue={(v) => updateDraft('max_premium', v)}
+                onToggle={(on) =>
+                  updateDraft('max_premium', on ? (draft.max_premium ?? 10) : null)
+                }
+              />
             </div>
           </Section>
 
@@ -712,12 +779,17 @@ export default function AlertsConfig() {
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-oss-muted">Cooldown per contract (minutes)</span>
+                <span className="text-sm text-oss-muted">
+                  Cooldown per contract (minutes)
+                </span>
                 <input
                   type="number"
                   value={draft.cooldown_minutes ?? 30}
                   onChange={(e) =>
-                    updateDraft('cooldown_minutes', Math.max(1, parseInt(e.target.value) || 1))
+                    updateDraft(
+                      'cooldown_minutes',
+                      Math.max(1, parseInt(e.target.value) || 1),
+                    )
                   }
                   min={1}
                   max={120}
@@ -744,18 +816,6 @@ export default function AlertsConfig() {
                 </div>
               </div>
             </div>
-          </Section>
-
-          {/* Setup Rule Filter */}
-          <Section
-            title="Setup Rule Filter"
-            icon={<Filter className="h-4 w-4" />}
-            defaultOpen={false}
-          >
-            <SetupRuleFilter
-              selectedIds={draft.setup_rule_filter_ids ?? []}
-              onChange={(ids) => updateDraft('setup_rule_filter_ids', ids)}
-            />
           </Section>
 
           {/* Webhook Channels */}

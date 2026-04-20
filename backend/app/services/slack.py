@@ -1,9 +1,14 @@
-"""Slack alert service for high-conviction opportunities.
+"""Slack alert service — v5-native dual-conviction alerts.
 
-Sends alerts to configured Slack webhooks when pipeline evaluations
-exceed the conviction score threshold and match optional setup rule filters.
-Config is persisted in DynamoDB (paper-positions table) so it survives
-Lambda cold starts.
+Under the v5 regime, alerts are gated on HR Conviction (grand-slam track,
+0-20 scale) and P Conviction (profitability track, 0-100 scale) rather than
+the legacy blended conviction_score. The message leads with the verdict
+driver (HR vs P), the matched archetype(s) with Wilson-lower rates, the
+regime multiplier, and a home-run structural check — matching the
+sharpshooter / 200%+ MFE north star of the system.
+
+Config persists in DynamoDB (paper-positions table) so it survives Lambda
+cold starts.
 """
 
 from __future__ import annotations
@@ -26,30 +31,47 @@ ALERT_LOG_PK_PREFIX = "ALERT_LOG"
 # Frontend URL for evaluation detail links
 FRONTEND_URL = "https://d3upsbalspxt4n.cloudfront.net"
 
-# Default configuration
+# v5 scoring thresholds (mirror GateConfig defaults in schemas.py)
+V5_HR_FLOOR = 7.0
+V5_P_FLOOR = 50.0
+V5_HR_TIER1 = 14.0  # hr_conviction ≥ 14 → Sharpshooter / TIER_1
+
+# v5-native default configuration. Prior schema (score_threshold,
+# require_urgency_or_convergence, cheap_gem_*, per_scanner_thresholds,
+# excluded_scanners, setup_rule_filter_ids) is retired — none of those
+# knobs map cleanly onto HR/P conviction. If DynamoDB still holds old keys
+# they are ignored on load.
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": False,
-    "score_threshold": 75,
-    "require_urgency_or_convergence": True,
+    # v5 eligibility (soft filters; Tier 1 bypasses these)
+    "hr_conviction_min": 10.0,       # ≥10/20 = solid HR bet (above 7.0 APPROVE floor)
+    "p_conviction_min": 70.0,        # ≥70/100 = high-base-rate grinder (above 50 floor)
+    "require_hr_archetype": False,   # Sharpshooter-only mode: filter pure P-driven trades
+    "min_archetype_fit": 60.0,       # Discard weak-fit even when conviction clears
+    "min_regime_alignment": 0.0,     # 0 = accept any regime; raise to require tailwind
+    "max_premium": None,             # Optional $ ceiling on option mid (None = off)
+    # Hard / regime-independent knobs
+    "tier_1_bypass": True,           # Sharpshooter (TIER_1) always alerts
     "cooldown_minutes": 30,
     "daily_cap": 10,
     "quiet_hours_start": "22:00",
     "quiet_hours_end": "08:00",
     "webhook_channels": [],
-    "setup_rule_filter_ids": [],
     "verdicts": ["APPROVE"],
-    "max_premium": None,
-    "cheap_gem_enabled": False,
-    "cheap_gem_threshold": 60,
-    "cheap_gem_max_premium": 1.50,
-    "tier_1_bypass": True,
-    "per_scanner_thresholds": {},
-    "excluded_scanners": [],
 }
+
+# Config keys carried forward. Anything else loaded from DynamoDB (including
+# retired legacy keys) is filtered out so the old schema doesn't leak into
+# new code paths.
+_CONFIG_KEYS = set(DEFAULT_CONFIG.keys()) | {"updated_at"}
 
 
 async def load_alert_config() -> dict[str, Any]:
-    """Load alert config from DynamoDB, falling back to defaults."""
+    """Load alert config from DynamoDB, falling back to defaults.
+
+    Filters out any legacy keys that are no longer part of the v5 schema so
+    stale DynamoDB state doesn't silently re-enable retired behaviors.
+    """
     try:
         from app.db.dynamodb import get_dynamodb
         from app.db.tables import PAPER_POSITIONS_TABLE
@@ -59,40 +81,47 @@ async def load_alert_config() -> dict[str, Any]:
         if item:
             item.pop("PK", None)
             item.pop("SK", None)
-            return {**DEFAULT_CONFIG, **item}
+            cleaned = {k: v for k, v in item.items() if k in _CONFIG_KEYS}
+            return {**DEFAULT_CONFIG, **cleaned}
     except Exception as e:
         logger.warning(f"Failed to load alert config from DynamoDB: {e}")
     return {**DEFAULT_CONFIG}
 
 
 async def save_alert_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Save alert config to DynamoDB."""
+    """Save alert config to DynamoDB (only v5 keys — legacy keys dropped)."""
     from app.db.dynamodb import get_dynamodb
     from app.db.tables import PAPER_POSITIONS_TABLE
 
     db = get_dynamodb()
     now = datetime.now(timezone.utc).isoformat()
+    cleaned = {k: v for k, v in config.items() if k in _CONFIG_KEYS}
     item = {
         "PK": ALERT_CONFIG_PK,
         "SK": ALERT_CONFIG_SK,
-        **config,
+        **cleaned,
         "updated_at": now,
     }
     await db.put_item(PAPER_POSITIONS_TABLE, item)
-
-    result = {**config, "updated_at": now}
-    return result
+    return {**cleaned, "updated_at": now}
 
 
 async def log_alert(
     contract_id: str,
     ticker: str,
-    conviction_score: float,
+    hr_conviction: float | None,
+    p_conviction: float | None,
+    driver: str | None,
     channel_name: str,
     status: str,
     quality_tier: str | None = None,
 ) -> None:
-    """Write an alert log entry for audit/volume preview."""
+    """Write an alert log entry for audit/volume preview.
+
+    ``conviction_score`` retained as a composite field for the history UI —
+    populated with whichever track's conviction drove the alert (normalized
+    to the 0-100 scale for legacy display).
+    """
     try:
         from app.db.dynamodb import get_dynamodb
         from app.db.tables import PAPER_POSITIONS_TABLE
@@ -102,12 +131,23 @@ async def log_alert(
         date_str = now.strftime("%Y-%m-%d")
         ts = now.isoformat()
 
+        # Normalize a single display score — HR on the 0-100 scale (×5) when
+        # HR-driven, else P as-is. Keeps the history table column meaningful.
+        display_score: float = 0.0
+        if driver == "HR" and hr_conviction is not None:
+            display_score = hr_conviction * 5.0
+        elif p_conviction is not None:
+            display_score = p_conviction
+
         item = {
             "PK": f"{ALERT_LOG_PK_PREFIX}#{date_str}",
             "SK": f"{ts}#{contract_id}",
             "contract_id": contract_id,
             "ticker": ticker,
-            "conviction_score": conviction_score,
+            "hr_conviction": hr_conviction,
+            "p_conviction": p_conviction,
+            "driver": driver,
+            "conviction_score": display_score,
             "channel": channel_name,
             "status": status,
             "quality_tier": quality_tier,
@@ -157,18 +197,45 @@ def mask_config_for_response(config: dict[str, Any]) -> dict[str, Any]:
         {
             "channel_name": ch.get("channel_name", ""),
             "url_masked": mask_webhook_url(ch.get("url", "")),
-            "url": ch.get("url", ""),  # Include full URL for the config page
+            "url": ch.get("url", ""),  # Full URL for the config page
         }
         for ch in channels
     ]
     return result
 
 
+def infer_verdict_driver(
+    hr_conviction: float | None,
+    p_conviction: float | None,
+    hr_floor: float = V5_HR_FLOOR,
+    p_floor: float = V5_P_FLOOR,
+) -> str | None:
+    """Infer which conviction track drove the APPROVE.
+
+    Mirrors the logic in ``ThesisGenerator.build_input``: whichever track
+    cleared its floor with the larger relative margin is the driver.
+    Returns "HR", "P", or None (neither cleared — caller shouldn't be
+    alerting anyway, but we surface None rather than guessing).
+    """
+    hr = hr_conviction or 0.0
+    p = p_conviction or 0.0
+    hr_cleared = hr >= hr_floor
+    p_cleared = p >= p_floor
+    if hr_cleared and not p_cleared:
+        return "HR"
+    if p_cleared and not hr_cleared:
+        return "P"
+    if hr_cleared and p_cleared:
+        hr_margin = (hr - hr_floor) / hr_floor if hr_floor > 0 else 0.0
+        p_margin = (p - p_floor) / p_floor if p_floor > 0 else 0.0
+        return "HR" if hr_margin >= p_margin else "P"
+    return None
+
+
 class SlackAlertService:
-    """Service for sending Slack alerts on high-conviction opportunities."""
+    """v5-native Slack alert service — gates on HR/P conviction, not a blended score."""
 
     def __init__(self) -> None:
-        """Initialize the Slack alert service."""
         settings = get_settings()
 
         # Legacy single webhook from env var (fallback)
@@ -184,58 +251,52 @@ class SlackAlertService:
         self._config_loaded = False
 
     async def _ensure_config(self) -> dict[str, Any]:
-        """Load config from DynamoDB if not already loaded."""
         if not self._config_loaded:
             self._config = await load_alert_config()
             self._config_loaded = True
         return self._config or DEFAULT_CONFIG
 
     def configure(self, config: dict[str, Any]) -> None:
-        """Apply config dict directly (used after PUT /api/alerts/config)."""
-        self._config = {**DEFAULT_CONFIG, **config}
+        """Apply config dict directly (used after PUT /api/alerts/config).
+
+        Filters out legacy keys so a stale payload can't reintroduce retired
+        behavior mid-process.
+        """
+        cleaned = {k: v for k, v in config.items() if k in _CONFIG_KEYS}
+        self._config = {**DEFAULT_CONFIG, **cleaned}
         self._config_loaded = True
 
     def _get_webhook_urls(self) -> list[dict[str, str]]:
-        """Get list of webhook channels. Falls back to legacy env var."""
         config = self._config or DEFAULT_CONFIG
         channels = config.get("webhook_channels", [])
         if channels:
             return channels
-
-        # Fallback to legacy single webhook URL from env var
         if self._legacy_webhook_url:
             return [{"channel_name": "#default", "url": self._legacy_webhook_url}]
         return []
 
     def _parse_time(self, time_str: str) -> time:
-        """Parse HH:MM string to time object."""
         parts = time_str.split(":")
         return time(int(parts[0]), int(parts[1]))
 
     def _is_within_quiet_hours(self) -> bool:
-        """Check if current time is within quiet hours."""
         config = self._config or DEFAULT_CONFIG
         quiet_start = self._parse_time(config.get("quiet_hours_start", "22:00"))
         quiet_end = self._parse_time(config.get("quiet_hours_end", "08:00"))
         now = datetime.now(timezone.utc).time()
-
         if quiet_start > quiet_end:
             return now >= quiet_start or now <= quiet_end
-        else:
-            return quiet_start <= now <= quiet_end
+        return quiet_start <= now <= quiet_end
 
     def _check_cooldown(self, contract_id: str) -> bool:
-        """Check if contract is outside cooldown period. True = can send."""
+        """True if contract is outside its cooldown window."""
         if contract_id not in self._alert_timestamps:
             return True
-
         config = self._config or DEFAULT_CONFIG
         cooldown = timedelta(minutes=config.get("cooldown_minutes", 30))
-        last_alert = self._alert_timestamps[contract_id]
-        return datetime.now(timezone.utc) - last_alert >= cooldown
+        return datetime.now(timezone.utc) - self._alert_timestamps[contract_id] >= cooldown
 
     def _reset_daily_count_if_needed(self) -> None:
-        """Reset daily count if new day."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._last_reset_date != today:
             self._daily_count = 0
@@ -243,25 +304,34 @@ class SlackAlertService:
 
     async def should_alert(
         self,
-        conviction_score: float,
-        urgency: str,
-        convergence: int,
+        *,
+        hr_conviction: float | None,
+        p_conviction: float | None,
+        hr_archetype_matched: str | None,
+        hr_archetype_fit: float | None,
+        p_archetype_fit: float | None,
+        regime_alignment: float | None,
         contract_id: str,
         verdict: str = "APPROVE",
-        matched_rule_ids: list[str] | None = None,
-        premium: float = 0,
+        premium: float = 0.0,
         quality_tier: str | None = None,
-        scanners: list[str] | None = None,
     ) -> tuple[bool, str | None]:
-        """Determine if an alert should be sent.
+        """Decide whether to alert on a v5 decision.
 
-        Returns:
-            Tuple of (should_alert, reason_if_not)
+        Returns ``(True, driver)`` where driver is ``"tier_1"``, ``"HR"``,
+        or ``"P"`` to let the formatter pick a header lane. Returns
+        ``(False, reason)`` otherwise.
+
+        Gate order:
+        1. Hard checks (enabled / webhooks / verdict / daily cap / cooldown)
+        2. Tier 1 bypass — Sharpshooter always alerts (modulo hard checks)
+        3. Soft v5 checks (archetype presence, regime, conviction + fit)
+        4. Premium ceiling (optional convenience filter)
+        5. Quiet hours
         """
         config = await self._ensure_config()
 
-        # --- Hard checks (always enforced, even for Tier 1) ---
-
+        # --- Hard checks ---
         if not config.get("enabled", False):
             return False, "Alerts disabled"
 
@@ -269,145 +339,162 @@ class SlackAlertService:
         if not webhooks:
             return False, "No webhook URLs configured"
 
-        # Check verdict filter
         allowed_verdicts = config.get("verdicts", ["APPROVE"])
         if verdict not in allowed_verdicts:
             return False, f"Verdict {verdict} not in allowed list {allowed_verdicts}"
 
-        # Reset daily count if new day
         self._reset_daily_count_if_needed()
-
-        # Check daily cap
         daily_cap = config.get("daily_cap", 10)
         if self._daily_count >= daily_cap:
             return False, f"Daily alert cap ({daily_cap}) reached"
 
-        # Check cooldown
         if not self._check_cooldown(contract_id):
             cooldown = config.get("cooldown_minutes", 30)
             return False, f"Contract in {cooldown}min cooldown"
 
-        # --- Tier 1 fast path: bypass soft filters ---
+        # --- Tier 1 fast path ---
         if quality_tier == "TIER_1" and config.get("tier_1_bypass", True):
             logger.info(
                 f"Tier 1 fast path: alerting for {contract_id} "
-                f"(score={conviction_score:.0f})"
+                f"(hr={hr_conviction}, p={p_conviction})"
             )
             return True, "tier_1"
 
-        # --- Soft checks (skipped for Tier 1) ---
+        # --- Soft v5 checks ---
+        # Sharpshooter-only mode: require an HR archetype match
+        if config.get("require_hr_archetype", False) and not hr_archetype_matched:
+            return False, "No HR archetype matched (sharpshooter-only mode)"
 
-        # Check excluded scanners
-        excluded = config.get("excluded_scanners", [])
-        if scanners and excluded:
-            if all(s in excluded for s in scanners):
-                return False, f"Scanner(s) {scanners} excluded from alerts"
+        # Regime headwind filter
+        min_regime = config.get("min_regime_alignment", 0.0) or 0.0
+        if min_regime > 0 and (regime_alignment is None or regime_alignment < min_regime):
+            return (
+                False,
+                f"Regime alignment {regime_alignment} below min {min_regime}",
+            )
 
-        # Check score threshold (with per-scanner overrides and cheap gem fallback)
-        threshold = config.get("score_threshold", 75)
-        per_scanner = config.get("per_scanner_thresholds", {})
-        if scanners and per_scanner:
-            overrides = [per_scanner[s] for s in scanners if s in per_scanner]
-            if overrides:
-                threshold = min(overrides)
+        # Conviction gate — either track can clear on its own
+        hr_min = config.get("hr_conviction_min", 10.0) or 0.0
+        p_min = config.get("p_conviction_min", 70.0) or 0.0
+        fit_min = config.get("min_archetype_fit", 60.0) or 0.0
 
-        is_cheap_gem = False
-        if conviction_score < threshold:
-            # Check if qualifies as a cheap gem (lower threshold for cheap options)
-            cheap_gem_enabled = config.get("cheap_gem_enabled", False)
-            cheap_gem_threshold = config.get("cheap_gem_threshold", 60)
-            cheap_gem_max_premium = config.get("cheap_gem_max_premium", 1.50)
-            if (
-                cheap_gem_enabled
-                and conviction_score >= cheap_gem_threshold
-                and 0 < premium <= cheap_gem_max_premium
-            ):
-                is_cheap_gem = True
-            else:
-                return False, f"Score {conviction_score:.1f} below threshold {threshold}"
+        hr_passes = (
+            (hr_conviction or 0.0) >= hr_min
+            and (hr_archetype_fit or 0.0) >= fit_min
+        )
+        p_passes = (
+            (p_conviction or 0.0) >= p_min
+            and (p_archetype_fit or 0.0) >= fit_min
+        )
 
-        # Check max premium (skip for cheap gems — already filtered by cheap_gem_max_premium)
-        if not is_cheap_gem:
-            max_premium = config.get("max_premium")
-            if max_premium is not None and premium > max_premium:
-                return False, f"Premium ${premium:.2f} above max ${max_premium:.2f}"
+        if not (hr_passes or p_passes):
+            return (
+                False,
+                (
+                    f"Neither track passed: HR {hr_conviction}/{hr_min} "
+                    f"fit {hr_archetype_fit}/{fit_min}, "
+                    f"P {p_conviction}/{p_min} fit {p_archetype_fit}/{fit_min}"
+                ),
+            )
 
-        # Check urgency/convergence requirement (skip for cheap gems)
-        if not is_cheap_gem and config.get("require_urgency_or_convergence", True):
-            if urgency != "act_now" and convergence < 2:
-                return False, "Requires Act Now urgency or 2+ scanner convergence"
+        # Premium ceiling (optional)
+        max_premium = config.get("max_premium")
+        if max_premium is not None and premium > max_premium:
+            return False, f"Premium ${premium:.2f} above max ${max_premium:.2f}"
 
-        # Check setup rule filter
-        filter_ids = config.get("setup_rule_filter_ids", [])
-        if filter_ids and matched_rule_ids:
-            if not any(rid in filter_ids for rid in matched_rule_ids):
-                return False, "No matching setup rules in filter"
-
-        # Check quiet hours
+        # Quiet hours
         if self._is_within_quiet_hours():
             return False, "Within quiet hours"
 
-        return True, "cheap_gem" if is_cheap_gem else None
+        # Driver: whichever track cleared more decisively (HR preferred on ties
+        # — sharpshooter-biased by design).
+        driver = infer_verdict_driver(hr_conviction, p_conviction)
+        if driver is None:
+            # Both passed the user's floors but neither cleared the v5
+            # system APPROVE floor — unusual but possible if user has set
+            # min below 7.0/50.0. Prefer HR since we're hunting grand slams.
+            driver = "HR" if hr_passes else "P"
+        return True, driver
 
     def _format_message(
         self,
+        *,
         ticker: str,
         strike: float,
         option_type: str,
         expiration: str,
-        conviction_score: float,
-        urgency: str,
-        headline: str | None,
-        theta_adj_ev: float,
+        driver: str,
+        hr_conviction: float | None,
+        p_conviction: float | None,
+        hr_archetype_matched: str | None,
+        hr_archetype_fit: float | None,
+        hr_p_lower: float | None,
+        hr_n_trades: int | None,
+        p_archetype_matched: str | None,
+        p_archetype_fit: float | None,
+        p_win_lower: float | None,
+        regime_alignment: float | None,
         delta: float,
+        dte: int,
         premium: float,
+        feasibility_ratio: float | None,
+        expected_move_pct: float | None,
+        underlying_price: float,
         scanners: list[str],
+        setup_summary: str | None = None,
+        tp2_pct: float | None = None,
+        tp2_underlying: float | None = None,
         evaluation_id: str | None = None,
-        trade_thesis: str | None = None,
-        matched_rules: list[str] | None = None,
-        pillar_scores: dict[str, float] | None = None,
-        underlying_price: float = 0,
-        gate_margin: float = 50,
-        dte: int = 0,
-        is_test: bool = False,
-        is_cheap_gem: bool = False,
         quality_tier: str | None = None,
+        is_test: bool = False,
     ) -> dict[str, Any]:
-        """Format Slack message with rich blocks.
+        """Format a v5 dual-conviction Slack message.
 
-        Returns:
-            Slack blocks message payload
+        Header lane is chosen by driver + tier so a reader can scan the
+        channel at a glance:
+        - ⭐ SHARPSHOOTER — TIER_1 (hr_conviction ≥ 14)
+        - 🎯 HR GRAND SLAM — HR-driven, sub-TIER_1
+        - 💰 P GRINDER — P-driven (no HR archetype or HR too weak)
         """
-        urgency_map = {
-            "act_now": "\U0001f534",
-            "hours": "\U0001f7e1",
-            "patient": "\U0001f7e2",
-        }
-        urgency_emoji = urgency_map.get(urgency, "\u26aa")
-        urgency_label = urgency.replace("_", " ").title()
         test_prefix = "[TEST] " if is_test else ""
-        gem_prefix = "\U0001f48e Cheap Gem: " if is_cheap_gem else ""
 
-        # Tier 1 gets a distinct header
-        if quality_tier == "TIER_1" and not is_test:
-            header_text = f"\u2b50 {test_prefix}TIER 1: {ticker} ${strike} {option_type}"
+        if quality_tier == "TIER_1" or driver == "tier_1":
+            header_emoji = "\u2b50"  # ⭐
+            header_label = "SHARPSHOOTER"
+        elif driver == "HR":
+            header_emoji = "\U0001f3af"  # 🎯
+            header_label = "HR GRAND SLAM"
+        elif driver == "P":
+            header_emoji = "\U0001f4b0"  # 💰
+            header_label = "P GRINDER"
         else:
-            header_text = (
-                f"\U0001f3af {test_prefix}{gem_prefix}High Conviction: "
-                f"{ticker} ${strike} {option_type}"
-            )
+            header_emoji = "\U0001f50d"  # 🔍
+            header_label = "Opportunity"
+
+        header_text = (
+            f"{header_emoji} {test_prefix}{header_label}: "
+            f"{ticker} ${strike:g} {option_type}"
+        )
 
         blocks: list[dict[str, Any]] = [
-            # Header
             {
                 "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": header_text,
-                    "emoji": True,
-                },
+                "text": {"type": "plain_text", "text": header_text, "emoji": True},
             },
-            # Contract details
+        ]
+
+        # --- Contract + structural check ---
+        feas_str = "N/A"
+        feas_note = ""
+        if feasibility_ratio is not None:
+            feas_str = f"{feasibility_ratio:.2f}"
+            feas_note = (
+                " (achievable)" if feasibility_ratio <= 1.0 else " (stretch)"
+            )
+        em_str = (
+            f"{expected_move_pct:.1f}%" if expected_move_pct is not None else "N/A"
+        )
+        blocks.append(
             {
                 "type": "section",
                 "text": {
@@ -415,81 +502,158 @@ class SlackAlertService:
                     "text": (
                         f"\U0001f4c4 *Contract*\n"
                         f"Exp {expiration} \u00b7 Premium ${premium:.2f} \u00b7 "
-                        f"Delta {delta:.2f}\n"
-                        f"\u03b8-Adj EV: ${theta_adj_ev:.2f} \u00b7 DTE: {dte}"
+                        f"\u0394 {delta:.2f} \u00b7 DTE {dte}\n"
+                        f"Expected move {em_str} \u00b7 "
+                        f"Feasibility {feas_str}{feas_note}"
                     ),
                 },
-            },
-            # Underlying
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"\U0001f4ca *Underlying: ${underlying_price:.2f}*\n"
-                        f"{', '.join(scanners)} \u00b7 {urgency_emoji} {urgency_label}"
-                    ),
-                },
-            },
-        ]
+            }
+        )
 
-        # Scores section
-        pillars = pillar_scores or {}
-        dir_score = pillars.get("DIRECTIONAL", 0)
-        vol_score = pillars.get("VOLATILITY", 0)
-        str_score = pillars.get("STRUCTURE", 0)
-
-        tier_labels = {"TIER_1": "\u2b50 Tier 1", "TIER_2": "Tier 2", "TIER_3": "Tier 3"}
-        tier_line = ""
-        if quality_tier and quality_tier in tier_labels:
-            tier_line = f"Quality: {tier_labels[quality_tier]}\n"
-
+        # --- Underlying + scanners ---
+        scanner_list = ", ".join(scanners) if scanners else "—"
         blocks.append(
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        f"\U0001f4c8 *Scores*\n"
-                        f"Conviction: {conviction_score:.0f}/100\n"
-                        f"{tier_line}"
-                        f"Directional: {dir_score:.0f} \u00b7 "
-                        f"Volatility: {vol_score:.0f} \u00b7 "
-                        f"Structure: {str_score:.0f}\n"
-                        f"Gate Margin: {gate_margin:.1f}"
+                        f"\U0001f4ca *Underlying: ${underlying_price:.2f}*\n"
+                        f"Scanners: {scanner_list}"
                     ),
                 },
             }
         )
 
-        # Matched setup rules
-        if matched_rules:
-            rules_text = ", ".join(matched_rules[:5])
+        # --- Dual-conviction block ---
+        hr_val = f"{hr_conviction:.1f}" if hr_conviction is not None else "—"
+        p_val = f"{p_conviction:.1f}" if p_conviction is not None else "—"
+        hr_flag = (
+            " \u2705" if hr_conviction is not None and hr_conviction >= V5_HR_FLOOR
+            else " \u274c" if hr_conviction is not None
+            else ""
+        )
+        p_flag = (
+            " \u2705" if p_conviction is not None and p_conviction >= V5_P_FLOOR
+            else " \u274c" if p_conviction is not None
+            else ""
+        )
+        tier_label = {"TIER_1": "\u2b50 Tier 1", "TIER_2": "Tier 2", "TIER_3": "Tier 3"}.get(
+            quality_tier or "", quality_tier or "—"
+        )
+        driver_label = (
+            "\u2b50 TIER_1" if driver == "tier_1" else f"*{driver}*"
+            if driver in ("HR", "P") else "—"
+        )
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4c8 *Convictions*\n"
+                        f"HR {hr_val}/20{hr_flag} (floor {V5_HR_FLOOR:g}) \u00b7 "
+                        f"P {p_val}/100{p_flag} (floor {V5_P_FLOOR:g})\n"
+                        f"Driver: {driver_label} \u00b7 Quality: {tier_label}"
+                    ),
+                },
+            }
+        )
+
+        # --- Archetype evidence ---
+        archetype_lines = []
+        if hr_archetype_matched:
+            fit_s = f"{hr_archetype_fit:.0f}" if hr_archetype_fit is not None else "—"
+            wl_s = (
+                f"Wilson-lower {hr_p_lower * 100:.1f}%"
+                if hr_p_lower is not None else "Wilson-lower —"
+            )
+            n_s = f"n={hr_n_trades}" if hr_n_trades else "n=—"
+            archetype_lines.append(
+                f"HR: *{hr_archetype_matched}* (fit {fit_s}, {wl_s} HR200, {n_s})"
+            )
+        else:
+            archetype_lines.append("HR: _no archetype match_")
+        if p_archetype_matched:
+            fit_s = f"{p_archetype_fit:.0f}" if p_archetype_fit is not None else "—"
+            wl_s = (
+                f"Wilson-lower {p_win_lower * 100:.1f}%"
+                if p_win_lower is not None else "Wilson-lower —"
+            )
+            archetype_lines.append(
+                f"P: *{p_archetype_matched}* (fit {fit_s}, {wl_s} win)"
+            )
+        else:
+            archetype_lines.append("P: _no archetype match_")
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "\U0001f3f7\ufe0f *Archetypes*\n" + "\n".join(archetype_lines),
+                },
+            }
+        )
+
+        # --- Regime alignment ---
+        if regime_alignment is not None:
+            if regime_alignment > 1.05:
+                regime_emoji = "\U0001f7e2"  # 🟢
+                regime_label = "tailwind"
+            elif regime_alignment < 0.95:
+                regime_emoji = "\U0001f534"  # 🔴
+                regime_label = "headwind"
+            else:
+                regime_emoji = "\u26aa"  # ⚪
+                regime_label = "neutral"
+            blocks.append(
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"{regime_emoji} Regime {regime_alignment:.2f}\u00d7 "
+                                f"({regime_label})"
+                            ),
+                        }
+                    ],
+                }
+            )
+
+        # --- Home-run target preview (TP2 from thesis) ---
+        if tp2_pct is not None:
+            tp2_text = f"TP2 (home-run base case): +{tp2_pct:.0f}%"
+            if tp2_underlying is not None:
+                tp2_text += f" at ${tp2_underlying:.2f} underlying"
             blocks.append(
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"\U0001f3f7\ufe0f *Setup Rules Matched*\n{rules_text}",
+                        "text": f"\U0001f3af *Target*\n{tp2_text}",
                     },
                 }
             )
 
-        # Trade thesis (truncate to ~500 chars)
-        thesis_text = trade_thesis or headline
-        if thesis_text:
-            if len(thesis_text) > 500:
-                thesis_text = thesis_text[:497] + "..."
+        # --- Setup summary (single paragraph — full thesis lives on the web page) ---
+        if setup_summary:
+            summary_text = setup_summary
+            if len(summary_text) > 500:
+                summary_text = summary_text[:497] + "..."
             blocks.append(
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"\U0001f4dd *Trade Thesis*\n{thesis_text}"},
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"\U0001f4dd *Setup Summary*\n{summary_text}",
+                    },
                 }
             )
 
         blocks.append({"type": "divider"})
 
-        # View Details button + timestamp
+        # --- View Details button ---
         if evaluation_id:
             detail_url = f"{FRONTEND_URL}/evaluation/{ticker}/{evaluation_id}"
             blocks.append(
@@ -498,7 +662,11 @@ class SlackAlertService:
                     "elements": [
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": "View Details", "emoji": True},
+                            "text": {
+                                "type": "plain_text",
+                                "text": "View Details",
+                                "emoji": True,
+                            },
                             "url": detail_url,
                             "style": "primary",
                         }
@@ -513,7 +681,8 @@ class SlackAlertService:
                     {
                         "type": "mrkdwn",
                         "text": (
-                            f"\u23f0 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+                            f"\u23f0 "
+                            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
                         ),
                     }
                 ],
@@ -524,78 +693,91 @@ class SlackAlertService:
 
     async def send_alert(
         self,
+        *,
         ticker: str,
         strike: float,
         option_type: str,
         expiration: str,
-        conviction_score: float,
-        urgency: str,
-        convergence: int,
-        headline: str | None,
-        theta_adj_ev: float,
-        delta: float,
-        premium: float,
-        scanners: list[str],
         contract_id: str,
         verdict: str = "APPROVE",
-        evaluation_id: str | None = None,
-        trade_thesis: str | None = None,
-        matched_rule_ids: list[str] | None = None,
-        matched_rule_names: list[str] | None = None,
-        pillar_scores: dict[str, float] | None = None,
-        underlying_price: float = 0,
-        gate_margin: float = 50,
-        dte: int = 0,
         quality_tier: str | None = None,
+        # v5 score fields
+        hr_conviction: float | None = None,
+        p_conviction: float | None = None,
+        hr_archetype_matched: str | None = None,
+        hr_archetype_fit: float | None = None,
+        hr_p_lower: float | None = None,
+        hr_n_trades: int | None = None,
+        p_archetype_matched: str | None = None,
+        p_archetype_fit: float | None = None,
+        p_win_lower: float | None = None,
+        regime_alignment: float | None = None,
+        # Contract + structural
+        delta: float = 0.0,
+        dte: int = 0,
+        premium: float = 0.0,
+        feasibility_ratio: float | None = None,
+        expected_move_pct: float | None = None,
+        underlying_price: float = 0.0,
+        scanners: list[str] | None = None,
+        # Thesis-derived context (from the completed TradeThesis, if any)
+        setup_summary: str | None = None,
+        tp2_pct: float | None = None,
+        tp2_underlying: float | None = None,
+        evaluation_id: str | None = None,
     ) -> tuple[bool, str | None]:
-        """Send a Slack alert for a high-conviction opportunity.
+        """Send a v5 dual-conviction alert. Returns (sent, error_or_reason)."""
+        scanners = scanners or []
 
-        Returns:
-            Tuple of (success, error_message)
-        """
-        should_send, reason = await self.should_alert(
-            conviction_score,
-            urgency,
-            convergence,
-            contract_id,
+        should_send, driver_or_reason = await self.should_alert(
+            hr_conviction=hr_conviction,
+            p_conviction=p_conviction,
+            hr_archetype_matched=hr_archetype_matched,
+            hr_archetype_fit=hr_archetype_fit,
+            p_archetype_fit=p_archetype_fit,
+            regime_alignment=regime_alignment,
+            contract_id=contract_id,
             verdict=verdict,
-            matched_rule_ids=matched_rule_ids,
             premium=premium,
             quality_tier=quality_tier,
-            scanners=scanners,
         )
 
         if not should_send:
-            logger.info(f"Skipping alert for {contract_id}: {reason}")
-            return False, reason
+            logger.info(f"Skipping alert for {contract_id}: {driver_or_reason}")
+            return False, driver_or_reason
 
-        is_cheap_gem = reason == "cheap_gem"
+        driver = driver_or_reason or "HR"
 
-        # Format message
         message = self._format_message(
-            ticker,
-            strike,
-            option_type,
-            expiration,
-            conviction_score,
-            urgency,
-            headline,
-            theta_adj_ev,
-            delta,
-            premium,
-            scanners,
-            evaluation_id=evaluation_id,
-            trade_thesis=trade_thesis,
-            matched_rules=matched_rule_names,
-            pillar_scores=pillar_scores,
-            underlying_price=underlying_price,
-            gate_margin=gate_margin,
+            ticker=ticker,
+            strike=strike,
+            option_type=option_type,
+            expiration=expiration,
+            driver=driver,
+            hr_conviction=hr_conviction,
+            p_conviction=p_conviction,
+            hr_archetype_matched=hr_archetype_matched,
+            hr_archetype_fit=hr_archetype_fit,
+            hr_p_lower=hr_p_lower,
+            hr_n_trades=hr_n_trades,
+            p_archetype_matched=p_archetype_matched,
+            p_archetype_fit=p_archetype_fit,
+            p_win_lower=p_win_lower,
+            regime_alignment=regime_alignment,
+            delta=delta,
             dte=dte,
-            is_cheap_gem=is_cheap_gem,
+            premium=premium,
+            feasibility_ratio=feasibility_ratio,
+            expected_move_pct=expected_move_pct,
+            underlying_price=underlying_price,
+            scanners=scanners,
+            setup_summary=setup_summary,
+            tp2_pct=tp2_pct,
+            tp2_underlying=tp2_underlying,
+            evaluation_id=evaluation_id,
             quality_tier=quality_tier,
         )
 
-        # Send to all configured webhooks
         webhooks = self._get_webhook_urls()
         sent_count = 0
 
@@ -604,7 +786,6 @@ class SlackAlertService:
             channel = webhook.get("channel_name", "unknown")
             if not url:
                 continue
-
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(url, json=message, timeout=10.0)
@@ -612,25 +793,26 @@ class SlackAlertService:
                 sent_count += 1
                 logger.info(
                     f"Sent Slack alert to {channel} for {contract_id} "
-                    f"(score: {conviction_score:.0f})"
+                    f"(driver={driver}, hr={hr_conviction}, p={p_conviction})"
                 )
-
-                # Log the alert
                 await log_alert(
                     contract_id=contract_id,
                     ticker=ticker,
-                    conviction_score=conviction_score,
+                    hr_conviction=hr_conviction,
+                    p_conviction=p_conviction,
+                    driver=driver,
                     channel_name=channel,
                     status="sent",
                     quality_tier=quality_tier,
                 )
-
             except httpx.HTTPError as e:
                 logger.error(f"Failed to send Slack alert to {channel}: {e}")
                 await log_alert(
                     contract_id=contract_id,
                     ticker=ticker,
-                    conviction_score=conviction_score,
+                    hr_conviction=hr_conviction,
+                    p_conviction=p_conviction,
+                    driver=driver,
                     channel_name=channel,
                     status="failed",
                     quality_tier=quality_tier,
@@ -639,14 +821,14 @@ class SlackAlertService:
         if sent_count == 0:
             return False, "All webhook sends failed"
 
-        # Update tracking
         self._alert_timestamps[contract_id] = datetime.now(timezone.utc)
         self._daily_count += 1
-
         return True, None
 
-    async def send_test_alert(self, channel_index: int | None = None) -> tuple[bool, str | None]:
-        """Send a test alert using the top conviction APPROVE evaluation.
+    async def send_test_alert(
+        self, channel_index: int | None = None
+    ) -> tuple[bool, str | None]:
+        """Send a test alert using the top v5 APPROVE evaluation.
 
         Falls back to a generic message if no evaluations are available.
         """
@@ -660,10 +842,8 @@ class SlackAlertService:
         if channel_index is not None and 0 <= channel_index < len(webhooks):
             targets = [webhooks[channel_index]]
 
-        # Try to build a realistic message from the top conviction evaluation
         message = await self._build_test_message_from_eval()
         if message is None:
-            # Fallback: generic message if no evaluations available
             message = self._build_generic_test_message(config)
 
         sent = 0
@@ -684,175 +864,89 @@ class SlackAlertService:
         return True, None
 
     async def _build_test_message_from_eval(self) -> dict[str, Any] | None:
-        """Build a realistic test alert from the top conviction APPROVE evaluation."""
-        import asyncio
-
+        """Build a realistic v5 test alert from the top HR-conviction APPROVE evaluation."""
         try:
-            from app.api.routes.evaluations import (
-                calculate_gate_margin,
-                calculate_theta_adjusted_ev,
-            )
-            from app.db.tables import (
-                EvaluationTable,
-                GateResultTable,
-                PillarScoreTable,
-                TradeThesisTable,
-            )
-            from app.scoring.conviction import (
-                calculate_conviction_score,
-                determine_urgency,
-            )
+            from app.db.tables import EvaluationTable, TradeThesisTable
 
-            # Fetch recent APPROVE evaluations
-            items = await EvaluationTable.list_by_verdict("APPROVE", limit=20)
+            items = await EvaluationTable.list_by_verdict("APPROVE", limit=30)
             if not items:
                 return None
 
-            # Enrich and score each evaluation
-            best_score = -1.0
-            best_message: dict[str, Any] | None = None
+            # Pick the eval with the highest HR conviction (most sharpshooter-like);
+            # fall back to highest P conviction, then to first item.
+            def _hr(item: dict[str, Any]) -> float:
+                d = item.get("decision") or {}
+                return d.get("hr_conviction") or 0.0
 
-            for item in items:
-                evaluation_id = item.get("evaluation_id", "")
-                if not evaluation_id:
-                    continue
+            def _p(item: dict[str, Any]) -> float:
+                d = item.get("decision") or {}
+                return d.get("p_conviction") or 0.0
 
-                try:
-                    pillar_scores_raw, gate_results_raw, thesis = await asyncio.gather(
-                        PillarScoreTable.list_by_evaluation(evaluation_id),
-                        GateResultTable.list_by_evaluation(evaluation_id),
-                        TradeThesisTable.get_by_evaluation_id(evaluation_id),
-                    )
-                except Exception:
-                    continue
+            item = max(items, key=lambda i: (_hr(i), _p(i)))
+            decision = item.get("decision") or {}
 
-                # Build pillar scores dict
-                pillar_scores: dict[str, float] = {}
-                for ps in pillar_scores_raw:
-                    pid = (
-                        ps.pillar_id.value
-                        if hasattr(ps.pillar_id, "value")
-                        else str(ps.pillar_id)
-                    )
-                    pillar_scores[pid] = ps.score
+            hr = decision.get("hr_conviction")
+            p = decision.get("p_conviction")
+            driver = infer_verdict_driver(hr, p) or "HR"
 
-                # Build gate results for margin calculation
-                gate_dicts = [
-                    {
-                        "enabled": gr.enabled,
-                        "passed": gr.passed,
-                        "measured_value": gr.measured_value,
-                        "threshold_value": gr.threshold_value,
-                        "operator": (
-                            gr.operator.value
-                            if hasattr(gr.operator, "value")
-                            else str(gr.operator)
-                        ),
-                    }
-                    for gr in gate_results_raw
-                ]
-                gate_margin = calculate_gate_margin(gate_dicts)
-
-                # Calculate theta-adjusted EV
-                theta_ev = calculate_theta_adjusted_ev(
-                    delta=item.get("delta", 0) or 0,
-                    theta=item.get("theta", 0) or 0,
-                    mid=item.get("mid", 0) or 0,
-                    iv=item.get("iv", 0) or 0,
-                    underlying_price=item.get("underlying_price", 0) or 0,
-                    dte=item.get("dte", 30) or 30,
+            # Try to pick up the thesis's setup_summary + TP2
+            setup_summary = None
+            tp2_pct: float | None = None
+            tp2_underlying: float | None = None
+            try:
+                thesis = await TradeThesisTable.get_by_evaluation_id(
+                    item.get("evaluation_id", "")
                 )
+                if thesis and getattr(thesis, "status", None):
+                    status = str(getattr(thesis.status, "value", thesis.status))
+                    if status == "COMPLETED":
+                        setup_summary = thesis.setup_summary or None
+                        tps = getattr(thesis.exit_plan, "take_profits", []) or []
+                        if len(tps) >= 2:
+                            tp2_pct = tps[1].option_pnl_pct
+                            tp2_underlying = tps[1].underlying_price
+            except Exception:
+                pass
 
-                # Get scanner types
-                scanner_source = item.get("scanner_source")
-                scanner_types = [scanner_source] if scanner_source else []
+            scanner_source = item.get("scanner_source")
+            scanners = [scanner_source] if scanner_source else []
 
-                # Calculate conviction score
-                premium = item.get("mid", 0) or 0
-                final_score = item.get("final_score") or 0
-                evaluated_at = item.get("evaluated_at", "")
-                result = calculate_conviction_score(
-                    final_score=final_score,
-                    evaluated_at=evaluated_at,
-                )
-
-                if result.total > best_score:
-                    best_score = result.total
-                    urgency = determine_urgency(scanner_types, mid=premium)
-
-                    # Get trade thesis text
-                    trade_thesis_text = None
-                    headline = None
-                    if thesis:
-                        trade_thesis_text = thesis.thesis if hasattr(thesis, "thesis") else None
-                        if hasattr(thesis, "setup_summary") and thesis.setup_summary:
-                            headline = thesis.setup_summary
-
-                    # Enrich with sector for sector-aware rule matching
-                    try:
-                        from app.db.tables import SP500TickerTable
-                        sector_map = await SP500TickerTable.get_sector_map()
-                        slack_ticker = item.get("underlying_ticker", "")
-                        if slack_ticker in sector_map:
-                            item["sector"] = sector_map[slack_ticker]
-                    except Exception:
-                        pass
-
-                    # Get matched rules
-                    matched_rule_names: list[str] = []
-                    try:
-                        from app.paper_trading.pattern_discovery import list_setup_rules
-                        from app.paper_trading.rule_matcher import (
-                            format_matched_rules,
-                            match_rules,
-                        )
-
-                        all_rules = await list_setup_rules()
-                        active_rules = [r for r in all_rules if r.get("is_active", False)]
-                        if active_rules:
-                            matched = match_rules(
-                                active_rules,
-                                item,
-                                item.get("decision", {}),
-                                scanner_types,
-                            )
-                            if matched:
-                                matched_rule_names = [
-                                    r.get("name", "") for r in format_matched_rules(matched)
-                                ]
-                    except Exception:
-                        pass
-
-                    best_message = self._format_message(
-                        ticker=item.get("underlying_ticker", "???"),
-                        strike=item.get("strike", 0),
-                        option_type=item.get("option_type", "CALL"),
-                        expiration=item.get("expiration_date", "N/A"),
-                        conviction_score=result.total,
-                        urgency=urgency,
-                        headline=headline,
-                        theta_adj_ev=theta_ev,
-                        delta=item.get("delta", 0) or 0,
-                        premium=item.get("mid", 0) or 0,
-                        scanners=scanner_types,
-                        evaluation_id=evaluation_id,
-                        trade_thesis=trade_thesis_text,
-                        matched_rules=matched_rule_names if matched_rule_names else None,
-                        pillar_scores=pillar_scores,
-                        underlying_price=item.get("underlying_price", 0) or 0,
-                        gate_margin=gate_margin,
-                        dte=item.get("dte", 0) or 0,
-                        is_test=True,
-                    )
-
-            return best_message
-
+            return self._format_message(
+                ticker=item.get("underlying_ticker", "???"),
+                strike=item.get("strike", 0),
+                option_type=str(item.get("option_type", "CALL")),
+                expiration=item.get("expiration_date", "N/A"),
+                driver=driver,
+                hr_conviction=hr,
+                p_conviction=p,
+                hr_archetype_matched=decision.get("hr_archetype_matched"),
+                hr_archetype_fit=decision.get("hr_archetype_fit"),
+                hr_p_lower=decision.get("hr_p_lower"),
+                hr_n_trades=decision.get("hr_n_trades"),
+                p_archetype_matched=decision.get("p_archetype_matched"),
+                p_archetype_fit=decision.get("p_archetype_fit"),
+                p_win_lower=decision.get("p_win_lower"),
+                regime_alignment=decision.get("regime_alignment"),
+                delta=item.get("delta") or 0,
+                dte=item.get("dte") or 0,
+                premium=item.get("mid") or 0,
+                feasibility_ratio=item.get("feasibility_ratio"),
+                expected_move_pct=item.get("expected_move_pct"),
+                underlying_price=item.get("underlying_price") or 0,
+                scanners=scanners,
+                setup_summary=setup_summary,
+                tp2_pct=tp2_pct,
+                tp2_underlying=tp2_underlying,
+                evaluation_id=item.get("evaluation_id"),
+                quality_tier=item.get("quality_tier"),
+                is_test=True,
+            )
         except Exception as e:
-            logger.warning(f"Failed to build realistic test alert: {e}")
+            logger.warning(f"Failed to build realistic v5 test alert: {e}")
             return None
 
     def _build_generic_test_message(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Build a generic test alert when no evaluations are available."""
+        """Fallback test alert when no evaluations are available."""
         return {
             "blocks": [
                 {
@@ -870,13 +964,17 @@ class SlackAlertService:
                         "text": (
                             "Your webhook is working, but there are no recent APPROVE "
                             "evaluations to preview.\n\n"
-                            "When the pipeline produces high-conviction opportunities, "
-                            "alerts will appear here with full contract details, "
-                            "pillar scores, and trade thesis.\n\n"
-                            f"*Config:* Score threshold {config.get('score_threshold', 75)} · "
-                            f"Daily cap {config.get('daily_cap', 10)} · "
-                            f"Quiet hours {config.get('quiet_hours_start', '22:00')}"
-                            f"–{config.get('quiet_hours_end', '08:00')} UTC"
+                            "Once the v5 pipeline produces a sharpshooter opportunity, "
+                            "alerts will carry the full dual-conviction block: HR/P "
+                            "scores, matched archetypes with Wilson-lower rates, "
+                            "regime alignment, a home-run structural check, and the "
+                            "TP2 home-run target price.\n\n"
+                            f"*Config:* HR min "
+                            f"{config.get('hr_conviction_min', 10):g}/20 \u00b7 "
+                            f"P min {config.get('p_conviction_min', 70):g}/100 \u00b7 "
+                            f"min archetype fit "
+                            f"{config.get('min_archetype_fit', 60):g} \u00b7 "
+                            f"daily cap {config.get('daily_cap', 10)}"
                         ),
                     },
                 },
@@ -896,7 +994,6 @@ class SlackAlertService:
         }
 
 
-# Singleton instance
 _slack_service: SlackAlertService | None = None
 
 

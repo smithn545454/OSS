@@ -1964,13 +1964,21 @@ async def _fire_slack_alerts(
     filtered_opportunities: list[Opportunity],
     theses: list[TradeThesis],
 ) -> None:
-    """Send Slack alerts for high-conviction APPROVE evaluations.
+    """Send v5 dual-conviction Slack alerts for APPROVE evaluations.
 
-    This is a pipeline side effect — failures are logged but never
-    affect pipeline determinism or outputs.
+    Pipeline side effect — failures are logged but never affect pipeline
+    determinism. The alert service gates on HR/P conviction + archetype fit
+    + regime alignment; this function assembles those fields off the
+    Decision (already carrying v5 output) plus structural fields off the
+    Evaluation, and the setup_summary + TP2 home-run target off the
+    TradeThesis when present.
+
+    ``pillar_results`` and ``gate_evaluations`` are accepted for backwards
+    compatibility with the caller but no longer consumed — the v5 alert
+    renders conviction + archetype evidence instead of pillar subscores.
     """
-    from app.api.routes.evaluations import calculate_gate_margin, calculate_theta_adjusted_ev
-    from app.scoring.conviction import calculate_conviction_score, determine_urgency
+    _ = pillar_results  # retained in signature; v5 alerts don't use pillars
+    _ = gate_evaluations
     from app.services.slack import get_slack_service
 
     service = get_slack_service()
@@ -1982,51 +1990,34 @@ async def _fire_slack_alerts(
     opp_scanners: dict[str, list[str]] = {}
     for opp in filtered_opportunities:
         scanner_types = [
-                t.scanner_type.value
-                if hasattr(t.scanner_type, "value")
-                else str(t.scanner_type)
-                for t in opp.scanner_triggers
-            ]
+            t.scanner_type.value if hasattr(t.scanner_type, "value") else str(t.scanner_type)
+            for t in opp.scanner_triggers
+        ]
         opp_scanners[opp.opportunity_id] = scanner_types
 
-    # Build lookup: evaluation_id → trade thesis text
-    thesis_map: dict[str, str] = {}
+    # Build lookup: evaluation_id → (setup_summary, tp2_pct, tp2_underlying)
+    thesis_preview: dict[str, tuple[str | None, float | None, float | None]] = {}
     for t in theses:
-        thesis_map[t.evaluation_id] = t.thesis
-
-    # Build lookup: evaluation_id → matched rule IDs/names
-    rule_ids_map: dict[str, list[str]] = {}
-    rule_names_map: dict[str, list[str]] = {}
-    # (Matched rules are tracked on PaperPosition, but we can also
-    #  check in real-time against active rules)
-    try:
-        from app.paper_trading.pattern_discovery import list_setup_rules
-        from app.paper_trading.rule_matcher import match_rules as do_match_rules
-
-        all_rules = await list_setup_rules()
-        active_rules = [r for r in all_rules if r.get("is_active", False)]
-
-        if active_rules:
-            for ev in evaluations:
-                decision = decisions.get(ev.evaluation_id)
-                if not decision:
-                    continue
-                scanners = opp_scanners.get(ev.opportunity_id, [])
-                matched = do_match_rules(
-                    active_rules,
-                    ev.model_dump(),
-                    decision.model_dump(),
-                    scanners,
-                )
-                if matched:
-                    rule_ids_map[ev.evaluation_id] = [
-                        r["rule_id"] for r in matched
-                    ]
-                    rule_names_map[ev.evaluation_id] = [
-                        r.get("name", "") for r in matched
-                    ]
-    except Exception as e:
-        logger.warning(f"Rule matching for alerts skipped: {e}")
+        # Only pull from COMPLETED theses — a FAILED/PENDING thesis has no
+        # useful summary or exit targets to surface in Slack.
+        status = str(getattr(getattr(t, "status", None), "value", getattr(t, "status", "")))
+        if status != "COMPLETED":
+            continue
+        tp2_pct: float | None = None
+        tp2_underlying: float | None = None
+        tps = getattr(t.exit_plan, "take_profits", []) or []
+        if len(tps) >= 2:
+            tp2_pct = tps[1].option_pnl_pct
+            tp2_underlying = tps[1].underlying_price
+        elif tps:
+            # Only TP1 available — better than nothing
+            tp2_pct = tps[0].option_pnl_pct
+            tp2_underlying = tps[0].underlying_price
+        thesis_preview[t.evaluation_id] = (
+            t.setup_summary or None,
+            tp2_pct,
+            tp2_underlying,
+        )
 
     sent_count = 0
     checked_count = 0
@@ -2055,76 +2046,50 @@ async def _fire_slack_alerts(
 
         checked_count += 1
 
-        # Get scanner types for this evaluation
         scanner_types = opp_scanners.get(ev.opportunity_id, [])
-
-        # Get pillar scores
-        pillar_scores: dict[str, float] = {}
-        pr_list = pillar_results.get(ev.evaluation_id, [])
-        for pr in pr_list:
-            pillar_id = pr.pillar_id.value if hasattr(pr.pillar_id, "value") else str(pr.pillar_id)
-            pillar_scores[pillar_id] = pr.score
-
-        # Compute gate margin from gate results
-        gate_margin = 50.0
-        gate_eval = gate_evaluations.get(ev.evaluation_id)
-        if gate_eval and hasattr(gate_eval, "gate_results"):
-            gate_dicts = []
-            for gr in gate_eval.gate_results:
-                gate_dicts.append({
-                    "enabled": gr.enabled,
-                    "passed": gr.passed,
-                    "measured_value": gr.measured_value,
-                    "threshold_value": gr.threshold_value,
-                    "operator": gr.operator,
-                })
-            gate_margin = calculate_gate_margin(gate_dicts)
-
-        # Compute theta-adjusted EV
-        theta_ev = calculate_theta_adjusted_ev(
-            theta=ev.theta or 0,
-            iv=ev.iv or 0,
-            rv20=getattr(ev, "rv20", None),
-        )
-
-        # Compute conviction score
-        premium = ev.mid or 0
-        final_score = decision.final_score if decision else 0
-        evaluated_at = ev.evaluated_at or ""
-        result = calculate_conviction_score(
-            final_score=final_score,
-            evaluated_at=evaluated_at,
-        )
-
-        urgency = determine_urgency(scanner_types, mid=premium)
-        convergence = len(scanner_types)
         contract_id = ev.option_ticker or ev.evaluation_id
+        setup_summary, tp2_pct, tp2_underlying = thesis_preview.get(
+            ev.evaluation_id, (None, None, None)
+        )
 
-        # Send alert (service handles should_alert checks internally)
+        option_type_str = (
+            ev.option_type.value
+            if hasattr(ev.option_type, "value")
+            else str(ev.option_type)
+        )
+
         success, _ = await service.send_alert(
             ticker=ev.underlying_ticker,
             strike=ev.strike,
-            option_type=ev.option_type,
+            option_type=option_type_str,
             expiration=ev.expiration_date,
-            conviction_score=result.total,
-            urgency=urgency,
-            convergence=convergence,
-            headline=None,
-            theta_adj_ev=theta_ev,
-            delta=ev.delta or 0,
-            premium=premium,
-            scanners=scanner_types,
             contract_id=contract_id,
             verdict=verdict_str,
-            evaluation_id=ev.evaluation_id,
-            trade_thesis=thesis_map.get(ev.evaluation_id),
-            matched_rule_ids=rule_ids_map.get(ev.evaluation_id, []),
-            matched_rule_names=rule_names_map.get(ev.evaluation_id, []),
-            pillar_scores=pillar_scores,
-            underlying_price=ev.underlying_price or 0,
-            gate_margin=gate_margin,
-            dte=ev.dte or 0,
             quality_tier=quality_tier_str,
+            # v5 conviction + archetype fields off the Decision
+            hr_conviction=decision.hr_conviction,
+            p_conviction=decision.p_conviction,
+            hr_archetype_matched=decision.hr_archetype_matched,
+            hr_archetype_fit=decision.hr_archetype_fit,
+            hr_p_lower=decision.hr_p_lower,
+            hr_n_trades=decision.hr_n_trades,
+            p_archetype_matched=decision.p_archetype_matched,
+            p_archetype_fit=decision.p_archetype_fit,
+            p_win_lower=decision.p_win_lower,
+            regime_alignment=decision.regime_alignment,
+            # Structural fields off the Evaluation
+            delta=ev.delta or 0,
+            dte=ev.dte or 0,
+            premium=ev.mid or 0,
+            feasibility_ratio=getattr(ev, "feasibility_ratio", None),
+            expected_move_pct=getattr(ev, "expected_move_pct", None),
+            underlying_price=ev.underlying_price or 0,
+            scanners=scanner_types,
+            # Thesis-derived context
+            setup_summary=setup_summary,
+            tp2_pct=tp2_pct,
+            tp2_underlying=tp2_underlying,
+            evaluation_id=ev.evaluation_id,
         )
         if success:
             sent_count += 1

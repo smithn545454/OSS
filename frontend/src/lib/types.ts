@@ -1980,28 +1980,31 @@ export interface WebhookChannel {
 
 export interface AlertConfig {
   enabled: boolean
-  score_threshold: number
+  // v5 eligibility
+  hr_conviction_min: number       // 0-20
+  p_conviction_min: number        // 0-100
+  require_hr_archetype: boolean
+  min_archetype_fit: number       // 0-100
+  min_regime_alignment: number    // 0.0-2.0 (usually 0 = accept any regime)
   max_premium?: number | null
-  require_urgency_or_convergence: boolean
+  // Regime-independent
+  tier_1_bypass: boolean
   cooldown_minutes: number
   daily_cap: number
   quiet_hours_start: string
   quiet_hours_end: string
   webhook_channels: WebhookChannel[]
-  setup_rule_filter_ids: string[]
   verdicts: Verdict[]
-  cheap_gem_enabled?: boolean
-  cheap_gem_threshold?: number
-  cheap_gem_max_premium?: number
   updated_at?: string
 }
 
 export interface AlertPreviewBreakdown {
   totalEvaluations: number
-  belowScoreThreshold: number
+  tier1Bypassed: number
+  missingHrArchetype: number
+  regimeHeadwind: number
+  bothTracksFailed: number
   aboveMaxPremium: number
-  failedUrgencyConvergence: number
-  noMatchingSetupRule: number
   wouldAlert: number
 }
 
@@ -2014,7 +2017,13 @@ export interface AlertPreview {
 export interface AlertHistoryEntry {
   contract_id: string
   ticker: string
+  // Composite display score for the history table — HR-track on 0-100 scale
+  // when HR-driven, else raw P conviction. Kept for backwards compatibility
+  // with old records.
   conviction_score: number
+  hr_conviction?: number | null
+  p_conviction?: number | null
+  driver?: 'HR' | 'P' | 'tier_1' | null
   channel: string
   status: 'sent' | 'failed'
   timestamp: string

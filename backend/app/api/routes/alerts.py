@@ -1,8 +1,7 @@
-"""Alert configuration and management API routes."""
+"""Alert configuration and management API routes (v5 dual-conviction)."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -15,25 +14,30 @@ router = APIRouter()
 
 
 class AlertConfigUpdate(BaseModel):
-    """Request body for updating alert config."""
+    """Request body for updating alert config.
+
+    v5-native schema. Legacy knobs (score_threshold, cheap_gem_*,
+    per_scanner_thresholds, excluded_scanners, setup_rule_filter_ids,
+    require_urgency_or_convergence) have been retired — see
+    ``app.services.slack.DEFAULT_CONFIG`` for the canonical shape.
+    """
 
     enabled: Optional[bool] = None
-    score_threshold: Optional[int] = None
-    require_urgency_or_convergence: Optional[bool] = None
+    # v5 eligibility
+    hr_conviction_min: Optional[float] = None       # 0-20
+    p_conviction_min: Optional[float] = None        # 0-100
+    require_hr_archetype: Optional[bool] = None
+    min_archetype_fit: Optional[float] = None       # 0-100
+    min_regime_alignment: Optional[float] = None    # 0.0-2.0 (policy clamp is [0.5, 1.5])
+    max_premium: Optional[float] = None             # Optional ceiling; None = off
+    # Regime-independent
+    tier_1_bypass: Optional[bool] = None
     cooldown_minutes: Optional[int] = None
     daily_cap: Optional[int] = None
     quiet_hours_start: Optional[str] = None
     quiet_hours_end: Optional[str] = None
     webhook_channels: Optional[list[dict[str, str]]] = None
-    setup_rule_filter_ids: Optional[list[str]] = None
     verdicts: Optional[list[str]] = None
-    tier_1_bypass: Optional[bool] = None
-    max_premium: Optional[float] = None
-    cheap_gem_enabled: Optional[bool] = None
-    cheap_gem_threshold: Optional[int] = None
-    cheap_gem_max_premium: Optional[float] = None
-    per_scanner_thresholds: Optional[dict[str, int]] = None
-    excluded_scanners: Optional[list[str]] = None
 
 
 class TestAlertRequest(BaseModel):
@@ -64,49 +68,40 @@ async def update_alert_config(update: AlertConfigUpdate) -> dict[str, Any]:
         save_alert_config,
     )
 
-    # Load current config
     current = await load_alert_config()
-
-    # Merge updates
     update_dict = update.model_dump(exclude_none=True)
     merged = {**current, **update_dict}
 
-    # Validate
-    if merged.get("score_threshold", 75) < 0 or merged.get("score_threshold", 75) > 100:
-        raise HTTPException(status_code=400, detail="score_threshold must be 0-100")
+    # --- Validation ---
+    hr_min = merged.get("hr_conviction_min", 10.0)
+    if hr_min is None or not 0 <= hr_min <= 20:
+        raise HTTPException(
+            status_code=400, detail="hr_conviction_min must be 0-20"
+        )
+    p_min = merged.get("p_conviction_min", 70.0)
+    if p_min is None or not 0 <= p_min <= 100:
+        raise HTTPException(
+            status_code=400, detail="p_conviction_min must be 0-100"
+        )
+    fit_min = merged.get("min_archetype_fit", 60.0)
+    if fit_min is None or not 0 <= fit_min <= 100:
+        raise HTTPException(
+            status_code=400, detail="min_archetype_fit must be 0-100"
+        )
+    regime_min = merged.get("min_regime_alignment", 0.0)
+    if regime_min is None or not 0 <= regime_min <= 2:
+        raise HTTPException(
+            status_code=400, detail="min_regime_alignment must be 0.0-2.0"
+        )
     if merged.get("daily_cap", 10) < 1:
         raise HTTPException(status_code=400, detail="daily_cap must be >= 1")
     if merged.get("cooldown_minutes", 30) < 1:
         raise HTTPException(status_code=400, detail="cooldown_minutes must be >= 1")
+    if merged.get("max_premium") is not None and merged["max_premium"] < 0:
+        raise HTTPException(status_code=400, detail="max_premium must be >= 0")
 
-    # Validate per-scanner thresholds
-    valid_scanners = {
-        "BREAKOUT", "BREAKDOWN", "UNUSUAL_VOLUME",
-        "CHEAP_OPTIONS", "COMPRESSION_EXPANSION",
-    }
-    per_scanner = merged.get("per_scanner_thresholds", {})
-    for scanner, thresh in per_scanner.items():
-        if scanner not in valid_scanners:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid scanner '{scanner}'. Valid: {sorted(valid_scanners)}",
-            )
-        if not 0 <= thresh <= 100:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Threshold for {scanner} must be 0-100, got {thresh}",
-            )
-    for scanner in merged.get("excluded_scanners", []):
-        if scanner not in valid_scanners:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid excluded scanner '{scanner}'. Valid: {sorted(valid_scanners)}",
-            )
-
-    # Save to DynamoDB
     saved = await save_alert_config(merged)
 
-    # Reconfigure live service
     slack_service = get_slack_service()
     slack_service.configure(saved)
 
@@ -141,47 +136,28 @@ async def get_alert_history_endpoint(
 
 @router.get("/preview")
 async def get_alert_preview(days: int = 3) -> dict[str, Any]:
-    """Estimate how many alerts per day a configuration would produce.
+    """Estimate how many alerts per day the v5 config would produce.
 
-    Analyzes recent evaluations against the current alert config
-    (score threshold, urgency/convergence requirement, setup rule filter)
-    to estimate daily alert volume. Enriches raw evaluation items with
-    pillar scores, gate results, and scanner types from their respective
-    tables — matching how the pipeline computes conviction scores.
+    Replays recent APPROVE decisions against the configured HR/P floors,
+    archetype fit, regime alignment, and optional premium ceiling. Tier 1
+    (Sharpshooter) trades always count when ``tier_1_bypass`` is on.
+
+    Returns a breakdown showing how many evaluations fell out at each gate,
+    so the user can see whether their thresholds are too strict / loose.
     """
-    from app.api.routes.evaluations import (
-        calculate_gate_margin,
-        calculate_theta_adjusted_ev,
-    )
-    from app.db.tables import (
-        EvaluationTable,
-        FeatureValueTable,
-        GateResultTable,
-        OpportunityTable,
-        PillarScoreTable,
-    )
-    from app.scoring.conviction import calculate_conviction_score, determine_urgency
-    from app.services.slack import load_alert_config
+    from app.db.tables import EvaluationTable
+    from app.services.slack import V5_HR_FLOOR, V5_P_FLOOR, load_alert_config
 
     config = await load_alert_config()
-    threshold = config.get("score_threshold", 75)
-    require_uc = config.get("require_urgency_or_convergence", True)
-    filter_ids = config.get("setup_rule_filter_ids", [])
-    allowed_verdicts = config.get("verdicts", ["APPROVE"])
+    hr_min = config.get("hr_conviction_min", 10.0) or 0.0
+    p_min = config.get("p_conviction_min", 70.0) or 0.0
+    fit_min = config.get("min_archetype_fit", 60.0) or 0.0
+    regime_min = config.get("min_regime_alignment", 0.0) or 0.0
     max_premium = config.get("max_premium")
+    require_hr = config.get("require_hr_archetype", False)
+    tier_1_bypass = config.get("tier_1_bypass", True)
+    allowed_verdicts = config.get("verdicts", ["APPROVE"])
 
-    # Load setup rules if filter is active
-    rules_by_id: dict[str, dict[str, Any]] = {}
-    if filter_ids:
-        try:
-            from app.paper_trading.pattern_discovery import list_setup_rules
-
-            all_rules = await list_setup_rules()
-            rules_by_id = {r["rule_id"]: r for r in all_rules if r["rule_id"] in filter_ids}
-        except Exception as e:
-            logger.warning(f"Failed to load setup rules for preview: {e}")
-
-    # Query recent evaluations for all configured verdicts
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     evaluations: list[dict[str, Any]] = []
     for verdict in allowed_verdicts:
@@ -191,15 +167,13 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
         except Exception:
             pass
 
-    tier_1_bypass_enabled = config.get("tier_1_bypass", True)
-
     breakdown = {
         "totalEvaluations": len(evaluations),
-        "belowScoreThreshold": 0,
-        "aboveMaxPremium": 0,
-        "failedUrgencyConvergence": 0,
-        "noMatchingSetupRule": 0,
         "tier1Bypassed": 0,
+        "missingHrArchetype": 0,
+        "regimeHeadwind": 0,
+        "bothTracksFailed": 0,
+        "aboveMaxPremium": 0,
         "wouldAlert": 0,
     }
 
@@ -210,206 +184,52 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             "breakdown": breakdown,
         }
 
-    # ------------------------------------------------------------------
-    # Enrich evaluations with pillar scores, gate results, scanner types
-    # (these live in separate tables, not on the raw Evaluation item)
-    # ------------------------------------------------------------------
+    for item in evaluations:
+        decision = item.get("decision") or {}
+        quality_tier = item.get("quality_tier") or decision.get("quality_tier")
 
-    def _enum_str(val: Any) -> str:
-        return str(val.value) if hasattr(val, "value") else str(val)
-
-    sem = asyncio.Semaphore(50)
-
-    async def _limited(coro):  # type: ignore[no-untyped-def]
-        async with sem:
-            return await coro
-
-    # Pre-fetch opportunities by ticker for scanner type resolution
-    unique_tickers = list({
-        item.get("underlying_ticker", "")
-        for item in evaluations
-    } - {""})
-
-    opp_results = await asyncio.gather(*[
-        _limited(OpportunityTable.list_by_ticker(t, limit=50))
-        for t in unique_tickers
-    ])
-    opp_by_ticker: dict[str, list[Any]] = dict(zip(unique_tickers, opp_results))
-
-    def _scanner_types_for(item: dict[str, Any]) -> list[str]:
-        opportunity_id = item.get("opportunity_id")
-        ticker = item.get("underlying_ticker", "")
-        if opportunity_id and ticker in opp_by_ticker:
-            for opp in opp_by_ticker[ticker]:
-                if opp.opportunity_id == opportunity_id:
-                    return [_enum_str(st.scanner_type) for st in opp.scanner_triggers]
-        scanner_source = item.get("scanner_source")
-        if scanner_source:
-            return [scanner_source]
-        return []
-
-    # Feature names needed for setup rule matching
-    _feature_names = {
-        "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
-        "days_to_earnings", "atr14_pct", "rs_20d", "feasibility_ratio",
-    }
-
-    # Enrich each evaluation with pillar scores, gate results, and features
-    async def _enrich(item: dict[str, Any]) -> dict[str, Any]:
-        evaluation_id = item.get("evaluation_id", "")
-        pillar_scores_raw, gate_results_raw, feature_values = await asyncio.gather(
-            _limited(PillarScoreTable.list_by_evaluation(evaluation_id)),
-            _limited(GateResultTable.list_by_evaluation(evaluation_id)),
-            _limited(FeatureValueTable.list_by_evaluation(evaluation_id)),
-        )
-
-        # Merge feature values into item for rule matching
-        for fv in feature_values:
-            if fv.feature_name in _feature_names and fv.value is not None:
-                item[fv.feature_name] = fv.value
-
-        pillar_dict = {
-            _enum_str(ps.pillar_id): ps.score
-            for ps in pillar_scores_raw
-        }
-
-        gate_list = [
-            {
-                "enabled": gr.enabled,
-                "passed": gr.passed,
-                "measured_value": gr.measured_value,
-                "threshold_value": gr.threshold_value,
-                "operator": _enum_str(gr.operator),
-            }
-            for gr in gate_results_raw
-        ]
-
-        scanner_types = _scanner_types_for(item)
-
-        gate_margin = calculate_gate_margin(gate_list)
-
-        theta_ev = calculate_theta_adjusted_ev(
-            delta=item.get("delta") or 0,
-            theta=item.get("theta") or 0,
-            mid=item.get("mid") or 0,
-            iv=item.get("iv") or 0,
-            underlying_price=item.get("underlying_price") or 0,
-            dte=item.get("dte") or 30,
-        )
-
-        # Merge gate_margin into item for rule matching
-        item["gate_margin"] = gate_margin
-
-        return {
-            "pillar_scores": pillar_dict,
-            "gate_margin": gate_margin,
-            "theta_ev": theta_ev,
-            "scanner_types": scanner_types,
-            "item": item,
-        }
-
-    enriched = list(await asyncio.gather(*[_enrich(item) for item in evaluations]))
-
-    # ------------------------------------------------------------------
-    # Aggregate scanner convergence per-ticker (matches /approve endpoint)
-    # Multiple evaluations for the same ticker from different scanners
-    # should all reflect the full convergence count.
-    # ------------------------------------------------------------------
-    from collections import defaultdict
-
-    ticker_scanners: dict[str, set[str]] = defaultdict(set)
-    ticker_indices: dict[str, list[int]] = defaultdict(list)
-    for idx, e in enumerate(enriched):
-        ticker = e["item"].get("underlying_ticker", "")
-        ticker_scanners[ticker].update(e["scanner_types"])
-        ticker_indices[ticker].append(idx)
-
-    for ticker, indices in ticker_indices.items():
-        all_scanners = list(ticker_scanners[ticker])
-        for idx in indices:
-            enriched[idx]["scanner_types"] = all_scanners
-
-    # Enrich with sector for sector-aware rule matching
-    try:
-        from app.db.tables import SP500TickerTable
-        sector_map = await SP500TickerTable.get_sector_map()
-        for e in enriched:
-            t = e["item"].get("underlying_ticker", "")
-            if t in sector_map:
-                e["item"]["sector"] = sector_map[t]
-    except Exception:
-        pass
-
-    # ------------------------------------------------------------------
-    # Score and filter against alert criteria
-    # ------------------------------------------------------------------
-    for e in enriched:
-        pillar_scores = e["pillar_scores"]
-        scanner_types = e["scanner_types"]
-        item = e["item"]
-
-        mid = item.get("mid") or 0
-        final_score = item.get("final_score") or 0
-        evaluated_at = item.get("evaluated_at", "")
-        result = calculate_conviction_score(
-            final_score=final_score,
-            evaluated_at=evaluated_at,
-        )
-
-        # Check Tier 1 fast path — bypass soft filters
-        quality_tier = item.get("quality_tier")
-        if tier_1_bypass_enabled and quality_tier == "TIER_1":
+        # Tier 1 fast path
+        if tier_1_bypass and quality_tier == "TIER_1":
             breakdown["tier1Bypassed"] += 1
             breakdown["wouldAlert"] += 1
             continue
 
-        # Check score threshold
-        if result.total < threshold:
-            breakdown["belowScoreThreshold"] += 1
+        hr = decision.get("hr_conviction") or 0.0
+        p = decision.get("p_conviction") or 0.0
+        hr_archetype = decision.get("hr_archetype_matched")
+        hr_fit = decision.get("hr_archetype_fit") or 0.0
+        p_fit = decision.get("p_archetype_fit") or 0.0
+        regime = decision.get("regime_alignment")
+
+        # Sharpshooter-only mode
+        if require_hr and not hr_archetype:
+            breakdown["missingHrArchetype"] += 1
             continue
 
-        # Check max premium
-        if max_premium is not None:
-            if mid > max_premium:
-                breakdown["aboveMaxPremium"] += 1
-                continue
-
-        # Check urgency/convergence
-        urgency = determine_urgency(scanner_types, mid=mid)
-        convergence = len(scanner_types)
-        if require_uc and urgency != "act_now" and convergence < 2:
-            breakdown["failedUrgencyConvergence"] += 1
+        # Regime headwind
+        if regime_min > 0 and (regime is None or regime < regime_min):
+            breakdown["regimeHeadwind"] += 1
             continue
 
-        # Check setup rule filter
-        if filter_ids and rules_by_id:
-            from app.paper_trading.rule_matcher import match_rules
+        # Conviction + fit — either track on its own
+        hr_pass = (
+            hr >= hr_min
+            and hr >= V5_HR_FLOOR  # still gated by system APPROVE floor
+            and hr_fit >= fit_min
+        )
+        p_pass = (
+            p >= p_min
+            and p >= V5_P_FLOOR
+            and p_fit >= fit_min
+        )
+        if not (hr_pass or p_pass):
+            breakdown["bothTracksFailed"] += 1
+            continue
 
-            decision_data: dict[str, Any] = {
-                "final_score": item.get("final_score", 0),
-            }
-            # Copy whichever pillar scores are present (v3 or v4). Missing
-            # pillars leave the corresponding criterion unable to match —
-            # rule_matcher already treats None as "unknown".
-            for pid, field in (
-                ("PREMIUM_LEVERAGE", "premium_leverage_score"),
-                ("UNDERLYING_BEHAVIOR", "underlying_behavior_score"),
-                ("SETUP_QUALITY", "setup_quality_score"),
-                ("DIRECTIONAL_CONVICTION", "directional_conviction_score"),
-                ("MOVE_POTENTIAL", "move_potential_score"),
-                ("TRADE_STRUCTURE", "trade_structure_score"),
-            ):
-                decision_data[field] = pillar_scores.get(pid)
-            matched = match_rules(
-                list(rules_by_id.values()),
-                item,
-                decision_data,
-                scanner_types,
-                active_only=False,  # User explicitly selected these rules
-            )
-            if not matched:
-                breakdown["noMatchingSetupRule"] += 1
-                continue
+        # Premium ceiling
+        if max_premium is not None and (item.get("mid") or 0) > max_premium:
+            breakdown["aboveMaxPremium"] += 1
+            continue
 
         breakdown["wouldAlert"] += 1
 
