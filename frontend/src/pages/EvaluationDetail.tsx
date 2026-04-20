@@ -27,6 +27,7 @@ import AITradeThesis from '@/components/AITradeThesis'
 import AIStockSummary from '@/components/evaluation/AIStockSummary'
 import TrackTradeModal from '@/components/TrackTradeModal'
 import { ArchetypeMatchCard } from '@/components/ArchetypeMatchCard'
+import { ConvictionPanelV5 } from '@/components/ConvictionPanelV5'
 import { formatDate, formatDateTime, formatExpirationDate } from '@/lib/formatTime'
 import TradeContextSection from '@/components/evaluation/TradeContextSection'
 import UnderlyingStockDetails from '@/components/evaluation/UnderlyingStockDetails'
@@ -1446,6 +1447,10 @@ export default function EvaluationDetail() {
 
       {/* Contract Card */}
       <ContractCard evaluation={evaluation as ContractCardProps['evaluation']} />
+
+      {/* v5.0.0: Dual-conviction panel (HR + P side-by-side). Renders a
+          pre-v5 placeholder when the evaluation doesn't carry v5 fields. */}
+      {decision && <ConvictionPanelV5 decision={decision} />}
 
       {/* v4.1.0: Archetype match (when present). Skipped for pre-v4.1.0
           decisions which don't carry archetype data. */}

@@ -212,6 +212,27 @@ export interface Decision {
   archetype_match_score?: number | null
   archetype_all_fits?: Record<string, number> | null
   anti_archetype_triggered?: AntiArchetypeId | null
+  // v5.0.0 dual-conviction fields (all null for pre-v5 decisions).
+  // HR Conviction (0–20 realistic range): P(MFE ≥ 200%) × fit × regime × 100.
+  hr_conviction?: number | null
+  hr_archetype_matched?: string | null
+  hr_archetype_fit?: number | null
+  hr_p_point?: number | null        // [0, 1]
+  hr_p_lower?: number | null        // Wilson lower bound
+  hr_p_upper?: number | null        // Wilson upper bound
+  hr_n_trades?: number | null
+  // P Conviction (0–100 scale): Wilson_lower(P_win) × normalized_pnl × fit × regime.
+  p_conviction?: number | null
+  p_archetype_matched?: string | null
+  p_archetype_fit?: number | null
+  p_win_point?: number | null
+  p_win_lower?: number | null
+  p_mean_pnl_estimate?: number | null
+  // Shared v5 context
+  regime_alignment?: number | null
+  gbm_hr_score?: number | null
+  gbm_p_score?: number | null
+  v5_scoring_version?: string | null
 }
 
 // Paper Position (includes denormalized enrichment fields from backend)
@@ -266,6 +287,24 @@ export interface PaperPosition {
   archetype_match_score?: number | null
   archetype_all_fits?: Record<string, number> | null
   anti_archetype_triggered?: AntiArchetypeId | null
+  // v5.0.0 dual-conviction (denormalized from Decision at entry).
+  hr_conviction?: number | null
+  hr_archetype_matched?: string | null
+  hr_archetype_fit?: number | null
+  hr_p_point?: number | null
+  hr_p_lower?: number | null
+  hr_p_upper?: number | null
+  hr_n_trades?: number | null
+  p_conviction?: number | null
+  p_archetype_matched?: string | null
+  p_archetype_fit?: number | null
+  p_win_point?: number | null
+  p_win_lower?: number | null
+  p_mean_pnl_estimate?: number | null
+  regime_alignment?: number | null
+  gbm_hr_score?: number | null
+  gbm_p_score?: number | null
+  v5_scoring_version?: string | null
 }
 
 // Enriched position — now just an alias since enrichment is on PaperPosition
