@@ -70,6 +70,13 @@ class DecisionContext:
     archetype_all_fits: Optional[dict[str, float]] = None
     anti_archetype_triggered: Optional[str] = None
 
+    # v5.0.0: pre-computed dual-conviction envelope (orchestrator populates
+    # this when PolicyConfig.v5_active is True). When non-None AND the
+    # scanner is in ``policy.v5_active_scanners``, v5 drives the verdict;
+    # otherwise v5 fields are denormalized onto the Decision as shadow data
+    # and the v4.1.0 verdict logic runs.
+    v5_envelope: Optional[Any] = None  # V5Envelope — loose type to avoid cycles
+
     def is_v4(self) -> bool:
         """True when all three v4 pillar scores are populated."""
         return (
@@ -360,11 +367,19 @@ class DecisionCalculator:
         self,
         ctx: DecisionContext,
         concentration_warnings: Optional[list[str]] = None,
+        *,
+        v5_policy: Optional[Any] = None,  # PolicyConfig — loose to avoid cycles
     ) -> Decision:
         """Compute final Decision from DecisionContext.
 
         Works for both v3 and v4 contexts. For v4, the composite uses
         weighted geometric mean; v3 uses arithmetic sum.
+
+        When ``v5_policy`` is provided and the context carries a v5 envelope:
+          * v5 fields are ALWAYS denormalized onto the returned Decision.
+          * When the scanner is in ``v5_policy.v5_active_scanners``, v5
+            drives the verdict (replaces v4.1.0 verdict logic).
+          * Otherwise v5 fields ride as shadow data; v4.1.0 still drives.
         """
         p1, p2, p3 = ctx.pillar_triplet()
 
@@ -374,41 +389,64 @@ class DecisionCalculator:
             scanner_source=ctx.scanner_source,
         )
 
-        verdict, primary_reason = self.determine_verdict(
-            final_score,
-            ctx.all_gates_passed,
+        # Decide which verdict path runs
+        v5_driving = (
+            v5_policy is not None
+            and getattr(v5_policy, "v5_active", False)
+            and ctx.v5_envelope is not None
+            and ctx.scanner_source in getattr(v5_policy, "v5_active_scanners", [])
         )
 
-        # v4.1.0: anti-archetype short-circuit. When an anti-archetype has
-        # fired (populated upstream by the orchestrator), force REJECT
-        # regardless of score or gate status.
-        if ctx.anti_archetype_triggered:
-            verdict = Verdict.REJECT
-            primary_reason = f"ANTI_ARCHETYPE_{ctx.anti_archetype_triggered}"
+        if v5_driving:
+            # v5 drives — import locally to avoid top-level circular with v5.pipeline
+            from app.v5.pipeline import derive_v5_verdict
+            verdict, primary_reason, quality_tier = derive_v5_verdict(
+                ctx.v5_envelope,
+                v5_policy,
+                all_gates_passed=ctx.all_gates_passed,
+                anti_archetype_triggered=ctx.anti_archetype_triggered,
+            )
+        else:
+            # v4.1.0 path (original)
+            verdict, primary_reason = self.determine_verdict(
+                final_score,
+                ctx.all_gates_passed,
+            )
 
-        quality_tier = None
-        if verdict == Verdict.APPROVE:
-            if ctx.is_v4():
-                quality_tier = self.assign_quality_tier(
-                    final_score,
-                    spread_pct=ctx.spread_pct,
-                    directional_conviction=p1,
-                    move_potential=p2,
-                    trade_structure=p3,
-                    archetype_match_score=ctx.archetype_match_score,
-                )
-            else:
-                quality_tier = self.assign_quality_tier(
-                    final_score,
-                    premium_leverage=p1,
-                    underlying_behavior=p2,
-                    setup_quality=p3,
-                    spread_pct=ctx.spread_pct,
-                )
+            # v4.1.0: anti-archetype short-circuit. Force REJECT regardless
+            # of score or gate status when an anti-archetype fired.
+            if ctx.anti_archetype_triggered:
+                verdict = Verdict.REJECT
+                primary_reason = f"ANTI_ARCHETYPE_{ctx.anti_archetype_triggered}"
+
+            quality_tier = None
+            if verdict == Verdict.APPROVE:
+                if ctx.is_v4():
+                    quality_tier = self.assign_quality_tier(
+                        final_score,
+                        spread_pct=ctx.spread_pct,
+                        directional_conviction=p1,
+                        move_potential=p2,
+                        trade_structure=p3,
+                        archetype_match_score=ctx.archetype_match_score,
+                    )
+                else:
+                    quality_tier = self.assign_quality_tier(
+                        final_score,
+                        premium_leverage=p1,
+                        underlying_behavior=p2,
+                        setup_quality=p3,
+                        spread_pct=ctx.spread_pct,
+                    )
 
         supporting_reasons = self.generate_supporting_reasons(
             ctx, verdict, quality_tier
         )
+
+        # v5 envelope → Decision field dict (empty when envelope absent)
+        v5_fields: dict[str, Any] = {}
+        if ctx.v5_envelope is not None:
+            v5_fields = ctx.v5_envelope.to_decision_fields()
 
         # Every pillar-score field on Decision is Optional[float]. The
         # inactive regime's scores are None; the active regime's scores
@@ -435,6 +473,7 @@ class DecisionCalculator:
             archetype_match_score=_round_opt(ctx.archetype_match_score),
             archetype_all_fits=ctx.archetype_all_fits,
             anti_archetype_triggered=ctx.anti_archetype_triggered,
+            **v5_fields,
         )
 
     def compute_decision_from_evaluation(
@@ -458,6 +497,8 @@ class DecisionCalculator:
         gate_evaluations: dict[str, GateEvaluation],
         concentration_warnings: Optional[dict[str, list[str]]] = None,
         archetype_results: Optional[dict[str, dict[str, Any]]] = None,
+        v5_envelopes: Optional[dict[str, Any]] = None,
+        v5_policy: Optional[Any] = None,
     ) -> dict[str, Decision]:
         """Compute decisions for a batch of evaluations.
 
@@ -468,10 +509,17 @@ class DecisionCalculator:
                      "anti_archetype_triggered": str|None}}``.
         When present, the fields are threaded into DecisionContext and the
         calculator's anti-archetype short-circuit handles REJECT semantics.
+
+        ``v5_envelopes`` is an optional ``{eval_id: V5Envelope}`` map produced
+        upstream by :func:`app.v5.pipeline.compute_v5_envelope`. When present,
+        v5 fields are denormalized onto every Decision and (if ``v5_policy``
+        has ``v5_active=True`` and the scanner is allow-listed) the v5
+        verdict rules drive the verdict in place of v4.1.0.
         """
         decisions: dict[str, Decision] = {}
         warnings = concentration_warnings or {}
         archetype_map = archetype_results or {}
+        envelope_map = v5_envelopes or {}
 
         for evaluation in evaluations:
             try:
@@ -480,6 +528,7 @@ class DecisionCalculator:
                 gate_eval = gate_evaluations.get(eval_id)
                 eval_warnings = warnings.get(eval_id, [])
                 arch = archetype_map.get(eval_id, {})
+                envelope = envelope_map.get(eval_id)
 
                 ctx = DecisionContext.from_evaluation_and_results(
                     evaluation=evaluation,
@@ -491,7 +540,11 @@ class DecisionCalculator:
                     ctx.archetype_match_score = arch.get("archetype_match_score")
                     ctx.archetype_all_fits = arch.get("archetype_all_fits")
                     ctx.anti_archetype_triggered = arch.get("anti_archetype_triggered")
-                decision = self.compute_decision(ctx, eval_warnings)
+                if envelope is not None:
+                    ctx.v5_envelope = envelope
+                decision = self.compute_decision(
+                    ctx, eval_warnings, v5_policy=v5_policy,
+                )
                 decisions[eval_id] = decision
 
             except Exception as e:

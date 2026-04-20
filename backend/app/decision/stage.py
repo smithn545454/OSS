@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional, Sequence
 
+from app.core.pipeline import PipelineOrchestrator
 from app.core.schemas import (
     AntiArchetypeConfig,
     ArchetypeConfig,
@@ -26,13 +27,12 @@ from app.core.schemas import (
     TradeThesis,
     Verdict,
 )
-from app.core.pipeline import PipelineOrchestrator
-from app.db.tables import EvaluationTable, PillarScoreTable, TradeThesisTable
+from app.db.tables import EvaluationTable, TradeThesisTable
 from app.decision.calculator import DecisionCalculator
 from app.decision.concentration import (
+    analyze_concentration,
     check_concentration_warnings,
     update_decisions_with_warnings,
-    analyze_concentration,
 )
 from app.gates.models import GateEvaluation
 from app.pillars.models import PillarResult
@@ -51,7 +51,7 @@ class DecisionStage:
     
     Also handles Phase 10 LLM integration: generates trade theses for APPROVE verdicts.
     """
-    
+
     def __init__(
         self,
         orchestrator: PipelineOrchestrator,
@@ -61,6 +61,7 @@ class DecisionStage:
         pillar_config: Optional[PillarConfig] = None,
         archetypes_config: Optional[ArchetypeConfig] = None,
         anti_archetypes_config: Optional[AntiArchetypeConfig] = None,
+        v5_policy: Optional[Any] = None,
     ) -> None:
         """Initialize the decision stage.
 
@@ -70,6 +71,11 @@ class DecisionStage:
             pillar_weights: Weights for combining pillar scores
             thesis_config: LLM thesis generation configuration
             pillar_config: Full PillarConfig for per-scanner weight lookup
+            v5_policy: Full :class:`PolicyConfig` for v5 settings. When
+                non-None and ``v5_policy.v5_active=True``, the stage
+                computes a :class:`V5Envelope` per evaluation and
+                threads it into the decision. Shadow-only unless the
+                scanner is in ``v5_policy.v5_active_scanners``.
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = decision_config or DecisionConfig()
@@ -81,8 +87,9 @@ class DecisionStage:
         )
         self._archetypes_config = archetypes_config
         self._anti_archetypes_config = anti_archetypes_config
+        self._v5_policy = v5_policy
         self._thesis_generator = None  # Lazy init to avoid import if not needed
-    
+
     def _compute_archetype_results(
         self,
         evaluations: Sequence[Evaluation],
@@ -164,6 +171,70 @@ class DecisionStage:
                 )
         return results
 
+    def _compute_v5_envelopes(
+        self,
+        evaluations: Sequence[Evaluation],
+        pillar_results: dict[str, Sequence[PillarResult]],
+        feature_sets: dict[str, Any],
+        opportunities: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run v5 dual-conviction scoring per evaluation.
+
+        Returns ``{eval_id: V5Envelope}``. Empty dict when v5 is disabled
+        on the policy. Failures degrade gracefully per-evaluation —
+        a single bad evaluation doesn't kill the batch.
+
+        Rate lookups are currently empty (seed-fallback), matching the
+        Phase 5 scope. Phase 7 will add a rolling rate estimator that
+        caches Wilson bounds per archetype at Lambda init.
+        """
+        if self._v5_policy is None or not getattr(self._v5_policy, "v5_active", False):
+            return {}
+
+        from app.pillars.models import ScoringContext
+        from app.v5.pipeline import compute_v5_envelope
+
+        envelopes: dict[str, Any] = {}
+        for evaluation in evaluations:
+            eval_id = evaluation.evaluation_id
+            try:
+                ctx = ScoringContext.from_evaluation_and_features(
+                    evaluation=evaluation,
+                    feature_set=feature_sets.get(eval_id),
+                    opportunity=opportunities.get(evaluation.underlying_ticker),
+                )
+                pillars = pillar_results.get(eval_id, [])
+                pillar_scores: dict[str, float] = {}
+                for pr in pillars:
+                    pid = (
+                        pr.pillar_id.value
+                        if hasattr(pr.pillar_id, "value")
+                        else str(pr.pillar_id)
+                    )
+                    pillar_scores[pid] = pr.score
+                    short = {
+                        "TRADE_STRUCTURE": "TS",
+                        "MOVE_POTENTIAL": "MP",
+                        "DIRECTIONAL_CONVICTION": "DC",
+                    }.get(pid)
+                    if short:
+                        pillar_scores[short] = pr.score
+
+                envelope = compute_v5_envelope(
+                    ctx,
+                    self._v5_policy,
+                    pillar_scores=pillar_scores,
+                    hr_rate_lookup=None,   # Seed-fallback; Phase 7+ wires live rates
+                    p_rate_lookup=None,
+                    regime=None,           # Neutral; Phase 7+ wires SPY/VIX
+                )
+                envelopes[eval_id] = envelope
+            except Exception as exc:
+                logger.warning(
+                    "v5 envelope computation failed for %s: %s", eval_id, exc
+                )
+        return envelopes
+
     async def execute(
         self,
         run_id: str,
@@ -195,12 +266,12 @@ class DecisionStage:
             Tuple of (Dict mapping evaluation_id to Decision, List of TradeThesis)
         """
         logger.info(f"Stage 7: Computing decisions for {len(evaluations)} evaluations")
-        
+
         # Update current stage
         await self._orchestrator.update_current_stage(run_id, PipelineStage.DECISION_LOGIC)
-        
+
         theses: list[TradeThesis] = []
-        
+
         if not evaluations:
             # Record empty stage event
             await self._orchestrator.record_stage_event(
@@ -216,11 +287,22 @@ class DecisionStage:
                 },
             )
             return {}, theses
-        
+
         # v4.1.0: compute archetype matches + anti-archetype gates per
         # evaluation when configured. Uses ScoringContext reconstituted
         # from evaluation + features. No-op when either config is None.
         archetype_results = self._compute_archetype_results(
+            evaluations=evaluations,
+            pillar_results=pillar_results,
+            feature_sets=feature_sets or {},
+            opportunities=opportunities or {},
+        )
+
+        # v5.0.0: compute dual-conviction envelopes per evaluation when
+        # v5_policy.v5_active is True. No-op otherwise. When present, v5
+        # fields are denormalized onto every Decision; if the scanner is
+        # in v5_active_scanners, v5 drives the verdict.
+        v5_envelopes = self._compute_v5_envelopes(
             evaluations=evaluations,
             pillar_results=pillar_results,
             feature_sets=feature_sets or {},
@@ -233,8 +315,10 @@ class DecisionStage:
             pillar_results=pillar_results,
             gate_evaluations=gate_evaluations,
             archetype_results=archetype_results,
+            v5_envelopes=v5_envelopes,
+            v5_policy=self._v5_policy,
         )
-        
+
         # Step 2: Check concentration warnings if enabled
         if check_concentration:
             warnings = check_concentration_warnings(evaluations, decisions)
@@ -243,11 +327,11 @@ class DecisionStage:
                 logger.info(
                     f"Added concentration warnings to {len(warnings)} evaluations"
                 )
-        
+
         # Step 3: Persist decisions with evaluations
         if persist_decisions:
             await self._persist_decisions(evaluations, decisions)
-        
+
         # Step 4: Generate theses for APPROVE verdicts (Phase 10)
         if generate_theses and self._thesis_config.enabled:
             theses = await self._generate_theses(
@@ -257,13 +341,13 @@ class DecisionStage:
                 scanner_triggers=scanner_triggers or {},
                 features=features or {},
             )
-        
+
         # Compute statistics
         stats = self._compute_stats(evaluations, decisions)
         stats["theses_generated"] = len([t for t in theses if str(t.status) == "COMPLETED"])
         stats["theses_failed"] = len([t for t in theses if str(t.status) == "FAILED"])
         stats["theses_rate_limited"] = len([t for t in theses if str(t.status) == "RATE_LIMITED"])
-        
+
         # Record stage event
         await self._orchestrator.record_stage_event(
             run_id=run_id,
@@ -272,22 +356,22 @@ class DecisionStage:
             items_out=stats["total_actionable"],  # APPROVE + WATCH
             metadata=stats,
         )
-        
+
         logger.info(
             f"Stage 7 complete: {stats['approves']} APPROVE, "
             f"{stats['watches']} WATCH, {stats['rejects']} REJECT, "
             f"{stats['theses_generated']} theses generated"
         )
-        
+
         return decisions, theses
-    
+
     def _get_thesis_generator(self):
         """Lazy init thesis generator to avoid import if not needed."""
         if self._thesis_generator is None:
             from app.llm.generator import ThesisGenerator
             self._thesis_generator = ThesisGenerator(config=self._thesis_config)
         return self._thesis_generator
-    
+
     async def _generate_theses(
         self,
         evaluations: Sequence[Evaluation],
@@ -316,11 +400,11 @@ class DecisionStage:
             if e.evaluation_id in decisions
             and decisions[e.evaluation_id].verdict == Verdict.APPROVE
         ]
-        
+
         if not approved:
             logger.info("No APPROVE verdicts - skipping thesis generation")
             return []
-        
+
         logger.info(f"Generating theses for {len(approved)} APPROVE evaluations")
 
         generator = self._get_thesis_generator()
@@ -404,22 +488,22 @@ class DecisionStage:
                     matched_rules=matched_rules,
                     total_active_rules=total_active_rules,
                 )
-                
+
                 # Persist thesis
                 await TradeThesisTable.put(thesis)
                 theses.append(thesis)
-                
+
                 logger.debug(f"Generated thesis for {eval_id}: {thesis.status}")
-                
+
             except Exception as e:
                 logger.error(f"Error generating thesis for {evaluation.evaluation_id}: {e}")
                 continue
-        
+
         completed = len([t for t in theses if str(t.status) == "COMPLETED"])
         logger.info(f"Generated {completed}/{len(approved)} theses successfully")
-        
+
         return theses
-    
+
     async def _persist_decisions(
         self,
         evaluations: Sequence[Evaluation],
@@ -432,7 +516,7 @@ class DecisionStage:
             decisions: Dict mapping evaluation_id to Decision
         """
         eval_map = {e.evaluation_id: e for e in evaluations}
-        
+
         for eval_id, decision in decisions.items():
             try:
                 evaluation = eval_map.get(eval_id)
@@ -440,7 +524,7 @@ class DecisionStage:
                     await EvaluationTable.put(evaluation, decision)
             except Exception as e:
                 logger.error(f"Error persisting decision for {eval_id}: {e}")
-    
+
     def _compute_stats(
         self,
         evaluations: Sequence[Evaluation],
@@ -459,62 +543,62 @@ class DecisionStage:
         approves = 0
         watches = 0
         rejects = 0
-        
+
         # Count quality tiers
         tier_1 = 0
         tier_2 = 0
         tier_3 = 0
-        
+
         # Count rejection reasons
         rejected_by_gates = 0
         rejected_by_score = 0
-        
+
         # Track concentration warnings
         has_ticker_warning = 0
         has_directional_warning = 0
-        
+
         # Score distributions
         approve_scores: list[float] = []
         watch_scores: list[float] = []
         reject_scores: list[float] = []
-        
+
         for decision in decisions.values():
             if decision.verdict == Verdict.APPROVE:
                 approves += 1
                 approve_scores.append(decision.final_score)
-                
+
                 if decision.quality_tier:
                     tier_name = str(decision.quality_tier)
                     if hasattr(decision.quality_tier, 'value'):
                         tier_name = decision.quality_tier.value
-                    
+
                     if tier_name == "TIER_1":
                         tier_1 += 1
                     elif tier_name == "TIER_2":
                         tier_2 += 1
                     elif tier_name == "TIER_3":
                         tier_3 += 1
-                        
+
             elif decision.verdict == Verdict.WATCH:
                 watches += 1
                 watch_scores.append(decision.final_score)
-                
+
             elif decision.verdict == Verdict.REJECT:
                 rejects += 1
                 reject_scores.append(decision.final_score)
-                
+
                 if decision.primary_reason_code == "REJECTED_BY_GATES":
                     rejected_by_gates += 1
                 elif decision.primary_reason_code == "REJECTED_BY_SCORE":
                     rejected_by_score += 1
-            
+
             # Count warnings
             for warning in decision.concentration_warnings:
                 if "SAME_TICKER" in warning:
                     has_ticker_warning += 1
                 if "DIRECTIONAL" in warning:
                     has_directional_warning += 1
-        
+
         # Compute averages
         avg_approve_score = (
             sum(approve_scores) / len(approve_scores) if approve_scores else 0
@@ -525,10 +609,10 @@ class DecisionStage:
         avg_reject_score = (
             sum(reject_scores) / len(reject_scores) if reject_scores else 0
         )
-        
+
         # Run concentration analysis
         analysis = analyze_concentration(evaluations, decisions)
-        
+
         return {
             "approves": approves,
             "watches": watches,
@@ -701,7 +785,7 @@ def get_tier_1_evaluations(
         List of Evaluations with APPROVE verdict and TIER_1 quality
     """
     from app.core.schemas import QualityTier
-    
+
     return [
         e for e in evaluations
         if e.evaluation_id in decisions
@@ -722,18 +806,18 @@ def extract_decisions_for_paper_trading(
         Dict mapping evaluation_id to paper trading data
     """
     extracted: dict[str, dict] = {}
-    
+
     for eval_id, decision in decisions.items():
         # Only include APPROVE and WATCH for paper trading
         if decision.verdict not in (Verdict.APPROVE, Verdict.WATCH):
             continue
-        
+
         tier_value = None
         if decision.quality_tier:
             tier_value = str(decision.quality_tier)
             if hasattr(decision.quality_tier, 'value'):
                 tier_value = decision.quality_tier.value
-        
+
         extracted[eval_id] = {
             "verdict": str(decision.verdict.value) if hasattr(decision.verdict, 'value') else str(decision.verdict),
             "quality_tier": tier_value,
@@ -741,5 +825,5 @@ def extract_decisions_for_paper_trading(
             **decision.pillar_score_dict(),
             "concentration_warnings": decision.concentration_warnings,
         }
-    
+
     return extracted
