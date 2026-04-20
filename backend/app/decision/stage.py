@@ -40,6 +40,30 @@ from app.pillars.models import PillarResult
 logger = logging.getLogger(__name__)
 
 
+def _normalize_opportunities(opportunities: Any) -> dict[str, Any]:
+    """Accept either a dict or a list of Opportunity objects.
+
+    Callers in the main orchestrator pass ``list[Opportunity]`` directly
+    (it's the natural output of Stage 2). The archetype + v5 pipelines
+    expect a dict keyed by underlying_ticker so ``ScoringContext`` can
+    pick up per-ticker scanner metrics. Normalize here so both shapes
+    work — this fixes a latent v4.1.0 bug that made archetype matching
+    silently fail on worker-path pipeline runs.
+    """
+    if opportunities is None:
+        return {}
+    if isinstance(opportunities, dict):
+        return opportunities
+    if isinstance(opportunities, list):
+        out: dict[str, Any] = {}
+        for opp in opportunities:
+            ticker = getattr(opp, "underlying_ticker", None)
+            if ticker:
+                out[ticker] = opp
+        return out
+    return {}
+
+
 class DecisionStage:
     """Stage 7: Decision Logic.
     
@@ -111,6 +135,7 @@ class DecisionStage:
         from app.archetypes.matcher import compute_archetype_match
         from app.pillars.models import ScoringContext
 
+        opportunities = _normalize_opportunities(opportunities)
         results: dict[str, dict[str, Any]] = {}
         for evaluation in evaluations:
             eval_id = evaluation.evaluation_id
@@ -194,6 +219,7 @@ class DecisionStage:
         from app.pillars.models import ScoringContext
         from app.v5.pipeline import compute_v5_envelope
 
+        opportunities = _normalize_opportunities(opportunities)
         envelopes: dict[str, Any] = {}
         for evaluation in evaluations:
             eval_id = evaluation.evaluation_id
