@@ -64,6 +64,26 @@ def _normalize_opportunities(opportunities: Any) -> dict[str, Any]:
     return {}
 
 
+def _normalize_feature_sets(feature_sets: Any) -> dict[str, Any]:
+    """Accept either a dict or a list of FeatureSet objects.
+
+    Similar to _normalize_opportunities — callers pass either shape.
+    Returns ``dict[evaluation_id, FeatureSet]``.
+    """
+    if feature_sets is None:
+        return {}
+    if isinstance(feature_sets, dict):
+        return feature_sets
+    if isinstance(feature_sets, list):
+        out: dict[str, Any] = {}
+        for fs in feature_sets:
+            eval_id = getattr(fs, "evaluation_id", None)
+            if eval_id:
+                out[eval_id] = fs
+        return out
+    return {}
+
+
 class DecisionStage:
     """Stage 7: Decision Logic.
     
@@ -135,6 +155,7 @@ class DecisionStage:
         from app.archetypes.matcher import compute_archetype_match
         from app.pillars.models import ScoringContext
 
+        feature_sets = _normalize_feature_sets(feature_sets)
         opportunities = _normalize_opportunities(opportunities)
         results: dict[str, dict[str, Any]] = {}
         for evaluation in evaluations:
@@ -219,6 +240,7 @@ class DecisionStage:
         from app.pillars.models import ScoringContext
         from app.v5.pipeline import compute_v5_envelope
 
+        feature_sets = _normalize_feature_sets(feature_sets)
         opportunities = _normalize_opportunities(opportunities)
         envelopes: dict[str, Any] = {}
         for evaluation in evaluations:
