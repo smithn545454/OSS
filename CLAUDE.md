@@ -93,8 +93,32 @@ The backend runs as a single Lambda with three invocation modes:
 - `app/config.py` — Settings via pydantic-settings
 - `app/services/` — External API clients (Polygon, Finnhub, Slack)
 - `app/llm/` — Post-decision trade thesis generation (LLM is never used in decision logic)
-- `app/calibration/` — Performance tracking and analysis
+- `app/calibration/` — Performance tracking, archetype rates, discovery/drift detection
 - `app/observability/` — Pipeline stage tracing/telemetry
+- `app/v5/` — **v5 dual-conviction scoring** (HR/P archetypes, GBM co-scorer, decision pipeline)
+
+### v5 Scoring Regime (active as of 2026-04-20)
+
+Policy **v4.1.1** activated v5: `v5_active=True`, scanners = `{UNUSUAL_VOLUME,
+CHEAP_OPTIONS, BREAKDOWN, REVALIDATION}`. See `docs/v5_architecture.md` for
+the full design, `docs/archetypes_catalog.md` for the archetype library.
+
+**Two convictions:**
+- **HR Conviction (0–20):** `100 × Wilson_lower(P(MFE ≥ 200%)) × fit × regime`.
+  Calibrated grand-slam probability.
+- **P Conviction (0–100):** `100 × Wilson_lower(P_win) × normalized_pnl × fit × regime`.
+  Calibrated profitability (catches grinder patterns like BREAKDOWN).
+
+**Verdict order:** gates → anti-archetypes → v5 tier assignment when scanner
+is in `v5_active_scanners`; otherwise v4.1.0 fallback. `BREAKOUT` and
+`COMPRESSION_EXPANSION` remain on v4.1.0 until positive archetypes surface.
+
+**Critical wiring fix during Phase 7 cutover:** `opportunities` and `feature_sets`
+are passed as `list[...]` from the orchestrator but stage helpers expected
+`dict[...]`. `_normalize_opportunities` and `_normalize_feature_sets` in
+`app/decision/stage.py` accept either shape. Before the fix, v4.1.0 archetype
+matching was silently failing on the worker path (try/except swallowed the
+TypeError). Now both v4.1.0 archetypes AND v5 envelopes compute correctly.
 
 ### Frontend
 - React 18 + TypeScript + Vite + Tailwind CSS
@@ -382,10 +406,17 @@ After any rollback, tell the user:
 
 Baselines capture a known-good pipeline state: code (git tag) + policy config (exported JSON). Stored in `baselines/` with restore instructions.
 
-**Current known-good baseline: `pipeline-stable-2026-03-13`**
-- Policy v2.0.2, Lambda v127, commit `c651a2c`
-- 16.1% gate pass rate, 15 approvals, 231 watches per run
-- Full restore instructions in `baselines/2026-03-13-README.md`
+**Current known-good baseline: `pipeline-stable-v5.0-2026-04-20`**
+- Policy v4.1.1 (v5 active), Lambda v255, hash `0ef0cc52ae35340c`
+- v5_active=True, scanners UV/CHEAP/BREAKDOWN/REVALIDATION, GBM HR-only at 0.5× weight
+- First live Decision carrying `v5_scoring_version="v5.0.0"` on 2026-04-20 02:49 UTC
+- Full context in `baselines/2026-04-19-v5-cutover-README.md`
+
+**Previous baseline: `pipeline-stable-v4.0.1-2026-04-18`**
+- Policy v4.0.1, Lambda v244
+- See `baselines/2026-04-18-v4.0.1-README.md`
+
+**Deeper history:** `baselines/2026-03-13-README.md` covers Policy v2.0.2.
 
 ### Convention
 - Tag code: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
