@@ -1,0 +1,278 @@
+Loading closed positions (region=us-west-1 prefix=oss-dev)...
+  loaded 18567 closed positions
+
+  usable with conv_v4: 18567
+
+==============================================================================
+SECTION A — THE ≥80 ANOMALY: why 78→80 performance collapses
+==============================================================================
+
+75-78 cohort  (below TIER_1-candidate threshold) (n=318):
+  mean P&L: +23.33%  median: +58.56%
+  win rate: 64.8%  stops: 35.2%  profit-targets: 64.8%
+  big wins (≥100%): 16 (5.0%)
+  mean MFE: +23.2%  median: +10.6%
+  CALL/PUT: 280/35
+  abs(delta) mean: 0.44
+  days held mean: 3.4
+  scanners: BREAKOUT=168(53%), CHEAP_OPTIONS=118(37%), UNUSUAL_VOLUME=18(6%), BREAKDOWN=12(4%), COMPRESSION_EXPANSION=2(1%)
+
+78-80 cohort  (the sweet spot — 64% win) (n=90):
+  mean P&L: +34.24%  median: +67.22%
+  win rate: 70.0%  stops: 28.9%  profit-targets: 70.0%
+  big wins (≥100%): 2 (2.2%)
+  mean MFE: +13.6%  median: +0.0%
+  CALL/PUT: 86/0
+  abs(delta) mean: 0.45
+  days held mean: 2.8
+  scanners: BREAKOUT=58(64%), CHEAP_OPTIONS=22(24%), UNUSUAL_VOLUME=10(11%)
+
+80-82 cohort  (the anomaly — 44% win, no big wins) (n=21):
+  mean P&L: -8.18%  median: -51.07%
+  win rate: 42.9%  stops: 57.1%  profit-targets: 42.9%
+  big wins (≥100%): 0 (0.0%)
+  mean MFE: +23.2%  median: +14.6%
+  CALL/PUT: 16/2
+  abs(delta) mean: 0.44
+  days held mean: 3.6
+  scanners: UNUSUAL_VOLUME=8(38%), CHEAP_OPTIONS=7(33%), BREAKOUT=4(19%), BREAKDOWN=2(10%)
+
+≥82 cohort  (tiny sample) (n=6):
+  mean P&L: +4.06%  median: +1.40%
+  win rate: 50.0%  stops: 50.0%  profit-targets: 50.0%
+  big wins (≥100%): 0 (0.0%)
+  mean MFE: +25.2%  median: +2.3%
+  CALL/PUT: 6/0
+  abs(delta) mean: 0.41
+  days held mean: 1.2
+  scanners: CHEAP_OPTIONS=3(50%), UNUSUAL_VOLUME=2(33%), BREAKOUT=1(17%)
+
+==============================================================================
+EVERY SINGLE ≥80 TRADE (n=27) — individual examination
+==============================================================================
+  # ticker  scanner      type   conv    DC    MP    TS      pnl     mfe exit           days
+  1 VLO     BREAKOUT     CALL  83.44  98.0  69.6  73.2   +54.5%   +4.6% PROFIT_TARGET     1
+  2 WULF    UNUSUAL_VOLU CALL  82.85  82.9  79.0  89.6   +93.5%  +93.5% PROFIT_TARGET     0
+  3 WULF    UNUSUAL_VOLU CALL  82.58  82.9  79.9  86.9   +53.0%  +53.0% PROFIT_TARGET     0
+  4 TSN     CHEAP_OPTION CALL  82.18  76.8  74.2  94.2   -59.8%   +0.0% STOP_LOSS         5
+  5 ENPH    CHEAP_OPTION CALL  82.10  86.8  72.2  90.7   -66.7%   +0.0% STOP_LOSS         1
+  6 MU      CHEAP_OPTION CALL  82.02  75.6  75.6  92.7   -50.1%   +0.0% STOP_LOSS         0
+  7 VLO     BREAKOUT     CALL  81.99  98.0  68.2  69.2   +77.4%  +10.1% PROFIT_TARGET     1
+  8 WULF    UNUSUAL_VOLU CALL  81.63  82.9  80.6  82.5   +58.8%  +58.8% PROFIT_TARGET     0
+  9 WULF    UNUSUAL_VOLU CALL  81.59  82.9  78.5  86.2   +67.6%  +67.6% PROFIT_TARGET     1
+ 10 WULF    UNUSUAL_VOLU CALL  81.59  82.9  78.5  86.2   +67.6%  +67.6% PROFIT_TARGET     1
+ 11 WULF    UNUSUAL_VOLU CALL  81.59  82.9  78.5  86.2   +67.6%  +67.6% PROFIT_TARGET     1
+ 12 WULF    UNUSUAL_VOLU CALL  81.59  82.9  78.5  86.2   +67.6%  +67.6% PROFIT_TARGET     1
+ 13 MU      CHEAP_OPTION CALL  81.52  85.0  75.9  85.8   -58.1%  +19.3% STOP_LOSS         2
+ 14 VLO     BREAKOUT     CALL  81.30  98.0  72.2  60.8   +66.5%  +18.1% PROFIT_TARGET     1
+ 15 TSN     CHEAP_OPTION CALL  81.10  79.5  73.2  90.8   -69.8%   +0.0% STOP_LOSS         5
+ 16 NKE     BREAKDOWN    PUT   80.89  98.3  57.7  82.5   -50.3%   +0.0% STOP_LOSS         4
+ 17 VLO     BREAKOUT     CALL  80.33  98.0  68.9  61.5   +57.0%  +22.2% PROFIT_TARGET     2
+ 18 PWR     BREAKOUT     CALL  80.25  96.5  56.2  86.2   +55.3%   +3.9% PROFIT_TARGET     4
+ 19 NKE     BREAKDOWN    PUT   80.25  97.5  54.0  89.3   -52.4%  +41.7% STOP_LOSS         8
+ 20 FMC     UNUSUAL_VOLU ?     80.22  83.2  72.6  92.5   -77.8%   +0.0% STOP_LOSS         2
+ 21 FMC     UNUSUAL_VOLU ?     80.22  83.2  72.6  92.5   -77.8%   +0.0% STOP_LOSS         2
+ 22 FMC     UNUSUAL_VOLU ?     80.20  71.2  79.3  88.5   -62.1%   +0.0% STOP_LOSS         6
+ 23 MU      CHEAP_OPTION CALL  80.18  91.4  77.1  78.1   -67.5%  +11.7% STOP_LOSS         9
+ 24 MU      CHEAP_OPTION CALL  80.12  91.4  75.2  80.0   -71.1%  +17.5% STOP_LOSS         9
+ 25 MU      CHEAP_OPTION CALL  80.11  91.8  76.9  78.0   -66.7%  +14.6% STOP_LOSS         9
+ 26 ENPH    CHEAP_OPTION CALL  80.06  86.8  72.3  85.1   -52.4%   +0.0% STOP_LOSS         1
+ 27 AMGN    CHEAP_OPTION CALL  80.03  89.3  66.7  91.0   -51.1%   +0.0% STOP_LOSS         6
+
+==============================================================================
+SECTION B — HOME-RUN FINGERPRINT: where in the distribution do
+            ≥100%, ≥200%, and ≥500% winners actually sit?
+==============================================================================
+
+Total home runs by threshold:
+  ≥100%: 1465 trades (7.89% of all)
+  ≥200%: 221 trades (1.19% of all)
+  ≥500%: 9 trades (0.05% of all)
+
+≥100% winners (n=1465) — v4.0.1 conviction distribution:
+  [  0, 30):    9 (  0.6%)  
+  [ 30, 40):   33 (  2.3%)  █
+  [ 40, 50):  276 ( 18.8%)  █████████
+  [ 50, 55):  282 ( 19.2%)  █████████
+  [ 55, 60):  294 ( 20.1%)  ██████████
+  [ 60, 65):  294 ( 20.1%)  ██████████
+  [ 65, 70):  192 ( 13.1%)  ██████
+  [ 70, 75):   67 (  4.6%)  ██
+  [ 75, 80):   18 (  1.2%)  
+  [ 80, 85):    0 (  0.0%)  
+  [ 85,100):    0 (  0.0%)  
+
+≥200% winners (grand slams) — v4.0.1 conviction distribution:
+  [  0, 30):    3 (  1.4%)  
+  [ 30, 40):    5 (  2.3%)  █
+  [ 40, 50):   41 ( 18.6%)  █████████
+  [ 50, 55):   47 ( 21.3%)  ██████████
+  [ 55, 60):   30 ( 13.6%)  ██████
+  [ 60, 65):   49 ( 22.2%)  ███████████
+  [ 65, 70):   38 ( 17.2%)  ████████
+  [ 70, 75):    6 (  2.7%)  █
+  [ 75, 80):    2 (  0.9%)  
+  [ 80, 85):    0 (  0.0%)  
+  [ 85,100):    0 (  0.0%)  
+
+≥500% winners (legendary) — v4.0.1 conviction distribution:
+  [  0, 30):    0 (  0.0%)  
+  [ 30, 40):    1 ( 11.1%)  █████
+  [ 40, 50):    1 ( 11.1%)  █████
+  [ 50, 55):    0 (  0.0%)  
+  [ 55, 60):    0 (  0.0%)  
+  [ 60, 65):    2 ( 22.2%)  ███████████
+  [ 65, 70):    4 ( 44.4%)  ██████████████████████
+  [ 70, 75):    1 ( 11.1%)  █████
+  [ 75, 80):    0 (  0.0%)  
+  [ 80, 85):    0 (  0.0%)  
+  [ 85,100):    0 (  0.0%)  
+
+ALL TRADES (for reference) — v4.0.1 conviction distribution:
+  [  0, 30):  163 (  0.9%)  
+  [ 30, 40):  413 (  2.2%)  █
+  [ 40, 50): 3534 ( 19.0%)  █████████
+  [ 50, 55): 3588 ( 19.3%)  █████████
+  [ 55, 60): 3585 ( 19.3%)  █████████
+  [ 60, 65): 3215 ( 17.3%)  ████████
+  [ 65, 70): 2397 ( 12.9%)  ██████
+  [ 70, 75): 1237 (  6.7%)  ███
+  [ 75, 80):  408 (  2.2%)  █
+  [ 80, 85):   27 (  0.1%)  
+  [ 85,100):    0 (  0.0%)  
+
+==============================================================================
+SECTION B.2 — SCANNER CONTRIBUTION TO HOME RUNS
+==============================================================================
+
+Scanner                  trades  % of all  ≥100% HR  hit rate  ≥200% HR  hit rate  ≥500%
+                              4      0.0%         0     0.00%         0     0.00%      0
+BREAKDOWN                   232      1.2%        25    10.78%         0     0.00%      0
+BREAKOUT                    820      4.4%        29     3.54%         3     0.37%      0
+CHEAP_OPTIONS              7979     43.0%       486     6.09%        46     0.58%      1
+COMPRESSION_EXPANSION       682      3.7%        40     5.87%         0     0.00%      0
+REVALIDATION                112      0.6%        32    28.57%         2     1.79%      0
+UNUSUAL_VOLUME             8738     47.1%       853     9.76%       170     1.95%      8
+
+==============================================================================
+SECTION B.3 — HOME-RUN CATCH RATE BY CONVICTION THRESHOLD
+==============================================================================
+
+If we only took trades with v4.0.1 conviction ≥ threshold, how many
+home runs would we capture? (Baseline: taking 10% of trades should
+catch ~10% of home runs if random.)
+
+≥ threshold   trades  % of all  ≥100% caught   catch rate  ≥200% caught   catch rate
+≥ 50           14457     77.9%          1147        78.3%           172        77.8%
+≥ 55           10869     58.5%           865        59.0%           125        56.6%
+≥ 60            7284     39.2%           571        39.0%            95        43.0%
+≥ 65            4069     21.9%           277        18.9%            46        20.8%
+≥ 70            1672      9.0%            85         5.8%             8         3.6%
+≥ 75             435      2.3%            18         1.2%             2         0.9%
+≥ 78             117      0.6%             2         0.1%             0         0.0%
+≥ 80              27      0.1%             0         0.0%             0         0.0%
+
+==============================================================================
+SECTION C — NOISE vs DIAMONDS: UNUSUAL_VOLUME + CHEAP_OPTIONS
+==============================================================================
+
+These two scanners produce 87% of trades. Question: do they
+contain the home runs we care about, or can we drop them?
+
+
+  UNUSUAL_VOLUME:
+    trades: 8738  mean P&L: -0.64%  win rate: 40.9%
+    home runs (≥100%): 853 (9.76%)
+    home runs (≥200%): 170 (1.95%)
+    home runs (≥500%): 8
+    v4.0.1 score of grand slams: mean 55.0, median 56.1, max 72.4
+
+  CHEAP_OPTIONS:
+    trades: 7979  mean P&L: +1.45%  win rate: 44.9%
+    home runs (≥100%): 486 (6.09%)
+    home runs (≥200%): 46 (0.58%)
+    home runs (≥500%): 1
+    v4.0.1 score of grand slams: mean 60.8, median 63.1, max 75.3
+
+==============================================================================
+SECTION D — HOME-RUN ENTRY FINGERPRINT (≥200% winners)
+==============================================================================
+
+≥200% winners (n=221):
+  |entry_delta|          n= 180  mean=   0.37  median=   0.35  min=   0.13  max=   0.79
+  entry_iv (decimal)     n= 180  mean=   0.45  median=   0.35  min=   0.08  max=   1.04
+  days_held              n= 221  mean=   2.90  median=   2.00  min=   0.00  max=  16.00
+  DC pillar              n= 221  mean=  50.61  median=  48.62  min=   8.91  max=  98.53
+  MP pillar              n= 221  mean=  51.92  median=  52.01  min=   0.00  max=  76.16
+  TS pillar              n= 221  mean=  76.16  median=  76.15  min=  54.80  max=  94.16
+  v4 conviction          n= 221  mean=  56.45  median=  56.96  min=   0.00  max=  76.45
+  v3 conviction          n= 221  mean=  64.58  median=  65.07  min=  41.84  max=  81.50
+  MFE                    n= 221  mean= 258.99  median= 243.08  min=   0.00  max= 582.43
+  CALL/PUT: 92/35 (42%/16%)
+  UNUSUAL_VOLUME          170 ( 76.9%)  baseline 47.1%  lift x1.63
+  CHEAP_OPTIONS            46 ( 20.8%)  baseline 43.0%  lift x0.48
+  BREAKOUT                  3 (  1.4%)  baseline  4.4%  lift x0.31
+  REVALIDATION              2 (  0.9%)  baseline  0.6%  lift x1.50
+
+≥500% winners (n=9):
+  |entry_delta|          n=   5  mean=   0.39  median=   0.39  min=   0.20  max=   0.56
+  entry_iv (decimal)     n=   5  mean=   0.59  median=   0.63  min=   0.26  max=   0.95
+  days_held              n=   9  mean=   2.67  median=   2.00  min=   1.00  max=   9.00
+  DC pillar              n=   9  mean=  59.31  median=  68.62  min=   9.63  max=  88.79
+  MP pillar              n=   9  mean=  54.24  median=  54.17  min=  40.38  max=  68.84
+  TS pillar              n=   9  mean=  81.87  median=  83.69  min=  69.79  max=  88.23
+  v4 conviction          n=   9  mean=  61.24  median=  66.04  min=  38.76  max=  70.89
+  v3 conviction          n=   9  mean=  64.51  median=  65.62  min=  52.09  max=  79.26
+  MFE                    n=   9  mean= 527.10  median= 517.47  min= 500.00  max= 582.43
+  CALL/PUT: 1/1 (11%/11%)
+  UNUSUAL_VOLUME            8 ( 88.9%)  baseline 47.1%  lift x1.89
+  CHEAP_OPTIONS             1 ( 11.1%)  baseline 43.0%  lift x0.26
+
+≤-50% losers (for contrast) (n=9813):
+  |entry_delta|          n=7776  mean=   0.43  median=   0.43  min=   0.01  max=   1.00
+  entry_iv (decimal)     n=7776  mean=   0.42  median=   0.38  min=   0.00  max=   1.33
+  days_held              n=9813  mean=   6.59  median=   4.00  min=   0.00  max=  44.00
+  DC pillar              n=9813  mean=  57.68  median=  57.03  min=   0.00  max=  98.72
+  MP pillar              n=9813  mean=  51.83  median=  51.43  min=   0.00  max=  83.67
+  TS pillar              n=9813  mean=  71.51  median=  71.90  min=   0.00  max=  97.61
+  v4 conviction          n=9813  mean=  57.40  median=  57.76  min=   0.00  max=  82.18
+  v3 conviction          n=9813  mean=  54.52  median=  53.70  min=  32.71  max=  83.54
+  MFE                    n=9813  mean=   8.27  median=   0.00  min=   0.00  max=  50.00
+  CALL/PUT: 4676/2585 (48%/26%)
+  UNUSUAL_VOLUME         4561 ( 46.5%)  baseline 47.1%  lift x0.99
+  CHEAP_OPTIONS          4263 ( 43.4%)  baseline 43.0%  lift x1.01
+  BREAKOUT                493 (  5.0%)  baseline  4.4%  lift x1.14
+  COMPRESSION_EXPANSION   385 (  3.9%)  baseline  3.7%  lift x1.07
+  BREAKDOWN                74 (  0.8%)  baseline  1.2%  lift x0.60
+  REVALIDATION             33 (  0.3%)  baseline  0.6%  lift x0.56
+                            4 (  0.0%)  baseline  0.0%  lift x1.89
+
+==============================================================================
+SECTION E — ALTERNATIVE COMPOSITES: is geometric mean the right
+            aggregator? Could a simpler rule do better?
+==============================================================================
+
+Base: 18567 trades with all 3 pillars present
+
+Composite formulas (higher Pearson → better; higher P&L capture → better):
+
+  v4.0.1 geo mean (current)      Pears=-0.043  Spear=-0.041  top5%P&L=   -4%  top10%P&L=  -39%  top5%-catches-HR100/200=48/1465,3/221
+  arithmetic mean 40/35/25       Pears=-0.036  Spear=-0.044  top5%P&L=   +4%  top10%P&L=   +1%  top5%-catches-HR100/200=47/1465,7/221
+  arithmetic equal-weight        Pears=-0.032  Spear=-0.045  top5%P&L=   -7%  top10%P&L=  -97%  top5%-catches-HR100/200=47/1465,8/221
+  MAX(DC,MP,TS)                  Pears=-0.012  Spear=-0.052  top5%P&L=  +96%  top10%P&L=  +68%  top5%-catches-HR100/200=80/1465,7/221
+  MIN(DC,MP,TS)                  Pears=-0.044  Spear=-0.021  top5%P&L= -216%  top10%P&L= -205%  top5%-catches-HR100/200=40/1465,7/221
+  MP alone                       Pears=+0.015  Spear=+0.054  top5%P&L= -106%  top10%P&L=  -32%  top5%-catches-HR100/200=40/1465,5/221
+  DC alone                       Pears=-0.050  Spear=-0.054  top5%P&L=  +86%  top10%P&L=  +98%  top5%-catches-HR100/200=75/1465,7/221
+  TS alone                       Pears=+0.005  Spear=-0.049  top5%P&L=  -56%  top10%P&L=  -62%  top5%-catches-HR100/200=66/1465,11/221
+  MP * TS (no DC)                Pears=+0.014  Spear=+0.001  top5%P&L= -161%  top10%P&L=  -69%  top5%-catches-HR100/200=72/1465,10/221
+  DC * MP (no TS)                Pears=-0.038  Spear=-0.029  top5%P&L=   +1%  top10%P&L=  -24%  top5%-catches-HR100/200=49/1465,2/221
+  v3 conv (legacy reference)     Pears=+0.127  Spear=+0.086  top5%P&L= +257%  top10%P&L= +456%  top5%-catches-HR100/200=177/1465,48/221
+
+Threshold-AND composites (require ALL pillars ≥ threshold):
+  ALL≥40 else 0                  Pears=-0.017  Spear=-0.023  top5%P&L=   -7%  top10%P&L=  -88%  top5%-catches-HR100/200=47/1465,8/221
+  ALL≥50 else 0                  Pears=+0.009  Spear=+0.012  top5%P&L=  -52%  top10%P&L=  -50%  top5%-catches-HR100/200=45/1465,7/221
+  ALL≥55 else 0                  Pears=-0.023  Spear=-0.021  top5%P&L= -160%  top10%P&L= -197%  top5%-catches-HR100/200=42/1465,4/221
+  ALL≥60 else 0                  Pears=-0.070  Spear=-0.066  top5%P&L= -221%  top10%P&L= -122%  top5%-catches-HR100/200=38/1465,6/221
+
+==============================================================================
+SECTION F — SUBSCORE-LEVEL HOME-RUN PREDICTIVENESS
