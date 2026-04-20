@@ -1,0 +1,242 @@
+{
+  "UV_LOTTERY_CALL": {
+    "archetype_id": "UV_LOTTERY_CALL",
+    "n_raw": 136,
+    "n_effective": 136,
+    "hr200": {
+      "point": 0.1985,
+      "lower": 0.1402,
+      "upper": 0.2734
+    },
+    "win_rate": {
+      "point": 0.6544,
+      "lower": 0.5712,
+      "upper": 0.7291
+    },
+    "mean_pnl_pct": 82.0,
+    "median_pnl_pct": 79.07,
+    "computed_at": "2026-04-20T00:36:16.230002+00:00",
+    "seed_n": 136,
+    "seed_hr200_rate": 0.1985
+  },
+  "UV_REVERSAL_PUT": {
+    "archetype_id": "UV_REVERSAL_PUT",
+    "n_raw": 220,
+    "n_effective": 220,
+    "hr200": {
+      "point": 0.1045,
+      "lower": 0.0707,
+      "upper": 0.152
+    },
+    "win_rate": {
+      "point": 0.5455,
+      "lower": 0.4794,
+      "upper": 0.6099
+    },
+    "mean_pnl_pct": 44.19,
+    "median_pnl_pct": 55.97,
+    "computed_at": "2026-04-20T00:36:16.256074+00:00",
+    "seed_n": 192,
+    "seed_hr200_rate": 0.1042
+  },
+  "UV_STRUCTURAL": {
+    "archetype_id": "UV_STRUCTURAL",
+    "n_raw": 440,
+    "n_effective": 440,
+    "hr200": {
+      "point": 0.0818,
+      "lower": 0.0597,
+      "upper": 0.1112
+    },
+    "win_rate": {
+      "point": 0.4977,
+      "lower": 0.4512,
+      "upper": 0.5443
+    },
+    "mean_pnl_pct": 29.75,
+    "median_pnl_pct": -9.12,
+    "computed_at": "2026-04-20T00:36:16.280425+00:00",
+    "seed_n": 369,
+    "seed_hr200_rate": 0.0515
+  },
+  "CHEAP_COMPRESSION": {
+    "archetype_id": "CHEAP_COMPRESSION",
+    "n_raw": 258,
+    "n_effective": 258,
+    "hr200": {
+      "point": 0.031,
+      "lower": 0.0158,
+      "upper": 0.06
+    },
+    "win_rate": {
+      "point": 0.4535,
+      "lower": 0.3939,
+      "upper": 0.5145
+    },
+    "mean_pnl_pct": 9.62,
+    "median_pnl_pct": -50.18,
+    "computed_at": "2026-04-20T00:36:16.302359+00:00",
+    "seed_n": 93,
+    "seed_hr200_rate": 0.0753
+  },
+  "CHEAP_VOL_REVERSAL": {
+    "archetype_id": "CHEAP_VOL_REVERSAL",
+    "n_raw": 50,
+    "n_effective": 50,
+    "hr200": {
+      "point": 0.08,
+      "lower": 0.0315,
+      "upper": 0.1884
+    },
+    "win_rate": {
+      "point": 0.74,
+      "lower": 0.6045,
+      "upper": 0.8413
+    },
+    "mean_pnl_pct": 51.74,
+    "median_pnl_pct": 62.73,
+    "computed_at": "2026-04-20T00:36:16.325150+00:00",
+    "seed_n": 50,
+    "seed_hr200_rate": 0.08
+  },
+  "CHEAP_ULTRA_CALL": {
+    "archetype_id": "CHEAP_ULTRA_CALL",
+    "n_raw": 61,
+    "n_effective": 61,
+    "hr200": {
+      "point": 0.082,
+      "lower": 0.0355,
+      "upper": 0.1779
+    },
+    "win_rate": {
+      "point": 0.7869,
+      "lower": 0.6688,
+      "upper": 0.871
+    },
+    "mean_pnl_pct": 69.86,
+    "median_pnl_pct": 68.14,
+    "computed_at": "2026-04-20T00:36:16.348107+00:00",
+    "seed_n": 33,
+    "seed_hr200_rate": 0.0909
+  },
+  "UV_LOTTERY_DC_MID": {
+    "archetype_id": "UV_LOTTERY_DC_MID",
+    "n_raw": 41,
+    "n_effective": 41,
+    "hr200": {
+      "point": 0.2683,
+      "lower": 0.1569,
+      "upper": 0.4193
+    },
+    "win_rate": {
+      "point": 0.6341,
+      "lower": 0.4812,
+      "upper": 0.7641
+    },
+    "mean_pnl_pct": 89.13,
+    "median_pnl_pct": 90.57,
+    "computed_at": "2026-04-20T00:36:16.374777+00:00",
+    "seed_n": 36,
+    "seed_hr200_rate": 0.3056
+  },
+  "UV_LOTTERY_IVRV_CHEAP": {
+    "archetype_id": "UV_LOTTERY_IVRV_CHEAP",
+    "n_raw": 116,
+    "n_effective": 116,
+    "hr200": {
+      "point": 0.1724,
+      "lower": 0.1145,
+      "upper": 0.2514
+    },
+    "win_rate": {
+      "point": 0.5948,
+      "lower": 0.5038,
+      "upper": 0.6797
+    },
+    "mean_pnl_pct": 71.72,
+    "median_pnl_pct": 79.07,
+    "computed_at": "2026-04-20T00:36:16.399240+00:00",
+    "seed_n": 96,
+    "seed_hr200_rate": 0.1979
+  },
+  "UV_LOTTERY_IVP_LO": {
+    "archetype_id": "UV_LOTTERY_IVP_LO",
+    "n_raw": 84,
+    "n_effective": 84,
+    "hr200": {
+      "point": 0.2024,
+      "lower": 0.1304,
+      "upper": 0.3004
+    },
+    "win_rate": {
+      "point": 0.6786,
+      "lower": 0.5728,
+      "upper": 0.7687
+    },
+    "mean_pnl_pct": 89.55,
+    "median_pnl_pct": 86.75,
+    "computed_at": "2026-04-20T00:36:16.422791+00:00",
+    "seed_n": 76,
+    "seed_hr200_rate": 0.1974
+  },
+  "CHEAP_ULTRA_MP_HIGH": {
+    "archetype_id": "CHEAP_ULTRA_MP_HIGH",
+    "n_raw": 38,
+    "n_effective": 38,
+    "hr200": {
+      "point": 0.1053,
+      "lower": 0.0417,
+      "upper": 0.2413
+    },
+    "win_rate": {
+      "point": 0.7368,
+      "lower": 0.5799,
+      "upper": 0.8503
+    },
+    "mean_pnl_pct": 61.01,
+    "median_pnl_pct": 64.64,
+    "computed_at": "2026-04-20T00:36:16.442730+00:00",
+    "seed_n": 23,
+    "seed_hr200_rate": 0.1739
+  },
+  "CHEAP_SHORT_FAIR_CONTRARIAN": {
+    "archetype_id": "CHEAP_SHORT_FAIR_CONTRARIAN",
+    "n_raw": 48,
+    "n_effective": 48,
+    "hr200": {
+      "point": 0.0833,
+      "lower": 0.0329,
+      "upper": 0.1955
+    },
+    "win_rate": {
+      "point": 0.6667,
+      "lower": 0.5254,
+      "upper": 0.7832
+    },
+    "mean_pnl_pct": 53.59,
+    "median_pnl_pct": 57.64,
+    "computed_at": "2026-04-20T00:36:16.463420+00:00",
+    "seed_n": 34,
+    "seed_hr200_rate": 0.1176
+  },
+  "CHEAP_ULTRA_TS_MID": {
+    "archetype_id": "CHEAP_ULTRA_TS_MID",
+    "n_raw": 65,
+    "n_effective": 65,
+    "hr200": {
+      "point": 0.0615,
+      "lower": 0.0242,
+      "upper": 0.1478
+    },
+    "win_rate": {
+      "point": 0.7077,
+      "lower": 0.588,
+      "upper": 0.8042
+    },
+    "mean_pnl_pct": 51.23,
+    "median_pnl_pct": 61.22,
+    "computed_at": "2026-04-20T00:36:16.482536+00:00",
+    "seed_n": 37,
+    "seed_hr200_rate": 0.1081
+  }
+}
