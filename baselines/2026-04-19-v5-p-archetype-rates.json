@@ -1,0 +1,222 @@
+{
+  "BREAKDOWN_GRINDER": {
+    "archetype_id": "BREAKDOWN_GRINDER",
+    "n_raw": 232,
+    "n_effective": 232,
+    "win_rate": {
+      "point": 0.6595,
+      "lower": 0.5963,
+      "upper": 0.7174
+    },
+    "hr200": {
+      "point": 0.0,
+      "lower": 0.0,
+      "upper": 0.0163
+    },
+    "mean_pnl_pct": 29.57,
+    "median_pnl_pct": 58.54,
+    "p_conviction_estimate": 94.9,
+    "computed_at": "2026-04-20T01:29:42.396468+00:00",
+    "seed_n": 232,
+    "seed_win_rate": 0.659,
+    "seed_mean_pnl_pct": 29.57
+  },
+  "REVALIDATION_QUALITY": {
+    "archetype_id": "REVALIDATION_QUALITY",
+    "n_raw": 112,
+    "n_effective": 112,
+    "win_rate": {
+      "point": 0.6964,
+      "lower": 0.6059,
+      "upper": 0.7739
+    },
+    "hr200": {
+      "point": 0.0179,
+      "lower": 0.0049,
+      "upper": 0.0628
+    },
+    "mean_pnl_pct": 47.52,
+    "median_pnl_pct": 62.38,
+    "p_conviction_estimate": 118.19,
+    "computed_at": "2026-04-20T01:29:42.408605+00:00",
+    "seed_n": 112,
+    "seed_win_rate": 0.696,
+    "seed_mean_pnl_pct": 47.52
+  },
+  "REVALIDATION_LOW_MP": {
+    "archetype_id": "REVALIDATION_LOW_MP",
+    "n_raw": 41,
+    "n_effective": 41,
+    "win_rate": {
+      "point": 0.9268,
+      "lower": 0.8057,
+      "upper": 0.9748
+    },
+    "hr200": {
+      "point": 0.0,
+      "lower": 0.0,
+      "upper": 0.0857
+    },
+    "mean_pnl_pct": 71.11,
+    "median_pnl_pct": 71.89,
+    "p_conviction_estimate": 161.14,
+    "computed_at": "2026-04-20T01:29:42.420722+00:00",
+    "seed_n": 41,
+    "seed_win_rate": 0.862,
+    "seed_mean_pnl_pct": 71.1
+  },
+  "REVALIDATION_IVP_LO_CALL": {
+    "archetype_id": "REVALIDATION_IVP_LO_CALL",
+    "n_raw": 52,
+    "n_effective": 52,
+    "win_rate": {
+      "point": 0.9038,
+      "lower": 0.7939,
+      "upper": 0.9582
+    },
+    "hr200": {
+      "point": 0.0385,
+      "lower": 0.0106,
+      "upper": 0.1298
+    },
+    "mean_pnl_pct": 83.1,
+    "median_pnl_pct": 89.21,
+    "p_conviction_estimate": 158.78,
+    "computed_at": "2026-04-20T01:29:42.432762+00:00",
+    "seed_n": 52,
+    "seed_win_rate": 0.795,
+    "seed_mean_pnl_pct": 83.1
+  },
+  "UV_VOLATILE_COMPRESSION": {
+    "archetype_id": "UV_VOLATILE_COMPRESSION",
+    "n_raw": 516,
+    "n_effective": 516,
+    "win_rate": {
+      "point": 0.6899,
+      "lower": 0.6487,
+      "upper": 0.7283
+    },
+    "hr200": {
+      "point": 0.0426,
+      "lower": 0.0283,
+      "upper": 0.0637
+    },
+    "mean_pnl_pct": 51.43,
+    "median_pnl_pct": 61.91,
+    "p_conviction_estimate": 129.75,
+    "computed_at": "2026-04-20T01:29:42.452623+00:00",
+    "seed_n": 516,
+    "seed_win_rate": 0.69,
+    "seed_mean_pnl_pct": 51.43
+  },
+  "UV_VOLATILE_CALL": {
+    "archetype_id": "UV_VOLATILE_CALL",
+    "n_raw": 694,
+    "n_effective": 694,
+    "win_rate": {
+      "point": 0.6254,
+      "lower": 0.5888,
+      "upper": 0.6606
+    },
+    "hr200": {
+      "point": 0.0375,
+      "lower": 0.0257,
+      "upper": 0.0543
+    },
+    "mean_pnl_pct": 38.62,
+    "median_pnl_pct": 57.68,
+    "p_conviction_estimate": 104.35,
+    "computed_at": "2026-04-20T01:29:42.471271+00:00",
+    "seed_n": 694,
+    "seed_win_rate": 0.628,
+    "seed_mean_pnl_pct": 38.62
+  },
+  "UV_DEEP_OTM_VOLATILE": {
+    "archetype_id": "UV_DEEP_OTM_VOLATILE",
+    "n_raw": 230,
+    "n_effective": 230,
+    "win_rate": {
+      "point": 0.6478,
+      "lower": 0.5841,
+      "upper": 0.7067
+    },
+    "hr200": {
+      "point": 0.0783,
+      "lower": 0.0501,
+      "upper": 0.1203
+    },
+    "mean_pnl_pct": 55.46,
+    "median_pnl_pct": 66.15,
+    "p_conviction_estimate": 116.83,
+    "computed_at": "2026-04-20T01:29:42.493554+00:00",
+    "seed_n": 230,
+    "seed_win_rate": 0.62,
+    "seed_mean_pnl_pct": 55.46
+  },
+  "CHEAP_CONTRARIAN_CHEAP_VOL": {
+    "archetype_id": "CHEAP_CONTRARIAN_CHEAP_VOL",
+    "n_raw": 109,
+    "n_effective": 109,
+    "win_rate": {
+      "point": 0.8807,
+      "lower": 0.8066,
+      "upper": 0.929
+    },
+    "hr200": {
+      "point": 0.0,
+      "lower": 0.0,
+      "upper": 0.034
+    },
+    "mean_pnl_pct": 50.22,
+    "median_pnl_pct": 55.64,
+    "p_conviction_estimate": 161.32,
+    "computed_at": "2026-04-20T01:29:42.517983+00:00",
+    "seed_n": 109,
+    "seed_win_rate": 0.807,
+    "seed_mean_pnl_pct": 50.22
+  },
+  "CHEAP_VOLATILE_CALL": {
+    "archetype_id": "CHEAP_VOLATILE_CALL",
+    "n_raw": 140,
+    "n_effective": 140,
+    "win_rate": {
+      "point": 0.7857,
+      "lower": 0.7106,
+      "upper": 0.8456
+    },
+    "hr200": {
+      "point": 0.05,
+      "lower": 0.0244,
+      "upper": 0.0996
+    },
+    "mean_pnl_pct": 66.48,
+    "median_pnl_pct": 67.37,
+    "p_conviction_estimate": 142.12,
+    "computed_at": "2026-04-20T01:29:42.538535+00:00",
+    "seed_n": 140,
+    "seed_win_rate": 0.714,
+    "seed_mean_pnl_pct": 66.48
+  },
+  "BREAKOUT_CLEAN_ATR_MIDHI": {
+    "archetype_id": "BREAKOUT_CLEAN_ATR_MIDHI",
+    "n_raw": 127,
+    "n_effective": 127,
+    "win_rate": {
+      "point": 1.0,
+      "lower": 0.9706,
+      "upper": 1.0
+    },
+    "hr200": {
+      "point": 0.0157,
+      "lower": 0.0043,
+      "upper": 0.0556
+    },
+    "mean_pnl_pct": 64.92,
+    "median_pnl_pct": 59.55,
+    "p_conviction_estimate": 194.13,
+    "computed_at": "2026-04-20T01:29:42.552302+00:00",
+    "seed_n": 127,
+    "seed_win_rate": 1.0,
+    "seed_mean_pnl_pct": 64.92
+  }
+}

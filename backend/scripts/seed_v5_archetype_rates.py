@@ -43,6 +43,7 @@ from app.calibration.archetype_rates import (
     estimate_archetype_rates,
 )
 from app.v5.hr_archetypes import default_v5_hr_archetypes
+from app.v5.p_archetypes import default_v5_p_archetypes
 
 TABLE_PREFIX = os.environ.get("DYNAMODB_TABLE_PREFIX", "oss-dev")
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-1")
@@ -295,10 +296,78 @@ def main() -> int:
               f"{rates.hr200.point*100:>6.2f}% {rates.hr200.lower*100:>6.2f}% "
               f"{rates.hr200.upper*100:>6.2f}% {rates.mean_pnl_pct:>+8.2f}%")
 
-    # Save output
+    # ========================================================================
+    # P-archetype rate estimation (same records, different library)
+    # ========================================================================
+    print()
+    print("=" * 80)
+    print("v5 P Archetype Rate Estimates")
+    print("=" * 80)
+
+    p_library = default_v5_p_archetypes()
+    p_output: dict[str, dict] = {}
+
+    p_header = (
+        f"\n{'Archetype':<32} {'n':>5} {'wins':>5} {'winPt':>6} "
+        f"{'winLow':>7} {'meanPL':>9} {'pConv*':>7}"
+    )
+    print(p_header)
+    print("-" * 90)
+
+    for arch in p_library.archetypes:
+        cohort = [r for r in records if _matches_archetype(r, arch)]
+        rates = estimate_archetype_rates(
+            cohort,
+            archetype_id=arch.archetype_id,
+            rolling_window_n=args.rolling_window,
+            ewma_half_life_n=args.ewma_half_life,
+        )
+        # Estimate P-conviction at fit=100 regime=1 (for reporting only)
+        from app.calibration.archetype_rates import normalize_pnl_pct
+        pnl_norm = normalize_pnl_pct(rates.mean_pnl_pct)
+        p_conv_est = 100.0 * rates.win_rate.lower * pnl_norm
+
+        p_output[arch.archetype_id] = {
+            "archetype_id": arch.archetype_id,
+            "n_raw": rates.hr200.n_raw,
+            "n_effective": rates.hr200.n_effective,
+            "win_rate": {
+                "point": round(rates.win_rate.point, 4),
+                "lower": round(rates.win_rate.lower, 4),
+                "upper": round(rates.win_rate.upper, 4),
+            },
+            "hr200": {
+                "point": round(rates.hr200.point, 4),
+                "lower": round(rates.hr200.lower, 4),
+                "upper": round(rates.hr200.upper, 4),
+            },
+            "mean_pnl_pct": round(rates.mean_pnl_pct, 2),
+            "median_pnl_pct": round(rates.median_pnl_pct, 2),
+            "p_conviction_estimate": round(p_conv_est, 2),
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "seed_n": int(arch.historical_n),
+            "seed_win_rate": float(arch.historical_win_rate),
+            "seed_mean_pnl_pct": float(arch.historical_mean_pnl_pct),
+        }
+        wins = sum(
+            1 for r in cohort if (r.get("current_pnl_pct") or 0) > 0
+        )
+        print(f"{arch.archetype_id:<32} {rates.hr200.n_raw:>5} {wins:>5} "
+              f"{rates.win_rate.point*100:>5.1f}% {rates.win_rate.lower*100:>6.2f}% "
+              f"{rates.mean_pnl_pct:>+8.2f}% {p_conv_est:>6.1f}")
+
+    # Save HR output
     with open(args.out, "w") as fp:
         json.dump(output, fp, indent=2)
-    print(f"\nWrote rate estimates to: {args.out}")
+    print(f"\nWrote HR rate estimates to: {args.out}")
+
+    # Save P output alongside HR (derive filename)
+    p_out_path = args.out.replace(".json", "_p.json")
+    if p_out_path == args.out:
+        p_out_path = args.out + ".p"
+    with open(p_out_path, "w") as fp:
+        json.dump(p_output, fp, indent=2)
+    print(f"Wrote P rate estimates to: {p_out_path}")
     return 0
 
 

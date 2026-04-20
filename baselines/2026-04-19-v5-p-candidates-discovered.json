@@ -1,0 +1,3630 @@
+[
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "atr=ATR_HI"
+    ],
+    "n": 140,
+    "wins": 139,
+    "win_point": 0.9928571428571429,
+    "win_lower": 0.9606506328243919,
+    "win_upper": 0.9987380280358878,
+    "win_lift": 2.6520915841361834,
+    "mean_pnl": 64.59432297402688,
+    "median_pnl": 59.5505617977528,
+    "hr200": 2,
+    "hr200_lower": 0.003926358459994089,
+    "p_conviction_est": 192.13012656487837
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "atr=ATR_HI"
+    ],
+    "n": 127,
+    "wins": 127,
+    "win_point": 1.0,
+    "win_lower": 0.9706393073762475,
+    "win_upper": 1.0,
+    "win_lift": 2.6796675610943894,
+    "mean_pnl": 64.91989026247984,
+    "median_pnl": 59.5505617977528,
+    "hr200": 2,
+    "hr200_lower": 0.00432926528219783,
+    "p_conviction_est": 194.1278614752495
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "atr=ATR_HI"
+    ],
+    "n": 126,
+    "wins": 125,
+    "win_point": 0.9920634920634921,
+    "win_lower": 0.9564121255180473,
+    "win_upper": 0.9985976710340594,
+    "win_lift": 2.6403902338509013,
+    "mean_pnl": 58.699810507515984,
+    "median_pnl": 59.5505617977528,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 191.28242510360946
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "atr=ATR_HI"
+    ],
+    "n": 146,
+    "wins": 139,
+    "win_point": 0.952054794520548,
+    "win_lower": 0.9043459888049974,
+    "win_upper": 0.9765842735520518,
+    "win_lift": 2.4966499829449242,
+    "mean_pnl": 56.382876762625656,
+    "median_pnl": 59.5505617977528,
+    "hr200": 1,
+    "hr200_lower": 0.001210066099070966,
+    "p_conviction_est": 180.86919776099947
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "adx=ADX_LO",
+      "atr=ATR_VOL"
+    ],
+    "n": 516,
+    "wins": 356,
+    "win_point": 0.689922480620155,
+    "win_lower": 0.648733333730026,
+    "win_upper": 0.7283045947466485,
+    "win_lift": 1.6259822586316441,
+    "mean_pnl": 51.433799820393695,
+    "median_pnl": 61.912133274362375,
+    "hr200": 22,
+    "hr200_lower": 0.02832190205949915,
+    "p_conviction_est": 129.7466667460052
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 109,
+    "wins": 96,
+    "win_point": 0.8807339449541285,
+    "win_lower": 0.806583402505531,
+    "win_upper": 0.9289609357527002,
+    "win_lift": 1.8402884831526876,
+    "mean_pnl": 50.22359280722403,
+    "median_pnl": 55.6420233463035,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 161.3166805011062
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "atr=ATR_HI",
+      "rs=RS_WITH"
+    ],
+    "n": 71,
+    "wins": 67,
+    "win_point": 0.9436619718309859,
+    "win_lower": 0.8639019960075406,
+    "win_upper": 0.9778758387795298,
+    "win_lift": 1.9710657185440834,
+    "mean_pnl": 54.894689596678525,
+    "median_pnl": 55.15515515515516,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 172.78039920150812
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_LO",
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 73,
+    "wins": 68,
+    "win_point": 0.9315068493150684,
+    "win_lower": 0.8494770066805462,
+    "win_upper": 0.970391397933621,
+    "win_lift": 1.9381538812243384,
+    "mean_pnl": 54.028282644130684,
+    "median_pnl": 55.15515515515516,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 169.89540133610922
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "adx=ADX_LO",
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 140,
+    "wins": 110,
+    "win_point": 0.7857142857142857,
+    "win_lower": 0.7105941206983544,
+    "win_upper": 0.8455732189307932,
+    "win_lift": 1.6212807906225482,
+    "mean_pnl": 66.4836198874038,
+    "median_pnl": 67.36516960996062,
+    "hr200": 7,
+    "hr200_lower": 0.024427961911698888,
+    "p_conviction_est": 142.11882413967086
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 694,
+    "wins": 434,
+    "win_point": 0.6253602305475504,
+    "win_lower": 0.5887506589544504,
+    "win_upper": 0.6605895924722343,
+    "win_lift": 1.475641957094209,
+    "mean_pnl": 38.623268338523694,
+    "median_pnl": 57.68306292385614,
+    "hr200": 26,
+    "hr200_lower": 0.02569257567834887,
+    "p_conviction_est": 104.35401526600583
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 157,
+    "wins": 113,
+    "win_point": 0.7197452229299363,
+    "win_lower": 0.6448884784550566,
+    "win_upper": 0.784105015765344,
+    "win_lift": 1.4713677917647985,
+    "mean_pnl": 55.036041280480866,
+    "median_pnl": 63.090128755364795,
+    "hr200": 5,
+    "hr200_lower": 0.013678184971507655,
+    "p_conviction_est": 128.97769569101132
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "atr=ATR_MID",
+      "option_type=PUT",
+      "rs=RS_WITH"
+    ],
+    "n": 1250,
+    "wins": 790,
+    "win_point": 0.632,
+    "win_lower": 0.6048982897427512,
+    "win_upper": 0.658292850190714,
+    "win_lift": 1.3801267824683623,
+    "mean_pnl": 23.947134577275452,
+    "median_pnl": 54.09520903177502,
+    "hr200": 1,
+    "hr200_lower": 0.00014122997218083376,
+    "p_conviction_est": 89.46099047434197
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "delta=DEEP_OTM(<0.25)",
+      "atr=ATR_VOL"
+    ],
+    "n": 230,
+    "wins": 149,
+    "win_point": 0.6478260869565218,
+    "win_lower": 0.58412805748261,
+    "win_upper": 0.7066670790542595,
+    "win_lift": 1.4640558899212448,
+    "mean_pnl": 55.45537094004257,
+    "median_pnl": 66.14704023593849,
+    "hr200": 18,
+    "hr200_lower": 0.050074187674017216,
+    "p_conviction_est": 116.825611496522
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 1699,
+    "wins": 1041,
+    "win_point": 0.6127133608004709,
+    "win_lower": 0.589320318961717,
+    "win_upper": 0.6355978413651157,
+    "win_lift": 1.344584320113975,
+    "mean_pnl": 22.04600513523514,
+    "median_pnl": 53.49907918968695,
+    "hr200": 2,
+    "hr200_lower": 0.00032287318415646655,
+    "p_conviction_est": 84.91634945242855
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "adx=ADX_LO",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 339,
+    "wins": 238,
+    "win_point": 0.7020648967551623,
+    "win_lower": 0.6513351657855849,
+    "win_upper": 0.7482662828134182,
+    "win_lift": 1.4860764560046087,
+    "mean_pnl": 32.91307355740608,
+    "median_pnl": 55.76923076923078,
+    "hr200": 1,
+    "hr200_lower": 0.0005208979238408486,
+    "p_conviction_est": 108.00840102261098
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "option_type=CALL"
+    ],
+    "n": 52,
+    "wins": 47,
+    "win_point": 0.9038461538461539,
+    "win_lower": 0.79390118138839,
+    "win_upper": 0.9582262648165898,
+    "win_lift": 1.310220827647477,
+    "mean_pnl": 83.0999829723051,
+    "median_pnl": 89.2146870424007,
+    "hr200": 2,
+    "hr200_lower": 0.010611488322077554,
+    "p_conviction_est": 158.780236277678
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 1091,
+    "wins": 686,
+    "win_point": 0.6287809349220899,
+    "win_lower": 0.5997071057845513,
+    "win_upper": 0.6569510263141924,
+    "win_lift": 1.3682826557202463,
+    "mean_pnl": 24.675845773922124,
+    "median_pnl": 54.28571428571429,
+    "hr200": 1,
+    "hr200_lower": 0.00016181485708007372,
+    "p_conviction_est": 89.56727068218471
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "adx=ADX_MID",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 517,
+    "wins": 341,
+    "win_point": 0.6595744680851063,
+    "win_lower": 0.6176849851775035,
+    "win_upper": 0.6991099866527035,
+    "win_lift": 1.4093007132398851,
+    "mean_pnl": 30.818757304282663,
+    "median_pnl": 55.78330893118596,
+    "hr200": 1,
+    "hr200_lower": 0.0003415129963388278,
+    "p_conviction_est": 99.84106581512016
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 37,
+    "wins": 36,
+    "win_point": 0.972972972972973,
+    "win_lower": 0.8617562156243666,
+    "win_upper": 0.9952131489450924,
+    "win_lift": 1.4222058973273457,
+    "mean_pnl": 77.82241785922872,
+    "median_pnl": 79.31034482758622,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 172.35124312487332
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "adx=ADX_LO"
+    ],
+    "n": 290,
+    "wins": 195,
+    "win_point": 0.6724137931034483,
+    "win_lower": 0.6164486944499317,
+    "win_upper": 0.7238707157356923,
+    "win_lift": 1.5450641864957033,
+    "mean_pnl": 38.66839791692806,
+    "median_pnl": 58.91610031199005,
+    "hr200": 8,
+    "hr200_lower": 0.014043116369253497,
+    "p_conviction_est": 109.31903626971469
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_HIGH",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 278,
+    "wins": 195,
+    "win_point": 0.7014388489208633,
+    "win_lower": 0.6451951339394435,
+    "win_upper": 0.7521911993768589,
+    "win_lift": 1.4720674522766064,
+    "mean_pnl": 35.26068349453151,
+    "median_pnl": 57.389810249514404,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 110.01955621404552
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "mp=MP_MID"
+    ],
+    "n": 168,
+    "wins": 130,
+    "win_point": 0.7738095238095238,
+    "win_lower": 0.7048368947626369,
+    "win_upper": 0.830539870816827,
+    "win_lift": 1.9458603709995983,
+    "mean_pnl": 35.55313356184889,
+    "median_pnl": 58.55855855855857,
+    "hr200": 1,
+    "hr200_lower": 0.0010514882493867714,
+    "p_conviction_est": 120.6020099938934
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "atr=ATR_MID"
+    ],
+    "n": 40,
+    "wins": 38,
+    "win_point": 0.95,
+    "win_lower": 0.834958291820748,
+    "win_upper": 0.9861796228538989,
+    "win_lift": 1.3779797408127428,
+    "mean_pnl": 74.92421075415298,
+    "median_pnl": 75.60174616524492,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 166.9916583641496
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 595,
+    "wins": 388,
+    "win_point": 0.6521008403361345,
+    "win_lower": 0.6129635414450983,
+    "win_upper": 0.6892866696290821,
+    "win_lift": 1.398528338681212,
+    "mean_pnl": 28.578222652492112,
+    "median_pnl": 54.89510489510487,
+    "hr200": 1,
+    "hr200_lower": 0.00029673392275271666,
+    "p_conviction_est": 96.33117127506603
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "atr=ATR_HI",
+      "option_type=CALL"
+    ],
+    "n": 79,
+    "wins": 67,
+    "win_point": 0.8481012658227848,
+    "win_lower": 0.7529994484509047,
+    "win_upper": 0.9109181967901335,
+    "win_lift": 1.7180321445989875,
+    "mean_pnl": 43.23001263535755,
+    "median_pnl": 54.22885572139302,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 140.40429618699022
+  },
+  {
+    "scanner": "BREAKDOWN",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "atr=ATR_HI"
+    ],
+    "n": 49,
+    "wins": 44,
+    "win_point": 0.8979591836734694,
+    "win_lower": 0.7824337583502992,
+    "win_upper": 0.9556211075129601,
+    "win_lift": 1.3120412407189566,
+    "mean_pnl": 69.41599436411249,
+    "median_pnl": 65.55555555555556,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 156.48675167005985
+  },
+  {
+    "scanner": "BREAKDOWN",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "dc=DC_ELITE",
+      "atr=ATR_HI"
+    ],
+    "n": 49,
+    "wins": 44,
+    "win_point": 0.8979591836734694,
+    "win_lower": 0.7824337583502992,
+    "win_upper": 0.9556211075129601,
+    "win_lift": 1.3120412407189566,
+    "mean_pnl": 69.41599436411249,
+    "median_pnl": 65.55555555555556,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 156.48675167005985
+  },
+  {
+    "scanner": "BREAKDOWN",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_ELITE",
+      "atr=ATR_HI",
+      "option_type=PUT"
+    ],
+    "n": 49,
+    "wins": 44,
+    "win_point": 0.8979591836734694,
+    "win_lower": 0.7824337583502992,
+    "win_upper": 0.9556211075129601,
+    "win_lift": 1.3120412407189566,
+    "mean_pnl": 69.41599436411249,
+    "median_pnl": 65.55555555555556,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 156.48675167005985
+  },
+  {
+    "scanner": "BREAKDOWN",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_ELITE",
+      "atr=ATR_HI",
+      "rs=RS_WITH"
+    ],
+    "n": 49,
+    "wins": 44,
+    "win_point": 0.8979591836734694,
+    "win_lower": 0.7824337583502992,
+    "win_upper": 0.9556211075129601,
+    "win_lift": 1.3120412407189566,
+    "mean_pnl": 69.41599436411249,
+    "median_pnl": 65.55555555555556,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 156.48675167005985
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "ivrv=IVRV_FAIR"
+    ],
+    "n": 153,
+    "wins": 120,
+    "win_point": 0.7843137254901961,
+    "win_lower": 0.7126045738142696,
+    "win_upper": 0.8420951997152023,
+    "win_lift": 1.9673047916216286,
+    "mean_pnl": 34.71769849114287,
+    "median_pnl": 58.55855855855857,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 120.7404388556133
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "ts=TS_HI"
+    ],
+    "n": 274,
+    "wins": 164,
+    "win_point": 0.5985401459854015,
+    "win_lower": 0.5395214169874729,
+    "win_upper": 0.6548339279284794,
+    "win_lift": 1.3522540103334812,
+    "mean_pnl": 50.31860392272567,
+    "median_pnl": 58.809792728715784,
+    "hr200": 26,
+    "hr200_lower": 0.06557920821223767,
+    "p_conviction_est": 107.90428339749458
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "ivp=IVP_LO"
+    ],
+    "n": 42,
+    "wins": 39,
+    "win_point": 0.9285714285714286,
+    "win_lower": 0.8099028671147483,
+    "win_upper": 0.9754100364488272,
+    "win_lift": 1.336629330881442,
+    "mean_pnl": 87.62445225499113,
+    "median_pnl": 89.2146870424007,
+    "hr200": 2,
+    "hr200_lower": 0.013157248639206365,
+    "p_conviction_est": 161.98057342294967
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 1,
+    "conditions": [
+      "mp=MP_LO"
+    ],
+    "n": 41,
+    "wins": 38,
+    "win_point": 0.926829268292683,
+    "win_lower": 0.8057225998278872,
+    "win_upper": 0.9748026267474359,
+    "win_lift": 1.3297303951035653,
+    "mean_pnl": 71.11072826189141,
+    "median_pnl": 71.8931475029036,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 161.14451996557744
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "option_type=CALL"
+    ],
+    "n": 41,
+    "wins": 38,
+    "win_point": 0.926829268292683,
+    "win_lower": 0.8057225998278872,
+    "win_upper": 0.9748026267474359,
+    "win_lift": 1.3297303951035653,
+    "mean_pnl": 71.11072826189141,
+    "median_pnl": 71.8931475029036,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 161.14451996557744
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_LO",
+      "mp=MP_LO",
+      "atr=ATR_HI"
+    ],
+    "n": 82,
+    "wins": 68,
+    "win_point": 0.8292682926829268,
+    "win_lower": 0.7335806237937915,
+    "win_upper": 0.8954850040603025,
+    "win_lift": 1.673726448173996,
+    "mean_pnl": 42.06944880921097,
+    "median_pnl": 54.19205343147276,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 135.08072737962306
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_HIGH",
+      "adx=ADX_LO"
+    ],
+    "n": 452,
+    "wins": 274,
+    "win_point": 0.6061946902654868,
+    "win_lower": 0.5604373490881936,
+    "win_upper": 0.6501621223071333,
+    "win_lift": 1.4046776068257019,
+    "mean_pnl": 36.845009606956935,
+    "median_pnl": 57.110906019038836,
+    "hr200": 16,
+    "hr200_lower": 0.02190421015213479,
+    "p_conviction_est": 97.34237393132331
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_MID",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 595,
+    "wins": 390,
+    "win_point": 0.6554621848739496,
+    "win_lower": 0.616389757514289,
+    "win_upper": 0.692540016235564,
+    "win_lift": 1.4063455414073505,
+    "mean_pnl": 25.478400497763822,
+    "median_pnl": 54.92957746478875,
+    "hr200": 1,
+    "hr200_lower": 0.00029673392275271666,
+    "p_conviction_est": 93.04822596076608
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO"
+    ],
+    "n": 33,
+    "wins": 32,
+    "win_point": 0.9696969696969697,
+    "win_lower": 0.8468093832683193,
+    "win_upper": 0.9946307279103482,
+    "win_lift": 1.3975382793424473,
+    "mean_pnl": 76.58331312984085,
+    "median_pnl": 79.31034482758622,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 169.36187665366387
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "option_type=CALL"
+    ],
+    "n": 438,
+    "wins": 293,
+    "win_point": 0.6689497716894978,
+    "win_lower": 0.6235762693761698,
+    "win_upper": 0.7113854001452152,
+    "win_lift": 1.721522184623274,
+    "mean_pnl": 27.90883546128096,
+    "median_pnl": 58.55855855855857,
+    "hr200": 1,
+    "hr200_lower": 0.0004031274789038867,
+    "p_conviction_est": 97.16420193677486
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO",
+      "atr=ATR_HI"
+    ],
+    "n": 82,
+    "wins": 68,
+    "win_point": 0.8292682926829268,
+    "win_lower": 0.7335806237937915,
+    "win_upper": 0.8954850040603025,
+    "win_lift": 1.673726448173996,
+    "mean_pnl": 41.35052850187603,
+    "median_pnl": 54.19205343147276,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 134.02595536459748
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "mp=MP_MID"
+    ],
+    "n": 387,
+    "wins": 263,
+    "win_point": 0.6795865633074936,
+    "win_lower": 0.6315247743876072,
+    "win_upper": 0.7241180231037551,
+    "win_lift": 1.743465815873815,
+    "mean_pnl": 28.406757182387114,
+    "median_pnl": 58.55855855855857,
+    "hr200": 1,
+    "hr200_lower": 0.0004562697820270113,
+    "p_conviction_est": 99.03161928014185
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "option_type=CALL"
+    ],
+    "n": 182,
+    "wins": 135,
+    "win_point": 0.7417582417582418,
+    "win_lower": 0.6736367934047861,
+    "win_upper": 0.7998847432156476,
+    "win_lift": 1.8597254917750115,
+    "mean_pnl": 34.150300085569405,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.0030187111424065383,
+    "p_conviction_est": 113.37347662738694
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "rs=RS_WITH"
+    ],
+    "n": 437,
+    "wins": 292,
+    "win_point": 0.6681922196796338,
+    "win_lower": 0.6227470730137781,
+    "win_upper": 0.7107060312304674,
+    "win_lift": 1.719233002043099,
+    "mean_pnl": 27.855559395539096,
+    "median_pnl": 58.55855855855857,
+    "hr200": 1,
+    "hr200_lower": 0.00040405022845175186,
+    "p_conviction_est": 96.96864346284465
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "mp=MP_MID"
+    ],
+    "n": 441,
+    "wins": 294,
+    "win_point": 0.6666666666666666,
+    "win_lower": 0.6213963509113734,
+    "win_upper": 0.7090583547636353,
+    "win_lift": 1.7155040306586091,
+    "mean_pnl": 27.603683014690617,
+    "median_pnl": 58.55855855855857,
+    "hr200": 1,
+    "hr200_lower": 0.00040038434613417877,
+    "p_conviction_est": 96.44529088522334
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "dc=DC_ELITE"
+    ],
+    "n": 173,
+    "wins": 129,
+    "win_point": 0.7456647398843931,
+    "win_lower": 0.6759207953945521,
+    "win_upper": 0.8047353398134534,
+    "win_lift": 1.8660309916604374,
+    "mean_pnl": 34.26980640128909,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.003176039095965432,
+    "p_conviction_est": 113.9194291410085
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "adx=ADX_LO"
+    ],
+    "n": 36,
+    "wins": 34,
+    "win_point": 0.9444444444444444,
+    "win_lower": 0.8185502589238878,
+    "win_upper": 0.9846303362329332,
+    "win_lift": 2.2597916232064508,
+    "mean_pnl": 86.33335288310276,
+    "median_pnl": 92.34172653640232,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 163.71005178477756
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "ts=TS_MID"
+    ],
+    "n": 73,
+    "wins": 62,
+    "win_point": 0.8493150684931506,
+    "win_lower": 0.7499788763087365,
+    "win_upper": 0.9137241179027322,
+    "win_lift": 2.0704849382032373,
+    "mean_pnl": 40.876909037294794,
+    "median_pnl": 51.93798449612403,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 136.31152424440322
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO",
+      "option_type=CALL"
+    ],
+    "n": 131,
+    "wins": 101,
+    "win_point": 0.7709923664122137,
+    "win_lower": 0.6919287457582938,
+    "win_upper": 0.8346149914859987,
+    "win_lift": 1.5786941536681822,
+    "mean_pnl": 36.600905636440494,
+    "median_pnl": 55.00000000000001,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 119.84331203710927
+  },
+  {
+    "scanner": "BREAKDOWN",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_ELITE",
+      "ts=TS_MID",
+      "atr=ATR_HI"
+    ],
+    "n": 32,
+    "wins": 31,
+    "win_point": 0.96875,
+    "win_lower": 0.8425539219962727,
+    "win_upper": 0.9944622826374491,
+    "win_lift": 1.4128550581961092,
+    "mean_pnl": 85.97597415142037,
+    "median_pnl": 68.14363143631437,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 168.51078439925453
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_HIGH",
+      "mp=MP_LO"
+    ],
+    "n": 32,
+    "wins": 31,
+    "win_point": 0.96875,
+    "win_lower": 0.8425539219962727,
+    "win_upper": 0.9944622826374491,
+    "win_lift": 1.3905152466016066,
+    "mean_pnl": 74.04754222519267,
+    "median_pnl": 72.54990925589837,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 168.51078439925453
+  },
+  {
+    "scanner": "REVALIDATION",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "adx=ADX_MID"
+    ],
+    "n": 39,
+    "wins": 36,
+    "win_point": 0.9230769230769231,
+    "win_lower": 0.7967862687194474,
+    "win_upper": 0.9734930859265043,
+    "win_lift": 1.3149822533757047,
+    "mean_pnl": 68.13630352363344,
+    "median_pnl": 70.73170731707317,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 159.35725374388946
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 180,
+    "wins": 133,
+    "win_point": 0.7388888888888889,
+    "win_lower": 0.6702065350320432,
+    "win_upper": 0.7975874789452069,
+    "win_lift": 1.850255493993386,
+    "mean_pnl": 33.49940842456749,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.0030523109083073832,
+    "p_conviction_est": 111.92369839490954
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ts=TS_MID",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 811,
+    "wins": 509,
+    "win_point": 0.6276202219482121,
+    "win_lower": 0.593818992871252,
+    "win_upper": 0.6602181107817772,
+    "win_lift": 1.3548484264165095,
+    "mean_pnl": 22.992046212543407,
+    "median_pnl": 53.42465753424656,
+    "hr200": 2,
+    "hr200_lower": 0.0006765377176205199,
+    "p_conviction_est": 86.68812673908882
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "ivp=IVP_LO"
+    ],
+    "n": 184,
+    "wins": 135,
+    "win_point": 0.7336956521739131,
+    "win_lower": 0.6655227298162646,
+    "win_upper": 0.7923098269762671,
+    "win_lift": 1.8373247989310424,
+    "mean_pnl": 33.223371969059286,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.002985843055377687,
+    "p_conviction_est": 110.77409139472547
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 291,
+    "wins": 201,
+    "win_point": 0.6907216494845361,
+    "win_lower": 0.6354202168528478,
+    "win_upper": 0.7410531166251961,
+    "win_lift": 1.4497651493996127,
+    "mean_pnl": 29.51350013584118,
+    "median_pnl": 54.6875,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 101.0489709980903
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "ivp=IVP_LO"
+    ],
+    "n": 565,
+    "wins": 321,
+    "win_point": 0.5681415929203539,
+    "win_lower": 0.5269727170899869,
+    "win_upper": 0.6083900974439711,
+    "win_lift": 1.320802006341505,
+    "mean_pnl": 35.50639293799303,
+    "median_pnl": 51.61290322580644,
+    "hr200": 32,
+    "hr200_lower": 0.040401336767577165,
+    "p_conviction_est": 90.11907243019651
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 704,
+    "wins": 441,
+    "win_point": 0.6264204545454546,
+    "win_lower": 0.5900898054344696,
+    "win_upper": 0.6613788847357607,
+    "win_lift": 1.3463399688036826,
+    "mean_pnl": 23.388225399796145,
+    "median_pnl": 54.28571428571429,
+    "hr200": 1,
+    "hr200_lower": 0.0002507826767764107,
+    "p_conviction_est": 86.61128729469341
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "dc=DC_ELITE"
+    ],
+    "n": 425,
+    "wins": 279,
+    "win_point": 0.6564705882352941,
+    "win_lower": 0.6101004221345081,
+    "win_upper": 0.7000374003155527,
+    "win_lift": 1.6843190851430396,
+    "mean_pnl": 26.41862408582475,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.0012914456772019321,
+    "p_conviction_est": 93.24606962739993
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "option_type=CALL"
+    ],
+    "n": 425,
+    "wins": 279,
+    "win_point": 0.6564705882352941,
+    "win_lower": 0.6101004221345081,
+    "win_upper": 0.7000374003155527,
+    "win_lift": 1.6843190851430396,
+    "mean_pnl": 26.41862408582475,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.0012914456772019321,
+    "p_conviction_est": 93.24606962739993
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "rs=RS_WITH"
+    ],
+    "n": 425,
+    "wins": 279,
+    "win_point": 0.6564705882352941,
+    "win_lower": 0.6101004221345081,
+    "win_upper": 0.7000374003155527,
+    "win_lift": 1.6843190851430396,
+    "mean_pnl": 26.41862408582475,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.0012914456772019321,
+    "p_conviction_est": 93.24606962739993
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_MID",
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 45,
+    "wins": 39,
+    "win_point": 0.8666666666666667,
+    "win_lower": 0.738224177587027,
+    "win_upper": 0.9374293636565033,
+    "win_lift": 1.6843211102263589,
+    "mean_pnl": 49.95626487177636,
+    "median_pnl": 61.08949416342412,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 147.5802628592763
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_LO",
+      "mp=MP_HIGH"
+    ],
+    "n": 472,
+    "wins": 282,
+    "win_point": 0.597457627118644,
+    "win_lower": 0.552599769981771,
+    "win_upper": 0.6407418798445578,
+    "win_lift": 1.3850335344232674,
+    "mean_pnl": 32.34070651142708,
+    "median_pnl": 54.08682284980746,
+    "hr200": 12,
+    "hr200_lower": 0.01460199204535806,
+    "p_conviction_est": 91.00291095670222
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 74,
+    "wins": 56,
+    "win_point": 0.7567567567567568,
+    "win_lower": 0.6479345618473262,
+    "win_upper": 0.8402362876727247,
+    "win_lift": 1.4783176895287535,
+    "mean_pnl": 54.807477160574386,
+    "median_pnl": 60.198429102935094,
+    "hr200": 4,
+    "hr200_lower": 0.021218668760240082,
+    "p_conviction_est": 129.58691236946524
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "atr=ATR_VOL",
+      "rs=RS_AGAINST"
+    ],
+    "n": 124,
+    "wins": 83,
+    "win_point": 0.6693548387096774,
+    "win_lower": 0.5825561512650286,
+    "win_upper": 0.7459754065377522,
+    "win_lift": 1.3291512974759427,
+    "mean_pnl": 48.71979878908304,
+    "median_pnl": 61.32352941176471,
+    "hr200": 5,
+    "hr200_lower": 0.017344082793805525,
+    "p_conviction_est": 115.0196520724525
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_HIGH",
+      "adx=ADX_LO"
+    ],
+    "n": 465,
+    "wins": 271,
+    "win_point": 0.5827956989247312,
+    "win_lower": 0.5374771291224972,
+    "win_upper": 0.6267574439188027,
+    "win_lift": 1.3471302165847086,
+    "mean_pnl": 33.70468599385288,
+    "median_pnl": 54.34782608695653,
+    "hr200": 17,
+    "hr200_lower": 0.022948817519442485,
+    "p_conviction_est": 89.9787086441523
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_HIGH",
+      "atr=ATR_VOL"
+    ],
+    "n": 524,
+    "wins": 307,
+    "win_point": 0.5858778625954199,
+    "win_lower": 0.543226654197266,
+    "win_upper": 0.6272790429664287,
+    "win_lift": 1.3615407999185107,
+    "mean_pnl": 30.886582568862714,
+    "median_pnl": 53.27031385181084,
+    "hr200": 15,
+    "hr200_lower": 0.01742294838565697,
+    "p_conviction_est": 87.87949523666838
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "adx=ADX_HI",
+      "option_type=PUT"
+    ],
+    "n": 31,
+    "wins": 29,
+    "win_point": 0.9354838709677419,
+    "win_lower": 0.7928101168125354,
+    "win_upper": 0.9821255922249368,
+    "win_lift": 1.808863562980446,
+    "mean_pnl": 55.30743466460228,
+    "median_pnl": 56.69354838709677,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 158.5620233625071
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "ts=TS_HI"
+    ],
+    "n": 200,
+    "wins": 136,
+    "win_point": 0.68,
+    "win_lower": 0.612479733946457,
+    "win_upper": 0.7407357039229475,
+    "win_lift": 1.6908877091743935,
+    "mean_pnl": 33.22093463202404,
+    "median_pnl": 63.706490667563486,
+    "hr200": 1,
+    "hr200_lower": 0.0008831459893662054,
+    "p_conviction_est": 101.94227180439515
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "dc=DC_ELITE"
+    ],
+    "n": 176,
+    "wins": 120,
+    "win_point": 0.6818181818181818,
+    "win_lower": 0.6097493936883893,
+    "win_upper": 0.7461193263407917,
+    "win_lift": 1.6833499923678577,
+    "mean_pnl": 35.626516337761174,
+    "median_pnl": 67.2222222222222,
+    "hr200": 2,
+    "hr200_lower": 0.0031218054298649232,
+    "p_conviction_est": 104.42143284119767
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_MID",
+      "adx=ADX_LO"
+    ],
+    "n": 39,
+    "wins": 34,
+    "win_point": 0.8717948717948718,
+    "win_lower": 0.7329395096236953,
+    "win_upper": 0.9439726505197168,
+    "win_lift": 2.0234439438601157,
+    "mean_pnl": 76.74899409215506,
+    "median_pnl": 86.71152228763671,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 146.58790192473904
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_MID"
+    ],
+    "n": 205,
+    "wins": 137,
+    "win_point": 0.6682926829268293,
+    "win_lower": 0.6012649879911895,
+    "win_upper": 0.7291289565102892,
+    "win_lift": 1.6599268870503872,
+    "mean_pnl": 33.11902885895343,
+    "median_pnl": 67.2222222222222,
+    "hr200": 1,
+    "hr200_lower": 0.0008615928370303422,
+    "p_conviction_est": 99.95312377743593
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "ivp=IVP_LO",
+      "adx=ADX_LO"
+    ],
+    "n": 140,
+    "wins": 94,
+    "win_point": 0.6714285714285714,
+    "win_lower": 0.5899549027462967,
+    "win_upper": 0.7437455010311917,
+    "win_lift": 1.3460321768721601,
+    "mean_pnl": 41.13822401334792,
+    "median_pnl": 59.35157215941821,
+    "hr200": 4,
+    "hr200_lower": 0.011165596206339352,
+    "p_conviction_est": 107.53488416852974
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_VOL",
+      "rs=RS_AGAINST"
+    ],
+    "n": 342,
+    "wins": 207,
+    "win_point": 0.6052631578947368,
+    "win_lower": 0.5525644788237076,
+    "win_upper": 0.6556233158198517,
+    "win_lift": 1.384945080826213,
+    "mean_pnl": 32.32812685015797,
+    "median_pnl": 54.46702718144158,
+    "hr200": 11,
+    "hr200_lower": 0.018052721479591693,
+    "p_conviction_est": 90.98319701097925
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "ts=TS_HI"
+    ],
+    "n": 207,
+    "wins": 138,
+    "win_point": 0.6666666666666666,
+    "win_lower": 0.5999261004691333,
+    "win_upper": 0.7273337951112454,
+    "win_lift": 1.656230587679917,
+    "mean_pnl": 32.9662605905569,
+    "median_pnl": 62.939297124600635,
+    "hr200": 2,
+    "hr200_lower": 0.0026535795413005388,
+    "p_conviction_est": 99.54725037319746
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "ivp=IVP_LO",
+      "rs=RS_AGAINST"
+    ],
+    "n": 165,
+    "wins": 109,
+    "win_point": 0.6606060606060606,
+    "win_lower": 0.5854351636203324,
+    "win_upper": 0.7284685188844532,
+    "win_lift": 1.3357200084906522,
+    "mean_pnl": 38.61269050734162,
+    "median_pnl": 58.24693685202639,
+    "hr200": 5,
+    "hr200_lower": 0.013011490419272673,
+    "p_conviction_est": 103.75396993200685
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_ELITE",
+      "atr=ATR_VOL"
+    ],
+    "n": 43,
+    "wins": 36,
+    "win_point": 0.8372093023255814,
+    "win_lower": 0.7002730466408176,
+    "win_upper": 0.9188347549714246,
+    "win_lift": 1.7551611591917167,
+    "mean_pnl": 63.86566801501957,
+    "median_pnl": 74.30894308943088,
+    "hr200": 1,
+    "hr200_lower": 0.004116981177419918,
+    "p_conviction_est": 140.0546093281635
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "mp=MP_LO",
+      "option_type=PUT"
+    ],
+    "n": 32,
+    "wins": 29,
+    "win_point": 0.90625,
+    "win_lower": 0.7578150066422116,
+    "win_upper": 0.9675990373736805,
+    "win_lift": 1.729019249282626,
+    "mean_pnl": 53.783024386351784,
+    "median_pnl": 60.72234762979686,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 151.5630013284423
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "adx=ADX_LO",
+      "option_type=CALL"
+    ],
+    "n": 61,
+    "wins": 46,
+    "win_point": 0.7540983606557377,
+    "win_lower": 0.6331533709421812,
+    "win_upper": 0.8449347700043716,
+    "win_lift": 1.7479619220218325,
+    "mean_pnl": 55.557796817991,
+    "median_pnl": 77.55102040816328,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 126.63067418843623
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "ivp=IVP_LO",
+      "option_type=CALL"
+    ],
+    "n": 37,
+    "wins": 32,
+    "win_point": 0.8648648648648649,
+    "win_lower": 0.7202227252929444,
+    "win_upper": 0.9408679273749238,
+    "win_lift": 1.6432492691322875,
+    "mean_pnl": 79.82368773474182,
+    "median_pnl": 66.91176470588233,
+    "hr200": 4,
+    "hr200_lower": 0.04285120520506268,
+    "p_conviction_est": 144.04454505858888
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "adx=ADX_LO"
+    ],
+    "n": 63,
+    "wins": 47,
+    "win_point": 0.746031746031746,
+    "win_lower": 0.6265857791515483,
+    "win_upper": 0.8371972541690185,
+    "win_lift": 1.7298306115111954,
+    "mean_pnl": 53.79916031872916,
+    "median_pnl": 76.21951219512194,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 125.31715583030967
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "option_type=CALL",
+      "rs=RS_WITH"
+    ],
+    "n": 185,
+    "wins": 127,
+    "win_point": 0.6864864864864865,
+    "win_lower": 0.6164156210427771,
+    "win_upper": 0.7489699719621539,
+    "win_lift": 1.4064045512424928,
+    "mean_pnl": 30.374743096433928,
+    "median_pnl": 54.6875,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 99.08849436388397
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "mp=MP_ELITE"
+    ],
+    "n": 58,
+    "wins": 44,
+    "win_point": 0.7586206896551724,
+    "win_lower": 0.6346977437031315,
+    "win_upper": 0.8504126027303373,
+    "win_lift": 1.590803520024303,
+    "mean_pnl": 51.069081100906054,
+    "median_pnl": 67.18655991113992,
+    "hr200": 1,
+    "hr200_lower": 0.003049959884541764,
+    "p_conviction_est": 126.9395487406263
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_LO",
+      "adx=ADX_LO",
+      "atr=ATR_MID"
+    ],
+    "n": 315,
+    "wins": 198,
+    "win_point": 0.6285714285714286,
+    "win_lower": 0.5739621405025317,
+    "win_upper": 0.6800825011000697,
+    "win_lift": 1.3095433325944625,
+    "mean_pnl": 27.988148992577756,
+    "median_pnl": 55.00000000000001,
+    "hr200": 2,
+    "hr200_lower": 0.0017428752336046925,
+    "p_conviction_est": 89.52448985922057
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "mp=MP_MID"
+    ],
+    "n": 213,
+    "wins": 149,
+    "win_point": 0.6995305164319249,
+    "win_lower": 0.6348710423970132,
+    "win_upper": 0.7571201622426869,
+    "win_lift": 1.752703939415063,
+    "mean_pnl": 25.367567468654148,
+    "median_pnl": 55.85365853658537,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 95.69737224350335
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "dc=DC_MID",
+      "mp=MP_ELITE"
+    ],
+    "n": 36,
+    "wins": 31,
+    "win_point": 0.8611111111111112,
+    "win_lower": 0.7134014871960681,
+    "win_upper": 0.9391827463688489,
+    "win_lift": 1.6276860355329725,
+    "mean_pnl": 66.1363475880504,
+    "median_pnl": 73.33333333333336,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 142.68029743921363
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "ts=TS_MID"
+    ],
+    "n": 185,
+    "wins": 130,
+    "win_point": 0.7027027027027027,
+    "win_lower": 0.6332577083642614,
+    "win_upper": 0.7639005449019682,
+    "win_lift": 1.7482499688825275,
+    "mean_pnl": 26.90070798639003,
+    "median_pnl": 52.85714285714285,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 97.39593222210121
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_ELITE",
+      "adx=ADX_LO"
+    ],
+    "n": 30,
+    "wins": 27,
+    "win_point": 0.9,
+    "win_lower": 0.7437855868473339,
+    "win_upper": 0.9654007400402839,
+    "win_lift": 1.8642207908234016,
+    "mean_pnl": 75.41867307741201,
+    "median_pnl": 76.11656636046881,
+    "hr200": 1,
+    "hr200_lower": 0.0059084379948573795,
+    "p_conviction_est": 148.75711736946678
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_HIGH",
+      "rs=RS_AGAINST"
+    ],
+    "n": 379,
+    "wins": 223,
+    "win_point": 0.5883905013192612,
+    "win_lower": 0.5381983992848652,
+    "win_upper": 0.636808705481179,
+    "win_lift": 1.3489380048186623,
+    "mean_pnl": 28.815782124743816,
+    "median_pnl": 54.04364569961492,
+    "hr200": 11,
+    "hr200_lower": 0.01628207026795094,
+    "p_conviction_est": 84.83705555584363
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "ivp=IVP_LO",
+      "dc=DC_MID"
+    ],
+    "n": 116,
+    "wins": 80,
+    "win_point": 0.6896551724137931,
+    "win_lower": 0.6005222969408555,
+    "win_upper": 0.7666290094502475,
+    "win_lift": 1.3701425835241836,
+    "mean_pnl": 37.63274893338432,
+    "median_pnl": 57.55730746428914,
+    "hr200": 3,
+    "hr200_lower": 0.00883372783851618,
+    "p_conviction_est": 105.2508393534345
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 277,
+    "wins": 177,
+    "win_point": 0.6389891696750902,
+    "win_lower": 0.580882193618184,
+    "win_upper": 0.6932937119456639,
+    "win_lift": 1.325332021045007,
+    "mean_pnl": 26.538017655227545,
+    "median_pnl": 53.42465753424656,
+    "hr200": 1,
+    "hr200_lower": 0.0006375408651620989,
+    "p_conviction_est": 88.91914318151176
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO"
+    ],
+    "n": 143,
+    "wins": 102,
+    "win_point": 0.7132867132867133,
+    "win_lower": 0.6343488049956663,
+    "win_upper": 0.7810648107644453,
+    "win_lift": 1.4473206323225694,
+    "mean_pnl": 29.321269690994804,
+    "median_pnl": 54.155251141552505,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.63470527844302
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "delta=ITM(>=0.55)",
+      "option_type=CALL"
+    ],
+    "n": 51,
+    "wins": 39,
+    "win_point": 0.7647058823529411,
+    "win_lower": 0.632375118636542,
+    "win_upper": 0.8599518740113747,
+    "win_lift": 1.4428174993982257,
+    "mean_pnl": 57.29087604825463,
+    "median_pnl": 60.493827160493815,
+    "hr200": 4,
+    "hr200_lower": 0.030921696126931505,
+    "p_conviction_est": 126.47502372730841
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "ivp=IVP_LO",
+      "option_type=PUT"
+    ],
+    "n": 215,
+    "wins": 137,
+    "win_point": 0.6372093023255814,
+    "win_lower": 0.5710521233733414,
+    "win_upper": 0.6985492686837445,
+    "win_lift": 1.302903881556925,
+    "mean_pnl": 30.99906890525358,
+    "median_pnl": 53.84615384615385,
+    "hr200": 2,
+    "hr200_lower": 0.0025546975628816665,
+    "p_conviction_est": 92.50938057921731
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "ts=TS_MID"
+    ],
+    "n": 113,
+    "wins": 84,
+    "win_point": 0.7433628318584071,
+    "win_lower": 0.6557596067410855,
+    "win_upper": 0.8149631495375004,
+    "win_lift": 1.8103715074243873,
+    "mean_pnl": 29.99301587627453,
+    "median_pnl": 51.93798449612403,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 104.91237726611838
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 552,
+    "wins": 342,
+    "win_point": 0.6195652173913043,
+    "win_lower": 0.5783691959080195,
+    "win_upper": 0.6591085315596619,
+    "win_lift": 1.3195984035048502,
+    "mean_pnl": 17.91071691433758,
+    "median_pnl": 52.950580845347574,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 78.55493347056513
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "adx=ADX_LO",
+      "option_type=PUT"
+    ],
+    "n": 150,
+    "wins": 99,
+    "win_point": 0.66,
+    "win_lower": 0.5810413820559243,
+    "win_upper": 0.7309678534174459,
+    "win_lift": 1.3256952229751662,
+    "mean_pnl": 34.90773558563836,
+    "median_pnl": 54.70119877309313,
+    "hr200": 2,
+    "hr200_lower": 0.0036640523882232115,
+    "p_conviction_est": 98.66981606383659
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_LO",
+      "mp=MP_LO",
+      "option_type=CALL"
+    ],
+    "n": 120,
+    "wins": 86,
+    "win_point": 0.7166666666666667,
+    "win_lower": 0.6302963078582111,
+    "win_upper": 0.7895949080175528,
+    "win_lift": 1.4380745161901254,
+    "mean_pnl": 31.002121705847358,
+    "median_pnl": 53.59696258735084,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 102.1106764797541
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "option_type=CALL"
+    ],
+    "n": 52,
+    "wins": 39,
+    "win_point": 0.75,
+    "win_lower": 0.6179328224079477,
+    "win_upper": 0.8476698823856113,
+    "win_lift": 1.4098661749137382,
+    "mean_pnl": 54.586564329377936,
+    "median_pnl": 60.04016184385539,
+    "hr200": 4,
+    "hr200_lower": 0.03031885429734589,
+    "p_conviction_est": 123.58656448158953
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_LO",
+      "atr=ATR_VOL"
+    ],
+    "n": 348,
+    "wins": 201,
+    "win_point": 0.5775862068965517,
+    "win_lower": 0.5251190282499434,
+    "win_upper": 0.6283591278293832,
+    "win_lift": 1.316155929116516,
+    "mean_pnl": 28.974532136343157,
+    "median_pnl": 55.54377282903265,
+    "hr200": 6,
+    "hr200_lower": 0.007925119577865115,
+    "p_conviction_est": 82.94205914386089
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "dc=DC_LO",
+      "mp=MP_LO"
+    ],
+    "n": 94,
+    "wins": 70,
+    "win_point": 0.7446808510638298,
+    "win_lower": 0.6481399091477772,
+    "win_upper": 0.8220077581021451,
+    "win_lift": 1.4787862068214384,
+    "mean_pnl": 31.67705786928497,
+    "median_pnl": 52.81007077387166,
+    "hr200": 0,
+    "hr200_lower": 3.469446951953614e-18,
+    "p_conviction_est": 105.87632173371219
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "ts=TS_MID"
+    ],
+    "n": 179,
+    "wins": 123,
+    "win_point": 0.6871508379888268,
+    "win_lower": 0.6158971380723427,
+    "win_upper": 0.7505402591064175,
+    "win_lift": 1.7003222199238497,
+    "mean_pnl": 25.268746942669335,
+    "median_pnl": 51.93798449612403,
+    "hr200": 0,
+    "hr200_lower": 1.734723475976807e-18,
+    "p_conviction_est": 92.71561165656288
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "ts=TS_HI",
+      "atr=ATR_HI"
+    ],
+    "n": 62,
+    "wins": 49,
+    "win_point": 0.7903225806451613,
+    "win_lower": 0.6736054886034556,
+    "win_upper": 0.8731612971368666,
+    "win_lift": 1.5368880874744726,
+    "mean_pnl": 36.44506647580712,
+    "median_pnl": 54.19205343147276,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 116.4597424815885
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "option_type=PUT",
+      "rs=RS_AGAINST"
+    ],
+    "n": 165,
+    "wins": 107,
+    "win_point": 0.6484848484848484,
+    "win_lower": 0.573009679612094,
+    "win_upper": 0.717203158930066,
+    "win_lift": 1.3073702122427655,
+    "mean_pnl": 31.65994606045755,
+    "median_pnl": 53.84615384615385,
+    "hr200": 3,
+    "hr200_lower": 0.006202298221943011,
+    "p_conviction_est": 93.58387905848731
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "atr=ATR_HI"
+    ],
+    "n": 91,
+    "wins": 68,
+    "win_point": 0.7472527472527473,
+    "win_lower": 0.6492012891565241,
+    "win_upper": 0.8252740465611358,
+    "win_lift": 1.4812078353849296,
+    "mean_pnl": 31.176319464111693,
+    "median_pnl": 52.76018099547509,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 105.3995424901663
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_HIGH",
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 52,
+    "wins": 39,
+    "win_point": 0.75,
+    "win_lower": 0.6179328224079477,
+    "win_upper": 0.8476698823856113,
+    "win_lift": 1.4098661749137382,
+    "mean_pnl": 47.35083564476914,
+    "median_pnl": 60.99542111445338,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 120.31255326748888
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_ELITE",
+      "rs=RS_AGAINST"
+    ],
+    "n": 46,
+    "wins": 35,
+    "win_point": 0.7608695652173914,
+    "win_lower": 0.6206458383088198,
+    "win_upper": 0.860879634388686,
+    "win_lift": 1.4160561509304477,
+    "mean_pnl": 53.61849637963236,
+    "median_pnl": 66.7142490536986,
+    "hr200": 1,
+    "hr200_lower": 0.0038477551112426345,
+    "p_conviction_est": 124.12916766176396
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_ELITE",
+      "rs=RS_AGAINST"
+    ],
+    "n": 46,
+    "wins": 35,
+    "win_point": 0.7608695652173914,
+    "win_lower": 0.6206458383088198,
+    "win_upper": 0.860879634388686,
+    "win_lift": 1.4160561509304477,
+    "mean_pnl": 53.61849637963236,
+    "median_pnl": 66.7142490536986,
+    "hr200": 1,
+    "hr200_lower": 0.0038477551112426345,
+    "p_conviction_est": 124.12916766176396
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "ts=TS_MID",
+      "option_type=CALL"
+    ],
+    "n": 37,
+    "wins": 30,
+    "win_point": 0.8108108108108109,
+    "win_lower": 0.6579498842904441,
+    "win_upper": 0.9052014124266288,
+    "win_lift": 1.5011684976285447,
+    "mean_pnl": 71.18066922139847,
+    "median_pnl": 62.5,
+    "hr200": 4,
+    "hr200_lower": 0.04285120520506268,
+    "p_conviction_est": 131.58997685808882
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_HI",
+      "option_type=PUT",
+      "rs=RS_AGAINST"
+    ],
+    "n": 71,
+    "wins": 53,
+    "win_point": 0.7464788732394366,
+    "win_lower": 0.6344585450983389,
+    "win_upper": 0.8331958075611448,
+    "win_lift": 1.4475710136798612,
+    "mean_pnl": 37.44413565864247,
+    "median_pnl": 55.76923076923078,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 110.95935817472814
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "atr=ATR_VOL",
+      "rs=RS_AGAINST"
+    ],
+    "n": 50,
+    "wins": 37,
+    "win_point": 0.74,
+    "win_lower": 0.6044657801100008,
+    "win_upper": 0.8412862034863262,
+    "win_lift": 1.3791399750365076,
+    "mean_pnl": 51.73580164993273,
+    "median_pnl": 62.73148148148148,
+    "hr200": 4,
+    "hr200_lower": 0.031549003255790686,
+    "p_conviction_est": 120.89315602200017
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "atr=ATR_MID"
+    ],
+    "n": 196,
+    "wins": 125,
+    "win_point": 0.6377551020408163,
+    "win_lower": 0.5684134540478329,
+    "win_upper": 0.7018005554476874,
+    "win_lift": 1.5692328576913632,
+    "mean_pnl": 28.17506924734821,
+    "median_pnl": 67.2222222222222,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 88.87152226262744
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "option_type=CALL"
+    ],
+    "n": 232,
+    "wins": 154,
+    "win_point": 0.6637931034482759,
+    "win_lower": 0.6007732797832255,
+    "win_upper": 0.7214769084787267,
+    "win_lift": 1.6585694162325537,
+    "mean_pnl": 21.616590783666478,
+    "median_pnl": 54.93349215803057,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 86.05066826399286
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "delta=ITM(>=0.55)",
+      "option_type=PUT"
+    ],
+    "n": 98,
+    "wins": 68,
+    "win_point": 0.6938775510204082,
+    "win_lower": 0.5967537243906448,
+    "win_upper": 0.7763747417764225,
+    "win_lift": 1.36154426543267,
+    "mean_pnl": 35.4364103800573,
+    "median_pnl": 57.26381790046958,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 101.96899218573348
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_MID",
+      "mp=MP_LO",
+      "option_type=PUT"
+    ],
+    "n": 103,
+    "wins": 74,
+    "win_point": 0.7184466019417476,
+    "win_lower": 0.624947994087061,
+    "win_upper": 0.7962362637301188,
+    "win_lift": 1.4258718844390128,
+    "mean_pnl": 30.51927241145328,
+    "median_pnl": 54.89510489510487,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.6407155577747
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "rs=RS_WITH"
+    ],
+    "n": 231,
+    "wins": 153,
+    "win_point": 0.6623376623376623,
+    "win_lower": 0.5991385677039445,
+    "win_upper": 0.7202256335278645,
+    "win_lift": 1.6540564268066265,
+    "mean_pnl": 21.48856530571492,
+    "median_pnl": 55.072463768115924,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 85.66311324895187
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "adx=ADX_LO"
+    ],
+    "n": 47,
+    "wins": 35,
+    "win_point": 0.7446808510638298,
+    "win_lower": 0.604915508600796,
+    "win_upper": 0.8474699395361627,
+    "win_lift": 1.670004968150473,
+    "mean_pnl": 52.79526998172202,
+    "median_pnl": 76.21951219512194,
+    "hr200": 0,
+    "hr200_lower": 6.938893903907228e-18,
+    "p_conviction_est": 120.9831017201592
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "ivrv=IVRV_FAIR"
+    ],
+    "n": 233,
+    "wins": 154,
+    "win_point": 0.6609442060085837,
+    "win_lower": 0.5979872105761345,
+    "win_upper": 0.718680131647529,
+    "win_lift": 1.6508778471600147,
+    "mean_pnl": 21.304558391797784,
+    "median_pnl": 54.79452054794521,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 85.27842794814852
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "adx=ADX_LO"
+    ],
+    "n": 40,
+    "wins": 31,
+    "win_point": 0.775,
+    "win_lower": 0.6249660359590695,
+    "win_upper": 0.8768404674532148,
+    "win_lift": 1.7253589470554034,
+    "mean_pnl": 54.14408475962852,
+    "median_pnl": 69.83359446755632,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 124.99320719181391
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_HI",
+      "adx=ADX_LO",
+      "option_type=PUT"
+    ],
+    "n": 139,
+    "wins": 94,
+    "win_point": 0.6762589928057554,
+    "win_lower": 0.5946390397781876,
+    "win_upper": 0.7483982826824962,
+    "win_lift": 1.3567194330275938,
+    "mean_pnl": 28.083605001289243,
+    "median_pnl": 55.76923076923078,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 92.86311980077184
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "adx=ADX_HI",
+      "atr=ATR_MID"
+    ],
+    "n": 75,
+    "wins": 55,
+    "win_point": 0.7333333333333333,
+    "win_lower": 0.6236898715426942,
+    "win_upper": 0.8202382070351124,
+    "win_lift": 1.4230013710840381,
+    "mean_pnl": 35.02722705418711,
+    "median_pnl": 56.91056910569105,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 106.0612406381149
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "ts=TS_MID",
+      "rs=RS_WITH"
+    ],
+    "n": 127,
+    "wins": 87,
+    "win_point": 0.6850393700787402,
+    "win_lower": 0.5998293468067151,
+    "win_upper": 0.7593836252144159,
+    "win_lift": 1.368561558986242,
+    "mean_pnl": 28.75911160360617,
+    "median_pnl": 54.424552429667514,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 94.48405293653651
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "atr=ATR_MID",
+      "option_type=PUT"
+    ],
+    "n": 107,
+    "wins": 76,
+    "win_point": 0.7102803738317757,
+    "win_lower": 0.6182267641098054,
+    "win_upper": 0.7877579925158658,
+    "win_lift": 1.4105368278517565,
+    "mean_pnl": 29.2016344064728,
+    "median_pnl": 54.69293163383544,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 97.92914030264302
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO",
+      "ts=TS_MID"
+    ],
+    "n": 56,
+    "wins": 43,
+    "win_point": 0.7678571428571429,
+    "win_lower": 0.6423159664807568,
+    "win_upper": 0.8590075275434671,
+    "win_lift": 1.4654983873803662,
+    "mean_pnl": 38.25078220550858,
+    "median_pnl": 55.609030106331474,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 113.36977293002803
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "dc=DC_ELITE"
+    ],
+    "n": 223,
+    "wins": 147,
+    "win_point": 0.6591928251121076,
+    "win_lower": 0.5947564234148339,
+    "win_upper": 0.7182373131837441,
+    "win_lift": 1.6419585344069187,
+    "mean_pnl": 20.79809509750815,
+    "median_pnl": 53.49544072948328,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 84.21524364955447
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "ts=TS_HI",
+      "rs=RS_WITH"
+    ],
+    "n": 139,
+    "wins": 94,
+    "win_point": 0.6762589928057554,
+    "win_lower": 0.5946390397781876,
+    "win_upper": 0.7483982826824962,
+    "win_lift": 1.3567194330275938,
+    "mean_pnl": 27.181991125255177,
+    "median_pnl": 54.155251141552505,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 91.79085018178066
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 47,
+    "wins": 37,
+    "win_point": 0.7872340425531915,
+    "win_lower": 0.6509569794902073,
+    "win_upper": 0.8801041987575269,
+    "win_lift": 1.4852135918770955,
+    "mean_pnl": 40.35982482909538,
+    "median_pnl": 56.400000000000006,
+    "hr200": 0,
+    "hr200_lower": 6.938893903907228e-18,
+    "p_conviction_est": 117.64071727602432
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 102,
+    "wins": 70,
+    "win_point": 0.6862745098039216,
+    "win_lower": 0.5908554817574903,
+    "win_upper": 0.7681715926631534,
+    "win_lift": 1.3480869243134295,
+    "mean_pnl": 31.26615814697413,
+    "median_pnl": 56.54677419354839,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 96.03311004502159
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_MID",
+      "mp=MP_LO",
+      "atr=ATR_MID"
+    ],
+    "n": 120,
+    "wins": 80,
+    "win_point": 0.6666666666666666,
+    "win_lower": 0.5783093452093498,
+    "win_upper": 0.744683897772007,
+    "win_lift": 1.319461849056633,
+    "mean_pnl": 29.75329595206773,
+    "median_pnl": 56.65528455284553,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 92.24415272065555
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "option_type=PUT",
+      "rs=RS_WITH"
+    ],
+    "n": 106,
+    "wins": 74,
+    "win_point": 0.6981132075471698,
+    "win_lower": 0.6050518290746324,
+    "win_upper": 0.7773169638052965,
+    "win_lift": 1.3804770954840955,
+    "mean_pnl": 28.010387421599116,
+    "median_pnl": 54.67511256559962,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 94.40065519251847
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "atr=ATR_VOL",
+      "rs=RS_AGAINST"
+    ],
+    "n": 60,
+    "wins": 42,
+    "win_point": 0.7,
+    "win_lower": 0.5749105303360957,
+    "win_upper": 0.801019897472731,
+    "win_lift": 1.311707164484414,
+    "mean_pnl": 43.49375880566215,
+    "median_pnl": 61.30600604727873,
+    "hr200": 2,
+    "hr200_lower": 0.009189126490150246,
+    "p_conviction_est": 107.50109291615648
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_MID",
+      "mp=MP_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 104,
+    "wins": 70,
+    "win_point": 0.6730769230769231,
+    "win_lower": 0.5781614312401357,
+    "win_upper": 0.7556615090723227,
+    "win_lift": 1.3191243707832188,
+    "mean_pnl": 31.39038457607998,
+    "median_pnl": 56.44858757062147,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 94.11356247138295
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "mp=MP_LO",
+      "atr=ATR_MID"
+    ],
+    "n": 43,
+    "wins": 34,
+    "win_point": 0.7906976744186046,
+    "win_lower": 0.6479406820576336,
+    "win_upper": 0.8857729400218853,
+    "win_lift": 1.4783316533079587,
+    "mean_pnl": 39.62692733095319,
+    "median_pnl": 54.89510489510487,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 116.14586485109551
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_RICH",
+      "dc=DC_LO",
+      "atr=ATR_MID"
+    ],
+    "n": 69,
+    "wins": 49,
+    "win_point": 0.7101449275362319,
+    "win_lower": 0.5942832702456184,
+    "win_upper": 0.8038408785924083,
+    "win_lift": 1.3559077146468166,
+    "mean_pnl": 36.54484397221798,
+    "median_pnl": 55.17241379310347,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 102.86430579741301
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "mp=MP_LO"
+    ],
+    "n": 48,
+    "wins": 37,
+    "win_point": 0.7708333333333334,
+    "win_lower": 0.6346046409154885,
+    "win_upper": 0.8669230897101096,
+    "win_lift": 1.4479043436850438,
+    "mean_pnl": 38.361587737748486,
+    "median_pnl": 55.64755244755244,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 112.14934731407263
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "ivrv=IVRV_CHEAP",
+      "option_type=CALL"
+    ],
+    "n": 35,
+    "wins": 27,
+    "win_point": 0.7714285714285715,
+    "win_lower": 0.6098236221989801,
+    "win_upper": 0.879342632538209,
+    "win_lift": 1.391364346453364,
+    "mean_pnl": 65.98421817495093,
+    "median_pnl": 66.29711751662971,
+    "hr200": 3,
+    "hr200_lower": 0.029581831005296905,
+    "p_conviction_est": 121.96472443979603
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "dc=DC_MID",
+      "atr=ATR_VOL"
+    ],
+    "n": 35,
+    "wins": 27,
+    "win_point": 0.7714285714285715,
+    "win_lower": 0.6098236221989801,
+    "win_upper": 0.879342632538209,
+    "win_lift": 1.391364346453364,
+    "mean_pnl": 59.13245692251204,
+    "median_pnl": 73.68421052631578,
+    "hr200": 1,
+    "hr200_lower": 0.005061361365853362,
+    "p_conviction_est": 121.96472443979603
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "mp=MP_ELITE"
+    ],
+    "n": 69,
+    "wins": 48,
+    "win_point": 0.6956521739130435,
+    "win_lower": 0.5791620736176137,
+    "win_upper": 0.7915052373695144,
+    "win_lift": 1.3214074212864986,
+    "mean_pnl": 38.18260782555015,
+    "median_pnl": 67.83216783216783,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 102.14404401050888
+  },
+  {
+    "scanner": "COMPRESSION_EXPANSION",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 38,
+    "wins": 29,
+    "win_point": 0.7631578947368421,
+    "win_lower": 0.6079288083466214,
+    "win_upper": 0.8700643850303049,
+    "win_lift": 1.5998418825584566,
+    "mean_pnl": 47.49875640653266,
+    "median_pnl": 63.113581418122834,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 118.54460559500184
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "adx=ADX_LO",
+      "rs=RS_WITH"
+    ],
+    "n": 50,
+    "wins": 35,
+    "win_point": 0.7,
+    "win_lower": 0.562493877226366,
+    "win_upper": 0.8089661091039063,
+    "win_lift": 1.5528905378786932,
+    "mean_pnl": 47.372487134855845,
+    "median_pnl": 74.20841080608113,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 109.54285564731902
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_ELITE"
+    ],
+    "n": 68,
+    "wins": 47,
+    "win_point": 0.6911764705882353,
+    "win_lower": 0.5736296438762007,
+    "win_upper": 0.7882776633107216,
+    "win_lift": 1.3087847133243125,
+    "mean_pnl": 38.000245514707,
+    "median_pnl": 69.73697943847196,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.9590989912392
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "ivp=IVP_HI",
+      "option_type=PUT"
+    ],
+    "n": 80,
+    "wins": 55,
+    "win_point": 0.6875,
+    "win_lower": 0.5793201821792608,
+    "win_upper": 0.7784974167215235,
+    "win_lift": 1.321768159387708,
+    "mean_pnl": 33.90256408963791,
+    "median_pnl": 60.3995853359721,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 97.21289742743228
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_MID",
+      "ivrv=IVRV_CHEAP"
+    ],
+    "n": 61,
+    "wins": 42,
+    "win_point": 0.6885245901639344,
+    "win_lower": 0.5640832930215206,
+    "win_upper": 0.7906272631646315,
+    "win_lift": 1.5572784767505277,
+    "mean_pnl": 41.73618635297586,
+    "median_pnl": 57.06153654381517,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 103.49370017444501
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_LO",
+      "mp=MP_LO",
+      "ts=TS_HI"
+    ],
+    "n": 68,
+    "wins": 50,
+    "win_point": 0.7352941176470589,
+    "win_lower": 0.6199204078287541,
+    "win_upper": 0.825503970247458,
+    "win_lift": 1.4144010197268475,
+    "mean_pnl": 31.214529507651513,
+    "median_pnl": 52.859960552268234,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.69308850800743
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dc=DC_HIGH",
+      "mp=MP_LO",
+      "option_type=CALL"
+    ],
+    "n": 55,
+    "wins": 39,
+    "win_point": 0.7090909090909091,
+    "win_lower": 0.5785902917965606,
+    "win_upper": 0.8122896298914968,
+    "win_lift": 1.3201028525377596,
+    "mean_pnl": 41.60264230128551,
+    "median_pnl": 59.375000000000014,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 106.0007990768735
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 70,
+    "wins": 50,
+    "win_point": 0.7142857142857143,
+    "win_lower": 0.5994958195463383,
+    "win_upper": 0.8067792340819687,
+    "win_lift": 1.367800588237052,
+    "mean_pnl": 33.11915665367563,
+    "median_pnl": 57.00106552232488,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 99.6591738761915
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "atr=ATR_VOL",
+      "option_type=CALL"
+    ],
+    "n": 36,
+    "wins": 27,
+    "win_point": 0.75,
+    "win_lower": 0.5892923231679656,
+    "win_upper": 0.8624967616077461,
+    "win_lift": 1.344520445334681,
+    "mean_pnl": 75.09114327624792,
+    "median_pnl": 86.19215291750504,
+    "hr200": 3,
+    "hr200_lower": 0.0287480892712918,
+    "p_conviction_est": 117.85846463359313
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "mp=MP_LO",
+      "option_type=PUT"
+    ],
+    "n": 39,
+    "wins": 31,
+    "win_point": 0.7948717948717948,
+    "win_lower": 0.6446572703687138,
+    "win_upper": 0.8922040980208888,
+    "win_lift": 1.4708402708944375,
+    "mean_pnl": 39.39136368285783,
+    "median_pnl": 54.69293163383544,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 115.25358501265622
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_LO",
+      "mp=MP_ELITE",
+      "atr=ATR_HI"
+    ],
+    "n": 34,
+    "wins": 27,
+    "win_point": 0.7941176470588235,
+    "win_lower": 0.6320128389178601,
+    "win_upper": 0.8965060397764868,
+    "win_lift": 1.441990927475348,
+    "mean_pnl": 44.470835586079026,
+    "median_pnl": 73.33333333333336,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 119.41356198740043
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 1,
+    "conditions": [
+      "mp=MP_ELITE"
+    ],
+    "n": 74,
+    "wins": 49,
+    "win_point": 0.6621621621621622,
+    "win_lower": 0.5487829947311834,
+    "win_upper": 0.7595354365446382,
+    "win_lift": 1.3754671864032622,
+    "mean_pnl": 38.58118722671662,
+    "median_pnl": 60.78956819622118,
+    "hr200": 1,
+    "hr200_lower": 0.0023894018749393217,
+    "p_conviction_est": 97.22369840624239
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_ELITE"
+    ],
+    "n": 74,
+    "wins": 49,
+    "win_point": 0.6621621621621622,
+    "win_lower": 0.5487829947311834,
+    "win_upper": 0.7595354365446382,
+    "win_lift": 1.3754671864032622,
+    "mean_pnl": 38.58118722671662,
+    "median_pnl": 60.78956819622118,
+    "hr200": 1,
+    "hr200_lower": 0.0023894018749393217,
+    "p_conviction_est": 97.22369840624239
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_ELITE",
+      "atr=ATR_HI",
+      "option_type=PUT"
+    ],
+    "n": 34,
+    "wins": 27,
+    "win_point": 0.7941176470588235,
+    "win_lower": 0.6320128389178601,
+    "win_upper": 0.8965060397764868,
+    "win_lift": 1.441990927475348,
+    "mean_pnl": 43.846407413317706,
+    "median_pnl": 73.28083989501314,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 118.62426874306607
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_HIGH",
+      "mp=MP_LO"
+    ],
+    "n": 57,
+    "wins": 40,
+    "win_point": 0.7017543859649122,
+    "win_lower": 0.5733547451096314,
+    "win_upper": 0.8046760759075674,
+    "win_lift": 1.3081575084592245,
+    "mean_pnl": 40.09011439137671,
+    "median_pnl": 58.730158730158735,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 103.30718914753066
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_MID",
+      "atr=ATR_MID"
+    ],
+    "n": 256,
+    "wins": 150,
+    "win_point": 0.5859375,
+    "win_lower": 0.5247626618207338,
+    "win_upper": 0.6445712708520946,
+    "win_lift": 1.448725053136022,
+    "mean_pnl": 21.52897907440339,
+    "median_pnl": 55.90277777777778,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 75.07147491280699
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_MID",
+      "mp=MP_LO",
+      "option_type=PUT"
+    ],
+    "n": 44,
+    "wins": 34,
+    "win_point": 0.7727272727272727,
+    "win_lower": 0.6300735713298432,
+    "win_upper": 0.8715818916981491,
+    "win_lift": 1.4375663238982193,
+    "mean_pnl": 37.11572440355416,
+    "median_pnl": 54.310478254140236,
+    "hr200": 0,
+    "hr200_lower": 6.938893903907228e-18,
+    "p_conviction_est": 109.7786311878675
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_RICH",
+      "dc=DC_MID",
+      "option_type=PUT"
+    ],
+    "n": 154,
+    "wins": 100,
+    "win_point": 0.6493506493506493,
+    "win_lower": 0.5711844194887772,
+    "win_upper": 0.7202469902283062,
+    "win_lift": 1.3032057263715418,
+    "mean_pnl": 21.95487931053444,
+    "median_pnl": 54.6060812015331,
+    "hr200": 0,
+    "hr200_lower": 1.734723475976807e-18,
+    "p_conviction_est": 82.19901193674526
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_MID",
+      "option_type=CALL"
+    ],
+    "n": 279,
+    "wins": 162,
+    "win_point": 0.5806451612903226,
+    "win_lower": 0.5220310777930797,
+    "win_upper": 0.6370685737433281,
+    "win_lift": 1.4411839026245157,
+    "mean_pnl": 20.292239180027217,
+    "median_pnl": 55.172413793103445,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 73.38946675927711
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 57,
+    "wins": 41,
+    "win_point": 0.7192982456140351,
+    "win_lower": 0.5916955491727645,
+    "win_upper": 0.8192075171502777,
+    "win_lift": 1.3500036094133194,
+    "mean_pnl": 36.343051214245335,
+    "median_pnl": 55.645161290322584,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 102.17759821093004
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=NEAR(0.40-0.55)",
+      "dc=DC_MID",
+      "mp=MP_LO"
+    ],
+    "n": 41,
+    "wins": 32,
+    "win_point": 0.7804878048780488,
+    "win_lower": 0.6329469790176472,
+    "win_upper": 0.8799695984461366,
+    "win_lift": 1.4441222473883901,
+    "mean_pnl": 37.69757042215321,
+    "median_pnl": 54.69293163383544,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 111.01582453177849
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "mp=MP_ELITE"
+    ],
+    "n": 33,
+    "wins": 26,
+    "win_point": 0.7878787878787878,
+    "win_lower": 0.6224802241287064,
+    "win_upper": 0.8932411343356381,
+    "win_lift": 1.5601815848783478,
+    "mean_pnl": 44.54277023249529,
+    "median_pnl": 62.92682926829269,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 117.70200960814492
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "atr=ATR_MID",
+      "rs=RS_WITH"
+    ],
+    "n": 278,
+    "wins": 161,
+    "win_point": 0.579136690647482,
+    "win_lower": 0.5204091818566249,
+    "win_upper": 0.6357068776604938,
+    "win_lift": 1.4367062950360319,
+    "mean_pnl": 20.181094442579557,
+    "median_pnl": 55.24854455888938,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 73.04577188133071
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_ELITE",
+      "option_type=CALL"
+    ],
+    "n": 66,
+    "wins": 44,
+    "win_point": 0.6666666666666666,
+    "win_lower": 0.5465611809612104,
+    "win_upper": 0.7684373299549198,
+    "win_lift": 1.369898442538679,
+    "mean_pnl": 39.62218256035365,
+    "median_pnl": 61.948852293440446,
+    "hr200": 1,
+    "hr200_lower": 0.0026795715344567483,
+    "p_conviction_est": 97.96801188101617
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_LO",
+      "adx=ADX_HI",
+      "rs=RS_WITH"
+    ],
+    "n": 77,
+    "wins": 53,
+    "win_point": 0.6883116883116883,
+    "win_lower": 0.5779975455912919,
+    "win_upper": 0.7807286547807938,
+    "win_lift": 1.3187504517672999,
+    "mean_pnl": 31.568137072496473,
+    "median_pnl": 54.89510489510487,
+    "hr200": 0,
+    "hr200_lower": 3.469446951953614e-18,
+    "p_conviction_est": 94.29236605271406
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "mp=MP_ELITE",
+      "option_type=CALL",
+      "rs=RS_AGAINST"
+    ],
+    "n": 40,
+    "wins": 29,
+    "win_point": 0.725,
+    "win_lower": 0.5716474916687543,
+    "win_upper": 0.8389214656685692,
+    "win_lift": 1.304262264848571,
+    "mean_pnl": 46.673665816375255,
+    "median_pnl": 66.7142490536986,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 110.52651714870863
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "atr=ATR_MID"
+    ],
+    "n": 281,
+    "wins": 162,
+    "win_point": 0.5765124555160143,
+    "win_lower": 0.5180888275185686,
+    "win_upper": 0.6328722680517415,
+    "win_lift": 1.4303004363378697,
+    "mean_pnl": 19.7839165763732,
+    "median_pnl": 55.102040816326515,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 72.30853503741359
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivp=IVP_MID",
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 57,
+    "wins": 41,
+    "win_point": 0.7192982456140351,
+    "win_lower": 0.5916955491727645,
+    "win_upper": 0.8192075171502777,
+    "win_lift": 1.3500036094133194,
+    "mean_pnl": 34.99642923158609,
+    "median_pnl": 61.08949416342412,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.58401774381468
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_LO",
+      "ts=TS_HI"
+    ],
+    "n": 74,
+    "wins": 53,
+    "win_point": 0.7162162162162162,
+    "win_lower": 0.6048253064036953,
+    "win_upper": 0.8062659352974002,
+    "win_lift": 1.379960264786608,
+    "mean_pnl": 27.447021224052502,
+    "median_pnl": 52.859960552268234,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 93.68383668378209
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "dte=ULTRA(<14)",
+      "mp=MP_HIGH"
+    ],
+    "n": 132,
+    "wins": 80,
+    "win_point": 0.6060606060606061,
+    "win_lower": 0.5208366538799802,
+    "win_upper": 0.685285771062011,
+    "win_lift": 1.3054226055945946,
+    "mean_pnl": 27.57911768104758,
+    "median_pnl": 32.98853889943073,
+    "hr200": 2,
+    "hr200_lower": 0.00416488690145933,
+    "p_conviction_est": 80.81209612791608
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "ts=TS_LO",
+      "adx=ADX_MID",
+      "rs=RS_AGAINST"
+    ],
+    "n": 84,
+    "wins": 57,
+    "win_point": 0.6785714285714286,
+    "win_lower": 0.5727836073115733,
+    "win_upper": 0.7687402264983756,
+    "win_lift": 1.3068544091036036,
+    "mean_pnl": 27.657025662053755,
+    "median_pnl": 56.37150543923267,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 88.96134258359714
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ts=TS_HI",
+      "atr=ATR_MID"
+    ],
+    "n": 112,
+    "wins": 69,
+    "win_point": 0.6160714285714286,
+    "win_lower": 0.5235731054057493,
+    "win_upper": 0.7008713083454421,
+    "win_lift": 1.4454410157875426,
+    "mean_pnl": 29.43387690616147,
+    "median_pnl": 67.2222222222222,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 83.178883212354
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_LO",
+      "ts=TS_HI"
+    ],
+    "n": 107,
+    "wins": 69,
+    "win_point": 0.6448598130841121,
+    "win_lower": 0.5506061419908396,
+    "win_upper": 0.7290722459068449,
+    "win_lift": 1.5200717778682138,
+    "mean_pnl": 25.92686107161608,
+    "median_pnl": 58.55855855855857,
+    "hr200": 2,
+    "hr200_lower": 0.005140857096348456,
+    "p_conviction_est": 83.611592096234
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dc=DC_ELITE",
+      "atr=ATR_MID"
+    ],
+    "n": 238,
+    "wins": 138,
+    "win_point": 0.5798319327731093,
+    "win_lower": 0.5163419060835182,
+    "win_upper": 0.6407857344878312,
+    "win_lift": 1.4254776678123102,
+    "mean_pnl": 19.054091317629112,
+    "median_pnl": 56.47707885757616,
+    "hr200": 0,
+    "hr200_lower": 1.734723475976807e-18,
+    "p_conviction_est": 71.31104226761988
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "ivp=IVP_MID"
+    ],
+    "n": 85,
+    "wins": 53,
+    "win_point": 0.6235294117647059,
+    "win_lower": 0.5172971118468916,
+    "win_upper": 0.7190786400531193,
+    "win_lift": 1.4281147276128259,
+    "mean_pnl": 33.380420941601045,
+    "median_pnl": 57.014681892332796,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 86.2649018753366
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_ELITE",
+      "rs=RS_WITH"
+    ],
+    "n": 44,
+    "wins": 32,
+    "win_point": 0.7272727272727273,
+    "win_lower": 0.581508453144907,
+    "win_upper": 0.8365377660450867,
+    "win_lift": 1.4574901255982537,
+    "mean_pnl": 36.417130712203786,
+    "median_pnl": 60.78956819622118,
+    "hr200": 0,
+    "hr200_lower": 6.938893903907228e-18,
+    "p_conviction_est": 100.5045840113497
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivp=IVP_MID",
+      "option_type=CALL"
+    ],
+    "n": 84,
+    "wins": 52,
+    "win_point": 0.6190476190476191,
+    "win_lower": 0.5121524397704628,
+    "win_upper": 0.7155301161028366,
+    "win_lift": 1.4139117061908522,
+    "mean_pnl": 33.16580153966505,
+    "median_pnl": 57.038109218073984,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 85.18713632801112
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "delta=OTM(0.25-0.40)",
+      "mp=MP_LO",
+      "adx=ADX_HI"
+    ],
+    "n": 37,
+    "wins": 27,
+    "win_point": 0.7297297297297297,
+    "win_lower": 0.5702152452607867,
+    "win_upper": 0.8460270175300932,
+    "win_lift": 1.3009944731218481,
+    "mean_pnl": 40.6004600378845,
+    "median_pnl": 61.08949416342412,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 103.32352708248483
+  },
+  {
+    "scanner": "CHEAP_OPTIONS",
+    "depth": 3,
+    "conditions": [
+      "dte=SHORT(14-21)",
+      "delta=ITM(>=0.55)",
+      "dc=DC_MID"
+    ],
+    "n": 35,
+    "wins": 26,
+    "win_point": 0.7428571428571429,
+    "win_lower": 0.5793037572935127,
+    "win_upper": 0.8583713127344985,
+    "win_lift": 1.3217306846169832,
+    "mean_pnl": 40.457107455369865,
+    "median_pnl": 56.351351351351354,
+    "hr200": 1,
+    "hr200_lower": 0.005061361365853362,
+    "p_conviction_est": 104.80428444559756
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "mp=MP_HIGH",
+      "option_type=CALL"
+    ],
+    "n": 38,
+    "wins": 26,
+    "win_point": 0.6842105263157895,
+    "win_lower": 0.5254394356005149,
+    "win_upper": 0.8091557997633335,
+    "win_lift": 1.4505934389824398,
+    "mean_pnl": 47.371834347026606,
+    "median_pnl": 58.03091243176078,
+    "hr200": 1,
+    "hr200_lower": 0.004660467553530057,
+    "p_conviction_est": 102.32600336537698
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "mp=MP_HIGH"
+    ],
+    "n": 30,
+    "wins": 21,
+    "win_point": 0.7,
+    "win_lower": 0.5212387898833981,
+    "win_upper": 0.8333543735604105,
+    "win_lift": 1.4389966141080843,
+    "mean_pnl": 52.333280100086384,
+    "median_pnl": 61.012600160798755,
+    "hr200": 1,
+    "hr200_lower": 0.0059084379948573795,
+    "p_conviction_est": 104.24775797667962
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 1,
+    "conditions": [
+      "mp=MP_HIGH"
+    ],
+    "n": 39,
+    "wins": 26,
+    "win_point": 0.6666666666666666,
+    "win_lower": 0.5097710432024052,
+    "win_upper": 0.7936723389308484,
+    "win_lift": 1.4073373267225666,
+    "mean_pnl": 44.8472499657762,
+    "median_pnl": 57.607718583328335,
+    "hr200": 1,
+    "hr200_lower": 0.00454058606523737,
+    "p_conviction_est": 96.70076311986605
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ts=TS_MID",
+      "adx=ADX_LO"
+    ],
+    "n": 32,
+    "wins": 23,
+    "win_point": 0.71875,
+    "win_lower": 0.546251630618882,
+    "win_upper": 0.8443559315435214,
+    "win_lift": 1.5080501723354718,
+    "mean_pnl": 42.33864637974573,
+    "median_pnl": 68.64358030372756,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 100.88027230815287
+  },
+  {
+    "scanner": "UNUSUAL_VOLUME",
+    "depth": 2,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "mp=MP_ELITE"
+    ],
+    "n": 34,
+    "wins": 24,
+    "win_point": 0.7058823529411765,
+    "win_lower": 0.5383077411853625,
+    "win_upper": 0.8316554739006805,
+    "win_lift": 1.3492120588576484,
+    "mean_pnl": 38.32180243461388,
+    "median_pnl": 58.31002640583739,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 95.0886199319937
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "ivp=IVP_MID"
+    ],
+    "n": 55,
+    "wins": 35,
+    "win_point": 0.6363636363636364,
+    "win_lower": 0.5042251814868371,
+    "win_upper": 0.7506965065705916,
+    "win_lift": 1.3920267312989234,
+    "mean_pnl": 31.986858985663815,
+    "median_pnl": 56.25,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 82.67967770316412
+  },
+  {
+    "scanner": "COMPRESSION_EXPANSION",
+    "depth": 2,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "ivp=IVP_LO"
+    ],
+    "n": 70,
+    "wins": 44,
+    "win_point": 0.6285714285714286,
+    "win_lower": 0.5114698481852806,
+    "win_upper": 0.7322951839917036,
+    "win_lift": 1.345997875998131,
+    "mean_pnl": 25.79734883945652,
+    "median_pnl": 60.68587907117009,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 77.53611700752715
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_FAIR",
+      "ts=TS_HI"
+    ],
+    "n": 100,
+    "wins": 61,
+    "win_point": 0.61,
+    "win_lower": 0.5120283616749817,
+    "win_upper": 0.699832780680298,
+    "win_lift": 1.4135691607726146,
+    "mean_pnl": 16.829922297625068,
+    "median_pnl": 58.55855855855857,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 68.43763124983859
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "ivrv=IVRV_CHEAP",
+      "ts=TS_LO"
+    ],
+    "n": 37,
+    "wins": 24,
+    "win_point": 0.6486486486486487,
+    "win_lower": 0.48758729517569566,
+    "win_upper": 0.7817459336889914,
+    "win_lift": 1.3460941135960014,
+    "mean_pnl": 38.13044828779321,
+    "median_pnl": 54.82517482517481,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 85.9425738065332
+  },
+  {
+    "scanner": "BREAKOUT",
+    "depth": 2,
+    "conditions": [
+      "dte=LONG(>=45)",
+      "ivrv=IVRV_CHEAP"
+    ],
+    "n": 66,
+    "wins": 40,
+    "win_point": 0.6060606060606061,
+    "win_lower": 0.48548180775863853,
+    "win_upper": 0.7149717900970809,
+    "win_lift": 1.3402814432364716,
+    "mean_pnl": 26.243288206000212,
+    "median_pnl": 54.80984768656001,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 74.02945877542373
+  },
+  {
+    "scanner": "COMPRESSION_EXPANSION",
+    "depth": 2,
+    "conditions": [
+      "delta=ITM(>=0.55)",
+      "ivp=IVP_LO"
+    ],
+    "n": 40,
+    "wins": 26,
+    "win_point": 0.65,
+    "win_lower": 0.4950559699353738,
+    "win_upper": 0.7786566682895086,
+    "win_lift": 1.302802670377206,
+    "mean_pnl": 28.078439567118526,
+    "median_pnl": 56.641025641025635,
+    "hr200": 0,
+    "hr200_lower": 0.0,
+    "p_conviction_est": 77.30639526188065
+  }
+]
