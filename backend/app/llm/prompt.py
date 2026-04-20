@@ -10,59 +10,108 @@ from typing import Any
 
 from app.llm.models import ThesisInput
 
-THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst. Your task is to generate a detailed trade thesis for an approved options trade recommendation.
+THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst generating a thesis for an approved single-leg long options trade.
 
-You will receive data about:
-- The underlying stock (ticker, price, technical indicators, ATR)
-- The option contract (type, strike, expiration, Greeks, breakeven, expected move)
-- Scoring metrics across three pillars. The active scoring regime is declared at
-  the top of the Scoring Summary as either v3 (Premium Leverage / Underlying
-  Behavior / Setup Quality, composite = arithmetic weighted sum) or v4
-  (Directional Conviction / Move Potential / Trade Structure, composite =
-  weighted geometric mean 0.40 / 0.35 / 0.25). In v4 the geometric mean means a
-  weak pillar collapses the composite — treat a lagging pillar as a material risk.
-- The factors that contributed to the recommendation
-- Setup rule matches (codified trade archetypes from the trader's rule library)
+NORTH STAR — THIS IS THE LENS FOR EVERYTHING BELOW.
+The trader is a sharpshooter hunting grand-slam outcomes: trades whose maximum favorable
+excursion (MFE) reaches +200% or more on the option. A +30% winner is not the goal — it is
+a consolation prize. Your thesis must judge this trade on two dimensions simultaneously:
 
-Based on this data, provide a comprehensive trade thesis that explains:
-1. Why this trade setup is favorable
-2. The key supporting evidence
-3. The primary risks to monitor
-4. Conditions that would invalidate the thesis
-5. Specific exit targets with numerical price levels
+  1. UPSIDE CAPACITY. If the underlying delivers the move the archetype implies, does this
+     specific contract have the structural leverage (delta, DTE, IV regime, convexity) to
+     3–5x or more? A directionally correct thesis on a structurally weak contract still
+     fails the grand-slam test.
 
-EXIT TARGET GUIDELINES:
-- Provide 3 tiered take-profit targets: TP1 (conservative, +25-40%), TP2 (moderate, +50-80%), TP3 (stretch, +100%+)
-- Calculate underlying price levels using delta: a $1 stock move changes the option by ~delta dollars
-- For CALLs: TP underlying prices should be ABOVE current price; SL underlying price BELOW
-- For PUTs: TP underlying prices should be BELOW current price; SL underlying price ABOVE
-- Stop loss should account for the bid-ask spread and daily volatility (ATR)
-- Time exit should consider theta decay acceleration near expiration
-- All option_pnl_pct values represent the percentage change in the option's price (positive for gains, negative for losses)
+  2. PROBABILITY QUALITY. Are the calibrated win/HR rates robust — adequate sample size,
+     strong archetype fit, cooperative regime — or are they thin evidence dressed up as a
+     number? Wilson-lower bounds already discount small samples; note when that discount
+     is doing most of the work.
 
-SETUP RULE CONTEXT:
-The trader maintains a library of setup rules — codified trade archetypes based on historical
-patterns and volatility research. When one or more rules match this opportunity, incorporate
-this into your thesis:
+SCORING REGIME. The Scoring Summary declares one of three regimes:
 
-- Reference which rules matched and why that archetype applies to this trade
-- If a rule has historical performance data (win rate, sample size), cite it as supporting
-  evidence. Weight rules with larger samples (n>15) and higher win rates (>70%) more heavily.
-- If multiple rules match (confluence), explicitly call this out as increasing conviction.
-  Multi-rule confluence is the trader's highest-confidence signal.
-- If a matched rule has no historical data yet (no win rate or sample size), note that the
-  thesis aligns with the archetype but remains unvalidated by historical performance.
-- If zero rules match, note this explicitly — it means the trade does not fit any established
-  archetype, which is a caution flag worth acknowledging.
+- v5 (active from Policy v4.1.1, 2026-04-20 onward) — DUAL CONVICTION. This is the
+  current production regime and the one you should assume unless the block says otherwise.
+  Two scores are reported:
+    * HR Conviction (0–20): 100 × Wilson_lower(P(MFE ≥ 200%)) × fit × regime. The
+      calibrated grand-slam probability for this archetype, sample-size adjusted. The
+      v4.1.1 APPROVE floor is hr_conviction ≥ 7.0 on the HR track.
+    * P Conviction (0–100): 100 × Wilson_lower(P_win) × normalized_pnl × fit × regime.
+      Calibrated profitability — catches grinder patterns (e.g. BREAKDOWN) where the
+      edge is high win rate rather than tail MFE. The v4.1.1 APPROVE floor is
+      p_conviction ≥ 50.0 on the P track.
+    * Verdict driver: OR gate — either track clearing its threshold is sufficient. The
+      block names which track drove the APPROVE. An HR-driven trade should be framed
+      explicitly as a home-run bet (asymmetric tail payoff is the entire reason to
+      take it). A P-driven trade should be framed as a high-base-rate profitability
+      play; the thesis should still check whether the contract has enough leverage
+      to capture occasional fat-tail outcomes when they come.
+    * Fit and regime multipliers live in [0.5, 1.5] and multiplicatively compound with
+      the Wilson-lower rate. A strong raw rate with weak fit or a hostile regime ends
+      up at a modest conviction — when that happens, call out the discount as a risk.
+    * GBM co-scorer (when present): independent lognormal probability estimate from
+      the contract's IV and DTE. Treat it as a sanity check on the archetype's implied
+      probability — large divergence between archetype P and GBM P is a data point
+      worth naming.
+
+- v4 (Policy v4.x, legacy for scanners not in v5_active_scanners) — three pillars
+  (Directional Conviction 0.40, Move Potential 0.35, Trade Structure 0.25) combined via
+  weighted geometric mean. A lagging pillar collapses the composite — treat it as a
+  material risk.
+
+- v3 (Policy v3.x, historical) — Premium Leverage / Underlying Behavior / Setup Quality,
+  combined via arithmetic weighted sum.
+
+SETUP RULE / ARCHETYPE CONTEXT.
+Alongside the conviction scores, the block may list matched archetypes (v5) and setup
+rules (legacy rule library). In v5, the HR archetype and P archetype are the load-bearing
+historical evidence — their rates are already folded into the conviction scores. Setup
+rules from the legacy library are complementary.
+
+- Reference which archetypes/rules matched and why the pattern applies to this trade.
+- For v5 archetypes, cite the Wilson_lower HR/win rate and sample size — these are
+  calibrated and already discount low samples. A large-sample archetype with a modest
+  rate is often better evidence than a tiny-sample archetype with a dazzling one.
+- If multiple archetypes or rules match (confluence), call it out as increasing conviction.
+- If zero archetypes match but v5 is active, note it — in v5 no HR archetype means
+  hr_conviction defaulted to zero and the APPROVE came entirely from the P track.
+
+Based on this data, produce a thesis that answers:
+ 1. Why this setup has grand-slam potential (or, if P-driven, why the profitability edge
+    is robust and whether the structure still has enough leverage for occasional home runs).
+ 2. The structural qualities of THIS contract that enable or constrain a 3–5x+ outcome —
+    delta (leverage), DTE (time for the move), IV (entry premium richness), expected move
+    vs. required move (feasibility), liquidity (actually exitable near MFE).
+ 3. Key supporting evidence — cite calibrated rates, sample sizes, fit, regime.
+ 4. Primary risks to monitor — including low fit, thin sample, regime headwind, or
+    structural weakness that would cap the upside even if the direction is right.
+ 5. Conditions that would invalidate the thesis before or during the trade.
+ 6. Specific numerical exit targets calibrated to the grand-slam thesis (see below).
+
+EXIT TARGET GUIDELINES (calibrated to the grand-slam thesis — NOT generic +25/+50/+100).
+
+- TP1 CONSERVATIVE (+50-80%): The "de-risk" take. Lock in enough to make the trade
+  materially winning even if the tail doesn't come.
+- TP2 HOME RUN (+100-200%): THIS IS THE BASE CASE for a grand-slam thesis, not a stretch.
+  This is the level the archetype's historical HR rate implies is achievable.
+- TP3 STRETCH (+300%+): The archetype's long-tail outcome. Sized for partial exit only.
+- Calculate underlying price levels using delta; refresh with gamma if the move is large
+  (delta expands with ITM-ness, so TP3 underlying prices are typically closer than a
+  linear delta extrapolation suggests).
+- For CALLs: TP underlying prices ABOVE current, SL BELOW. For PUTs: inverted.
+- Stop loss should account for bid-ask spread and 1x daily ATR — if a single ATR of noise
+  would stop you out, the sizing or stop level is wrong.
+- Time exit: options bought with high grand-slam potential should be exited before theta
+  acceleration hollows out the convexity — typically DTE ≤ 5-7 for short-dated trades.
+- All option_pnl_pct values are the percentage change in the OPTION price.
 
 Your response MUST be valid JSON matching the exact schema provided."""
 
 THESIS_OUTPUT_SCHEMA = """{
-  "setup_summary": "string - One paragraph executive summary of the trade setup, referencing matched setup rules if any",
-  "thesis": "string - Detailed 2-3 paragraph explanation of why this trade is attractive, integrating setup rule context",
-  "supporting_evidence": ["string - List of 3-5 specific data points supporting the trade, including setup rule performance where available"],
-  "risks": ["string - List of 2-4 key risks to monitor"],
-  "invalidation_conditions": ["string - List of 2-3 conditions that would invalidate this thesis"],
+  "setup_summary": "string - One paragraph executive summary framing this as a grand-slam candidate (or a P-driven profitability play with upside optionality), naming the driving archetype and what the HR/P rates imply",
+  "thesis": "string - 2-3 paragraphs: (1) the grand-slam case — directional thesis plus why this contract's delta/DTE/IV position it for a 3-5x outcome if the move comes, (2) the calibrated evidence — HR/P convictions, Wilson-lower rates, sample size, fit, regime, (3) what would cap or unlock the tail",
+  "supporting_evidence": ["string - 3-5 specific calibrated data points: HR Conviction value, P Conviction value, archetype Wilson-lower rates with sample size, fit × regime multipliers, structural leverage indicators (delta, feasibility ratio, expected vs required move)"],
+  "risks": ["string - 2-4 risks — name fit/regime discounts explicitly when they are doing real work, call out structural caps on upside (low delta, wide spread, theta drag) if present"],
+  "invalidation_conditions": ["string - 2-3 conditions — include both directional (price/volume breakdown of the thesis) and structural (IV crush, liquidity dry-up, theta acceleration) invalidators"],
   "setup_rule_matches": {
     "count": 2,
     "total_active_rules": 9,
@@ -80,35 +129,35 @@ THESIS_OUTPUT_SCHEMA = """{
     "take_profits": [
       {
         "tier": 1,
-        "option_pnl_pct": 30.0,
-        "underlying_price": 185.50,
-        "rationale": "Conservative target near SMA resistance"
+        "option_pnl_pct": 60.0,
+        "underlying_price": 188.00,
+        "rationale": "Conservative de-risk — ~1x expected move; locks in a materially positive trade while leaving the tail open"
       },
       {
         "tier": 2,
-        "option_pnl_pct": 60.0,
-        "underlying_price": 192.00,
-        "rationale": "Moderate target at 1x expected move"
+        "option_pnl_pct": 150.0,
+        "underlying_price": 196.00,
+        "rationale": "Home-run base case — the level the archetype's historical HR200 rate says is reachable when the thesis plays out"
       },
       {
         "tier": 3,
-        "option_pnl_pct": 100.0,
-        "underlying_price": 200.00,
-        "rationale": "Stretch target if momentum accelerates"
+        "option_pnl_pct": 300.0,
+        "underlying_price": 205.00,
+        "rationale": "Stretch / long-tail — partial exit only; sized to capture the occasional grand-slam outlier"
       }
     ],
     "stop_loss_level": {
       "option_pnl_pct": -40.0,
       "underlying_price": 168.00,
-      "rationale": "Below key support at SMA50 minus 1 ATR"
+      "rationale": "Below invalidation level — more than 1 daily ATR away so noise cannot stop you out"
     },
     "time_exit_level": {
-      "dte_threshold": 5,
-      "rationale": "Exit before theta decay accelerates in final week"
+      "dte_threshold": 7,
+      "rationale": "Exit before theta acceleration hollows out convexity — grand-slam potential lives in gamma, not in held premium"
     },
-    "profit_target": "string - Human-readable summary of take profit strategy",
-    "stop_loss": "string - Human-readable summary of stop loss strategy",
-    "time_exit": "string - Human-readable summary of time-based exit rule"
+    "profit_target": "string - Human-readable summary of the tiered exit strategy",
+    "stop_loss": "string - Human-readable summary of stop loss",
+    "time_exit": "string - Human-readable summary of time-based exit"
   }
 }"""
 
@@ -285,13 +334,15 @@ Generate the trade thesis now:"""
 
 
 def _format_scores_block(scores: dict[str, Any], data: dict[str, Any]) -> str:
-    """Format the Scoring Summary — chooses v3 or v4 label set by regime."""
+    """Format the Scoring Summary — dispatches on active regime (v3 / v4 / v5)."""
     regime = scores.get("regime", "v3")
     final = scores.get("final", 0.0) or 0.0
     quality_tier = data.get("quality_tier") or "N/A"
     policy_version = data.get("policy_version", "N/A")
 
-    if regime == "v4":
+    if regime == "v5":
+        body = _format_v5_scores(scores, final)
+    elif regime == "v4":
         dc = scores.get("directional_conviction") or 0.0
         mp = scores.get("move_potential") or 0.0
         ts = scores.get("trade_structure") or 0.0
@@ -317,6 +368,85 @@ def _format_scores_block(scores: dict[str, Any], data: dict[str, Any]) -> str:
         + f"- Quality Tier: {quality_tier}\n"
         + f"- Policy Version: {policy_version}\n"
     )
+
+
+def _format_v5_scores(scores: dict[str, Any], final: float) -> str:
+    """Format the v5 dual-conviction scoring block.
+
+    Renders both tracks side-by-side with Wilson bounds, sample size, fit, and
+    regime so the LLM can judge the quality of the evidence — not just the
+    headline number.
+    """
+    hr_conv = scores.get("hr_conviction")
+    p_conv = scores.get("p_conviction")
+    driver = scores.get("verdict_driver") or "neither"
+    hr_thresh = scores.get("v5_hr_threshold") or 7.0
+    p_thresh = scores.get("v5_p_threshold") or 50.0
+    regime_mult = scores.get("regime_alignment")
+    gbm_hr = scores.get("gbm_hr_score")
+    gbm_p = scores.get("gbm_p_score")
+    v5_version = scores.get("v5_scoring_version") or "v5.x"
+
+    def _pct(x: Any) -> str:
+        return f"{x * 100:.1f}%" if isinstance(x, (int, float)) else "N/A"
+
+    def _num(x: Any, fmt: str = ".1f") -> str:
+        return format(x, fmt) if isinstance(x, (int, float)) else "N/A"
+
+    # HR track
+    hr_matched = scores.get("hr_archetype_matched") or "none"
+    hr_fit = scores.get("hr_archetype_fit")
+    hr_p_point = scores.get("hr_p_point")
+    hr_p_lower = scores.get("hr_p_lower")
+    hr_p_upper = scores.get("hr_p_upper")
+    hr_n = scores.get("hr_n_trades")
+    hr_cleared = (
+        "CLEARED THRESHOLD"
+        if isinstance(hr_conv, (int, float)) and hr_conv >= hr_thresh
+        else "below threshold"
+    )
+
+    # P track
+    p_matched = scores.get("p_archetype_matched") or "none"
+    p_fit = scores.get("p_archetype_fit")
+    p_win_point = scores.get("p_win_point")
+    p_win_lower = scores.get("p_win_lower")
+    p_mean_pnl = scores.get("p_mean_pnl_estimate")
+    p_cleared = (
+        "CLEARED THRESHOLD"
+        if isinstance(p_conv, (int, float)) and p_conv >= p_thresh
+        else "below threshold"
+    )
+
+    lines = [
+        f"- Composite Final Score: {final:.1f}/100 (legacy display only in v5)",
+        f"- v5 Scoring Version: {v5_version}",
+        f"- Verdict Driver: {driver}  "
+        f"(OR-gate between HR and P tracks — {driver} had the larger margin above threshold)",
+        "",
+        "**HR Conviction Track (grand-slam: P(MFE ≥ 200%))**",
+        f"  - HR Conviction: {_num(hr_conv)}/20  [{hr_cleared}; v4.1.1 floor = {hr_thresh:.1f}]",
+        f"  - Matched HR Archetype: {hr_matched}  (fit = {_num(hr_fit)}/100)",
+        f"  - Archetype HR200 Rate — point: {_pct(hr_p_point)}, "
+        f"Wilson lower: {_pct(hr_p_lower)}, Wilson upper: {_pct(hr_p_upper)}",
+        f"  - Sample Size (n): {hr_n if hr_n is not None else 'N/A'}  "
+        "(the Wilson lower bound is what drives conviction; "
+        "a modest point rate at large n can beat a dazzling rate at tiny n)",
+        "",
+        "**P Conviction Track (profitability: Wilson_lower(P_win) × normalized P&L)**",
+        f"  - P Conviction: {_num(p_conv)}/100  [{p_cleared}; v4.1.1 floor = {p_thresh:.1f}]",
+        f"  - Matched P Archetype: {p_matched}  (fit = {_num(p_fit)}/100)",
+        f"  - Archetype Win Rate — point: {_pct(p_win_point)}, Wilson lower: {_pct(p_win_lower)}",
+        f"  - Cohort Mean P&L: {_num(p_mean_pnl)}%",
+        "",
+        "**Shared Modifiers**",
+        f"  - Regime Alignment Multiplier: {_num(regime_mult, '.2f')}  "
+        "(applied multiplicatively to both convictions; <1.0 = regime headwind, >1.0 = tailwind)",
+        f"  - GBM Co-Scorer — P(HR200): {_num(gbm_hr)}/100, P(profit): {_num(gbm_p)}/100  "
+        "(independent lognormal sanity check from contract IV + DTE; "
+        "large divergence from archetype rates is a data point)",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def parse_thesis_response(response: str) -> dict[str, Any]:

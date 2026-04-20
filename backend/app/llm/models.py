@@ -50,9 +50,14 @@ class ContractData:
 class ScoresData:
     """Pillar and final scores for thesis input.
 
-    Carries both v3 and v4 pillar scores as optional fields so the prompt
+    Carries v3, v4, and v5 score fields as optional attributes so the prompt
     builder can render whichever regime produced this decision. The
-    ``regime`` field ("v3" or "v4") makes the active set explicit.
+    ``regime`` field ("v3", "v4", or "v5") makes the active set explicit.
+
+    v5 is the dual-conviction regime: HR Conviction (0–20) scores grand-slam
+    probability and P Conviction (0–100) scores profitability. Both are
+    Wilson-lower calibrated estimates multiplied by archetype fit and regime
+    alignment — the prompt layer treats them as the primary thesis inputs.
     """
 
     final: float
@@ -64,6 +69,32 @@ class ScoresData:
     directional_conviction: Optional[float] = None
     move_potential: Optional[float] = None
     trade_structure: Optional[float] = None
+    # v5 (Policy v4.1.1+ — active from 2026-04-20)
+    # HR conviction track (grand-slam: P(MFE ≥ 200%))
+    hr_conviction: Optional[float] = None        # 0–20
+    hr_archetype_matched: Optional[str] = None
+    hr_archetype_fit: Optional[float] = None     # 0–100 — min-fit across archetype conditions
+    hr_p_point: Optional[float] = None           # Point HR200 estimate, [0, 1]
+    hr_p_lower: Optional[float] = None           # Wilson lower bound, [0, 1]
+    hr_p_upper: Optional[float] = None           # Wilson upper bound, [0, 1]
+    hr_n_trades: Optional[int] = None            # Effective sample size for HR rate
+    # P conviction track (profitability: Wilson_lower(P_win) × normalized_pnl)
+    p_conviction: Optional[float] = None         # 0–100
+    p_archetype_matched: Optional[str] = None
+    p_archetype_fit: Optional[float] = None      # 0–100
+    p_win_point: Optional[float] = None          # Point win-rate estimate, [0, 1]
+    p_win_lower: Optional[float] = None          # Wilson lower bound on win rate, [0, 1]
+    p_mean_pnl_estimate: Optional[float] = None  # Mean % P&L in cohort
+    # Shared v5 modifiers
+    regime_alignment: Optional[float] = None     # Market-regime multiplier, [0.5, 1.5]
+    gbm_hr_score: Optional[float] = None         # GBM co-scorer P(HR200) × 100
+    gbm_p_score: Optional[float] = None          # GBM co-scorer P(profit) × 100
+    v5_scoring_version: Optional[str] = None     # e.g. "v5.0.0" when v5 wrote the decision
+    # Inferred at prompt-build time: "HR" or "P" — which conviction drove the APPROVE
+    verdict_driver: Optional[str] = None
+    # Thresholds active at decision time (for framing how far above floor the score landed)
+    v5_hr_threshold: Optional[float] = None
+    v5_p_threshold: Optional[float] = None
     regime: str = "v3"
 
 
@@ -146,6 +177,27 @@ class ThesisInput:
                 "directional_conviction": self.scores.directional_conviction,
                 "move_potential": self.scores.move_potential,
                 "trade_structure": self.scores.trade_structure,
+                # v5
+                "hr_conviction": self.scores.hr_conviction,
+                "hr_archetype_matched": self.scores.hr_archetype_matched,
+                "hr_archetype_fit": self.scores.hr_archetype_fit,
+                "hr_p_point": self.scores.hr_p_point,
+                "hr_p_lower": self.scores.hr_p_lower,
+                "hr_p_upper": self.scores.hr_p_upper,
+                "hr_n_trades": self.scores.hr_n_trades,
+                "p_conviction": self.scores.p_conviction,
+                "p_archetype_matched": self.scores.p_archetype_matched,
+                "p_archetype_fit": self.scores.p_archetype_fit,
+                "p_win_point": self.scores.p_win_point,
+                "p_win_lower": self.scores.p_win_lower,
+                "p_mean_pnl_estimate": self.scores.p_mean_pnl_estimate,
+                "regime_alignment": self.scores.regime_alignment,
+                "gbm_hr_score": self.scores.gbm_hr_score,
+                "gbm_p_score": self.scores.gbm_p_score,
+                "v5_scoring_version": self.scores.v5_scoring_version,
+                "verdict_driver": self.scores.verdict_driver,
+                "v5_hr_threshold": self.scores.v5_hr_threshold,
+                "v5_p_threshold": self.scores.v5_p_threshold,
             },
             "pillar_contributors": {
                 pillar: [

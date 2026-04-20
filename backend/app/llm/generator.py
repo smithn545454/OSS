@@ -160,22 +160,72 @@ class ThesisGenerator:
             theta_pct=theta_pct,
         )
 
-        # Build scores data — carries both regimes as optional fields and
-        # records which regime is active so the prompt picks the right labels.
+        # Build scores data — carries v3/v4/v5 as optional fields and records
+        # which regime is active so the prompt picks the right labels. v5 takes
+        # precedence whenever the decision was written by the v5 pipeline; v4
+        # falls back when only the pillar trio is set; otherwise v3.
+        is_v5 = decision.v5_scoring_version is not None or (
+            decision.hr_conviction is not None and decision.p_conviction is not None
+        )
         is_v4 = (
             decision.directional_conviction_score is not None
             and decision.move_potential_score is not None
             and decision.trade_structure_score is not None
         )
+
+        # v5 verdict driver: whichever conviction cleared its threshold with the
+        # larger relative margin. Thresholds default to the Policy v4.1.1 values
+        # (hr=7.0, p=50.0) — the prompt uses this to frame whether the trade is
+        # primarily a home-run bet (HR) or a profitability grind (P).
+        v5_hr_threshold = 7.0
+        v5_p_threshold = 50.0
+        verdict_driver: Optional[str] = None
+        if is_v5:
+            hr = decision.hr_conviction or 0.0
+            p = decision.p_conviction or 0.0
+            hr_margin = (hr - v5_hr_threshold) / v5_hr_threshold if v5_hr_threshold > 0 else 0.0
+            p_margin = (p - v5_p_threshold) / v5_p_threshold if v5_p_threshold > 0 else 0.0
+            hr_cleared = hr >= v5_hr_threshold
+            p_cleared = p >= v5_p_threshold
+            if hr_cleared and not p_cleared:
+                verdict_driver = "HR"
+            elif p_cleared and not hr_cleared:
+                verdict_driver = "P"
+            elif hr_cleared and p_cleared:
+                verdict_driver = "HR" if hr_margin >= p_margin else "P"
+            # else: neither cleared (WATCH/REJECT path — no driver)
+
+        regime = "v5" if is_v5 else ("v4" if is_v4 else "v3")
         scores = ScoresData(
             final=decision.final_score,
-            regime="v4" if is_v4 else "v3",
+            regime=regime,
             premium_leverage=decision.premium_leverage_score,
             underlying_behavior=decision.underlying_behavior_score,
             setup_quality=decision.setup_quality_score,
             directional_conviction=decision.directional_conviction_score,
             move_potential=decision.move_potential_score,
             trade_structure=decision.trade_structure_score,
+            # v5 fields
+            hr_conviction=decision.hr_conviction,
+            hr_archetype_matched=decision.hr_archetype_matched,
+            hr_archetype_fit=decision.hr_archetype_fit,
+            hr_p_point=decision.hr_p_point,
+            hr_p_lower=decision.hr_p_lower,
+            hr_p_upper=decision.hr_p_upper,
+            hr_n_trades=decision.hr_n_trades,
+            p_conviction=decision.p_conviction,
+            p_archetype_matched=decision.p_archetype_matched,
+            p_archetype_fit=decision.p_archetype_fit,
+            p_win_point=decision.p_win_point,
+            p_win_lower=decision.p_win_lower,
+            p_mean_pnl_estimate=decision.p_mean_pnl_estimate,
+            regime_alignment=decision.regime_alignment,
+            gbm_hr_score=decision.gbm_hr_score,
+            gbm_p_score=decision.gbm_p_score,
+            v5_scoring_version=decision.v5_scoring_version,
+            verdict_driver=verdict_driver,
+            v5_hr_threshold=v5_hr_threshold if is_v5 else None,
+            v5_p_threshold=v5_p_threshold if is_v5 else None,
         )
 
         # Build pillar contributors

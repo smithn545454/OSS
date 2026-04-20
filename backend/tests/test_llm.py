@@ -418,12 +418,91 @@ class TestPromptBuilding:
     def test_build_thesis_prompt_contains_instructions(self, sample_thesis_input):
         """Test prompt contains proper instructions."""
         prompt = build_thesis_prompt(sample_thesis_input)
-        
+
         assert "expert options trading analyst" in prompt
         assert "trade thesis" in prompt.lower()
         assert "JSON" in prompt
         assert "setup_summary" in prompt
         assert "exit_plan" in prompt
+
+    def test_build_thesis_prompt_grand_slam_framing(self, sample_thesis_input):
+        """Prompt should name the grand-slam / sharpshooter north star and the
+        HR/P dual-conviction regime regardless of the specific decision input —
+        these live in the system prompt header."""
+        prompt = build_thesis_prompt(sample_thesis_input)
+
+        assert "grand-slam" in prompt.lower()
+        assert "sharpshooter" in prompt.lower()
+        assert "MFE" in prompt
+        assert "200%" in prompt
+        assert "HR Conviction" in prompt
+        assert "P Conviction" in prompt
+        # TP2 is reframed as the home-run BASE CASE, not a stretch target.
+        assert "home-run" in prompt.lower() or "home run" in prompt.lower()
+        assert "100-200%" in prompt or "+100-200%" in prompt
+
+    def test_build_thesis_prompt_v5_scoring_block(
+        self,
+        sample_underlying,
+        sample_contract,
+        sample_pillar_contributors,
+        sample_scanner_triggers,
+    ):
+        """v5 scores render a dual-conviction block with HR/P tracks, Wilson
+        bounds, sample size, archetype fit, regime, and verdict driver."""
+        v5_scores = ScoresData(
+            final=72.0,
+            regime="v5",
+            hr_conviction=9.2,
+            hr_archetype_matched="HR_CHEAP_OPTIONS_MOMENTUM",
+            hr_archetype_fit=86.0,
+            hr_p_point=0.18,
+            hr_p_lower=0.11,
+            hr_p_upper=0.27,
+            hr_n_trades=42,
+            p_conviction=61.5,
+            p_archetype_matched="P_BREAKDOWN_GRINDER",
+            p_archetype_fit=78.0,
+            p_win_point=0.64,
+            p_win_lower=0.52,
+            p_mean_pnl_estimate=24.5,
+            regime_alignment=1.15,
+            gbm_hr_score=14.0,
+            gbm_p_score=58.0,
+            v5_scoring_version="v5.0.0",
+            verdict_driver="HR",
+            v5_hr_threshold=7.0,
+            v5_p_threshold=50.0,
+        )
+        thesis_input = ThesisInput(
+            underlying=sample_underlying,
+            contract=sample_contract,
+            scores=v5_scores,
+            pillar_contributors=sample_pillar_contributors,
+            scanner_triggers=sample_scanner_triggers,
+            policy_version="v4.1.1",
+            quality_tier="TIER_2",
+            evaluation_id="eval-v5",
+        )
+        prompt = build_thesis_prompt(thesis_input)
+
+        # Regime label
+        assert "regime=v5" in prompt
+        # HR track details
+        assert "HR Conviction: 9.2/20" in prompt
+        assert "HR_CHEAP_OPTIONS_MOMENTUM" in prompt
+        assert "CLEARED THRESHOLD" in prompt  # hr=9.2 >= 7.0
+        assert "Wilson lower: 11.0%" in prompt  # hr_p_lower
+        assert "Sample Size (n): 42" in prompt
+        # P track details
+        assert "P Conviction: 61.5/100" in prompt
+        assert "P_BREAKDOWN_GRINDER" in prompt
+        # Driver + modifiers
+        assert "Verdict Driver: HR" in prompt
+        assert "Regime Alignment Multiplier: 1.15" in prompt
+        assert "GBM Co-Scorer" in prompt
+        # v5 version
+        assert "v5.0.0" in prompt
 
 
 # ============================================================================
@@ -586,6 +665,107 @@ class TestThesisGenerator:
         assert len(input_data.pillar_contributors) == 3
         assert len(input_data.scanner_triggers) == 1
         assert input_data.quality_tier == "TIER_1"
+
+    def test_build_input_v5_wires_dual_conviction(
+        self,
+        sample_evaluation,
+        sample_pillar_scores,
+    ):
+        """When the Decision carries v5 scoring fields, build_input should tag
+        the regime as v5 and copy HR/P conviction, Wilson bounds, archetype
+        IDs, regime multiplier, and infer the verdict driver from margins."""
+        config = ThesisConfig(enabled=False)
+        generator = ThesisGenerator(config=config)
+
+        v5_decision = Decision(
+            evaluation_id="eval-v5",
+            verdict=Verdict.APPROVE,
+            quality_tier=QualityTier.TIER_2,
+            final_score=72.0,
+            # v5 dual-conviction fields
+            hr_conviction=11.0,  # well above 7.0 floor → +57% margin
+            hr_archetype_matched="HR_MOMENTUM_BREAKOUT",
+            hr_archetype_fit=88.0,
+            hr_p_point=0.22,
+            hr_p_lower=0.14,
+            hr_p_upper=0.31,
+            hr_n_trades=55,
+            p_conviction=55.0,  # just above 50.0 floor → +10% margin
+            p_archetype_matched="P_STEADY_GRINDER",
+            p_archetype_fit=74.0,
+            p_win_point=0.61,
+            p_win_lower=0.50,
+            p_mean_pnl_estimate=19.0,
+            regime_alignment=1.08,
+            gbm_hr_score=16.0,
+            gbm_p_score=52.0,
+            v5_scoring_version="v5.0.0",
+            primary_reason_code="V5_QUALITY",
+            supporting_reason_codes=[],
+            failed_gates=[],
+            concentration_warnings=[],
+            policy_version="v4.1.1",
+        )
+
+        input_data = generator.build_input(
+            evaluation=sample_evaluation,
+            decision=v5_decision,
+            pillar_scores=sample_pillar_scores,
+            scanner_triggers=[],
+            features={},
+        )
+
+        assert input_data.scores.regime == "v5"
+        assert input_data.scores.hr_conviction == 11.0
+        assert input_data.scores.p_conviction == 55.0
+        assert input_data.scores.hr_archetype_matched == "HR_MOMENTUM_BREAKOUT"
+        assert input_data.scores.p_archetype_matched == "P_STEADY_GRINDER"
+        assert input_data.scores.hr_p_lower == 0.14
+        assert input_data.scores.regime_alignment == 1.08
+        assert input_data.scores.v5_scoring_version == "v5.0.0"
+        assert input_data.scores.v5_hr_threshold == 7.0
+        assert input_data.scores.v5_p_threshold == 50.0
+        # HR cleared its floor by +57% vs P's +10% → HR is the driver.
+        assert input_data.scores.verdict_driver == "HR"
+
+    def test_build_input_v4_decision_keeps_v4_regime(
+        self,
+        sample_evaluation,
+        sample_pillar_scores,
+    ):
+        """A v4 decision (pillar trio present, no v5 fields) should render as
+        regime v4 and leave the v5 fields unset."""
+        config = ThesisConfig(enabled=False)
+        generator = ThesisGenerator(config=config)
+
+        v4_decision = Decision(
+            evaluation_id="eval-v4",
+            verdict=Verdict.APPROVE,
+            quality_tier=QualityTier.TIER_1,
+            final_score=78.0,
+            directional_conviction_score=80.0,
+            move_potential_score=75.0,
+            trade_structure_score=72.0,
+            primary_reason_code="APPROVED_TIER_1",
+            supporting_reason_codes=[],
+            failed_gates=[],
+            concentration_warnings=[],
+            policy_version="v4.0.1",
+        )
+
+        input_data = generator.build_input(
+            evaluation=sample_evaluation,
+            decision=v4_decision,
+            pillar_scores=sample_pillar_scores,
+            scanner_triggers=[],
+            features={},
+        )
+
+        assert input_data.scores.regime == "v4"
+        assert input_data.scores.hr_conviction is None
+        assert input_data.scores.p_conviction is None
+        assert input_data.scores.verdict_driver is None
+        assert input_data.scores.v5_hr_threshold is None
 
     @pytest.mark.asyncio
     async def test_generate_non_approve_returns_failed(
