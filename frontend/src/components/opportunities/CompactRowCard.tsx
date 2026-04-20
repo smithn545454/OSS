@@ -10,6 +10,7 @@
 import { useNavigate } from 'react-router-dom'
 import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
 import { ConvictionGauge } from './ConvictionGauge'
+import { TierBadge, ArchetypePill, ConvictionInline } from './V5Badges'
 import { formatRelativeTime, formatExpirationDate, getAgeFreshness } from '@/lib/formatTime'
 
 interface CompactRowCardProps {
@@ -128,15 +129,20 @@ function IdentityBlock({ evaluation }: { evaluation: ApproveEvaluation }) {
           ${evaluation.strike}
         </span>
 
+        <TierBadge tier={evaluation.decision?.quality_tier} size="xs" />
       </div>
 
-      {/* Line 2: Expiry + DTE */}
+      {/* Line 2: Expiry + DTE + v5 conviction (HR / P) when present */}
       <div style={{
         marginTop: '2px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
         fontSize: '11px',
         color: '#4A5168',
       }}>
-        {expiryDisplay} · {evaluation.dte}d
+        <span>{expiryDisplay} · {evaluation.dte}d</span>
+        <ConvictionInline evaluation={evaluation} size="xs" />
       </div>
     </div>
   )
@@ -146,9 +152,19 @@ function SignalsZone({ evaluation }: { evaluation: ApproveEvaluation }) {
   const hasSetupRules = (evaluation.matchedRules?.length ?? 0) > 0
   const urgencyConfig = getUrgencyConfig(evaluation.dte)
   const approvalCount = evaluation.approvalCount ?? 1
+  const hrArchetype = evaluation.decision?.hr_archetype_matched
+  const pArchetype = evaluation.decision?.p_archetype_matched
+  const hasArchetype = Boolean(hrArchetype || pArchetype)
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      {/* Row 0: v5 archetype pills (when matched) */}
+      {hasArchetype && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          <ArchetypePill archetype={hrArchetype} kind="hr" />
+          <ArchetypePill archetype={pArchetype} kind="p" />
+        </div>
+      )}
       {/* Row 1: Setup Rules (conditional) */}
       {hasSetupRules && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>

@@ -14,8 +14,19 @@ import { UrgencyBadge } from './UrgencyBadge'
 import { ScannerBadge } from './ScannerBadge'
 import { ConvictionGauge } from './ConvictionGauge'
 import { OptionTypeBadge } from './OptionTypeBadge'
+import { TierBadge, ArchetypePill, isSharpshooter } from './V5Badges'
 
-type SortField = 'contract' | 'conviction' | 'scanner' | 'urgency' | 'premium' | 'delta' | 'moneyness' | 'time'
+type SortField =
+  | 'contract'
+  | 'conviction'
+  | 'hr'
+  | 'p'
+  | 'scanner'
+  | 'urgency'
+  | 'premium'
+  | 'delta'
+  | 'moneyness'
+  | 'time'
 type SortDirection = 'asc' | 'desc'
 
 interface AllApprovesTableProps {
@@ -27,6 +38,7 @@ interface FilterState {
   scanner: ScannerType | 'all'
   urgency: UrgencyLevel | 'all'
   optionType: 'CALL' | 'PUT' | 'all'
+  tier: 'all' | 'sharpshooter' | 'TIER_1' | 'TIER_2' | 'TIER_3'
 }
 
 const ITEMS_PER_PAGE = 20
@@ -124,6 +136,7 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
     scanner: 'all',
     urgency: 'all',
     optionType: 'all',
+    tier: 'all',
   })
   const [page, setPage] = useState(1)
   
@@ -150,12 +163,17 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
     if (filters.optionType !== 'all') {
       result = result.filter(e => e.option_type === filters.optionType)
     }
-    
+    if (filters.tier === 'sharpshooter') {
+      result = result.filter(isSharpshooter)
+    } else if (filters.tier !== 'all') {
+      result = result.filter(e => e.decision?.quality_tier === filters.tier)
+    }
+
     // Sort
     result.sort((a, b) => {
       let aVal: number | string = 0
       let bVal: number | string = 0
-      
+
       switch (sortField) {
         case 'contract':
           aVal = a.underlying_ticker
@@ -164,6 +182,14 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
         case 'conviction':
           aVal = a.convictionScore ?? 0
           bVal = b.convictionScore ?? 0
+          break
+        case 'hr':
+          aVal = a.decision?.hr_conviction ?? -1
+          bVal = b.decision?.hr_conviction ?? -1
+          break
+        case 'p':
+          aVal = a.decision?.p_conviction ?? -1
+          bVal = b.decision?.p_conviction ?? -1
           break
         case 'premium':
           aVal = a.mid ?? 0
@@ -238,7 +264,19 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
         </div>
         
         {/* Filters */}
-        <div style={{ display: 'flex', gap: '16px' }}>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+          <FilterSelect
+            label="Tier"
+            value={filters.tier}
+            options={[
+              { value: 'all', label: 'All Tiers' },
+              { value: 'sharpshooter', label: '🎯 Sharpshooter (HR ≥ 14)' },
+              { value: 'TIER_1', label: 'TIER 1 only' },
+              { value: 'TIER_2', label: 'TIER 2 only' },
+              { value: 'TIER_3', label: 'TIER 3 only' },
+            ]}
+            onChange={(v) => setFilters(f => ({ ...f, tier: v as FilterState['tier'] }))}
+          />
           <FilterSelect
             label="Scanner"
             value={filters.scanner}
@@ -311,6 +349,35 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 onSort={handleSort}
                 align="right"
               />
+              <SortableHeader
+                label="HR"
+                field="hr"
+                currentSort={sortField}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+                align="right"
+              />
+              <SortableHeader
+                label="P"
+                field="p"
+                currentSort={sortField}
+                currentDirection={sortDirection}
+                onSort={handleSort}
+                align="right"
+              />
+              <th style={{
+                padding: '12px 16px',
+                textAlign: 'left',
+                fontWeight: 600,
+                fontSize: '12px',
+                color: 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderBottom: '1px solid var(--border-default)',
+                background: 'var(--bg-secondary)',
+              }}>
+                Tier / Archetype
+              </th>
               <SortableHeader
                 label="Delta"
                 field="delta"
@@ -445,6 +512,59 @@ export function AllApprovesTable({ evaluations, className = '' }: AllApprovesTab
                 <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <ConvictionGauge score={evaluation.convictionScore ?? 0} size="mini" />
+                  </div>
+                </td>
+                <td
+                  style={{
+                    padding: '12px 16px',
+                    textAlign: 'right',
+                    fontFamily: 'var(--font-primary)',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color:
+                      evaluation.decision?.hr_conviction != null && evaluation.decision.hr_conviction >= 14
+                        ? '#10B981'
+                        : evaluation.decision?.hr_conviction != null && evaluation.decision.hr_conviction >= 7
+                        ? 'var(--text-secondary)'
+                        : 'var(--text-muted)',
+                  }}
+                  title="HR conviction — P(MFE ≥ 200%) × fit × regime × 100 (max ~20)"
+                >
+                  {evaluation.decision?.hr_conviction != null
+                    ? evaluation.decision.hr_conviction.toFixed(
+                        evaluation.decision.hr_conviction >= 10 ? 0 : 1,
+                      )
+                    : '—'}
+                </td>
+                <td
+                  style={{
+                    padding: '12px 16px',
+                    textAlign: 'right',
+                    fontFamily: 'var(--font-primary)',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color:
+                      evaluation.decision?.p_conviction != null && evaluation.decision.p_conviction >= 70
+                        ? '#38BDF8'
+                        : evaluation.decision?.p_conviction != null && evaluation.decision.p_conviction >= 50
+                        ? 'var(--text-secondary)'
+                        : 'var(--text-muted)',
+                  }}
+                  title="P conviction — Wilson_lower(P_win) × normalized_pnl × fit × regime × 100"
+                >
+                  {evaluation.decision?.p_conviction != null
+                    ? evaluation.decision.p_conviction.toFixed(0)
+                    : '—'}
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                    <TierBadge tier={evaluation.decision?.quality_tier} size="xs" />
+                    {(evaluation.decision?.hr_archetype_matched || evaluation.decision?.p_archetype_matched) && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                        <ArchetypePill archetype={evaluation.decision?.hr_archetype_matched} kind="hr" />
+                        <ArchetypePill archetype={evaluation.decision?.p_archetype_matched} kind="p" />
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td style={{

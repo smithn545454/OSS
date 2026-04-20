@@ -9,6 +9,7 @@ import { useState } from 'react'
 import type { ApproveEvaluation, ContractQuote } from '@/lib/types'
 import { filterByConvictionThreshold, sortByConviction, sortByCheap } from '@/lib/convictionScore'
 import { CompactRowCard } from './CompactRowCard'
+import { isSharpshooter } from './V5Badges'
 
 const TIME_WINDOWS = [
   { label: 'Today', value: 1 },
@@ -25,7 +26,7 @@ interface ConvictionQueueProps {
   className?: string
 }
 
-function EmptyState() {
+function EmptyState({ sharpshooter }: { sharpshooter?: boolean }) {
   return (
     <div style={{
       padding: '48px 24px',
@@ -34,30 +35,31 @@ function EmptyState() {
       borderRadius: 'var(--radius-lg)',
       border: '1px solid var(--border-default)',
     }}>
-      <div style={{ 
-        fontSize: '48px', 
+      <div style={{
+        fontSize: '48px',
         marginBottom: '16px',
         opacity: 0.5,
       }}>
-        📊
+        {sharpshooter ? '🎯' : '📊'}
       </div>
-      <h3 style={{ 
-        margin: '0 0 8px', 
-        fontSize: '16px', 
+      <h3 style={{
+        margin: '0 0 8px',
+        fontSize: '16px',
         fontWeight: 600,
         color: 'var(--text-primary)',
       }}>
-        No High-Conviction Opportunities
+        {sharpshooter ? 'No Sharpshooter Trades Right Now' : 'No High-Conviction Opportunities'}
       </h3>
-      <p style={{ 
-        margin: 0, 
-        fontSize: '14px', 
+      <p style={{
+        margin: 0,
+        fontSize: '14px',
         color: 'var(--text-muted)',
-        maxWidth: '400px',
+        maxWidth: '420px',
         marginInline: 'auto',
       }}>
-        No contracts currently meet the conviction threshold. Check the All APPROVEs table 
-        below for opportunities with lower conviction scores.
+        {sharpshooter
+          ? 'No opportunities meet the TIER_1 bar (HR conviction ≥ 14). These are rare — typically UV_LOTTERY archetypes at strong fit and favorable regime.'
+          : 'No contracts currently meet the conviction threshold. Check the All APPROVEs table below for opportunities with lower conviction scores.'}
       </p>
     </div>
   )
@@ -71,17 +73,29 @@ export function ConvictionQueue({
   onMaxAgeTradingDaysChange,
   className = '',
 }: ConvictionQueueProps) {
-  const [sortMode, setSortMode] = useState<'conviction' | 'cheap'>('conviction')
+  const [sortMode, setSortMode] = useState<'conviction' | 'hr' | 'cheap'>('conviction')
   const [rulesOnly, setRulesOnly] = useState(false)
+  const [sharpshooterOnly, setSharpshooterOnly] = useState(false)
 
-  // Filter to high-conviction only, optionally require matched rules, then sort
-  let filtered = filterByConvictionThreshold(evaluations, threshold)
+  // When sharpshooter filter is on we bypass the legacy conviction threshold —
+  // a v5 HR ≥ 14 setup is always worth surfacing, even if its legacy score is low.
+  let filtered = sharpshooterOnly
+    ? evaluations.filter(isSharpshooter)
+    : filterByConvictionThreshold(evaluations, threshold)
   if (rulesOnly) {
     filtered = filtered.filter(e => e.matchedRules && e.matchedRules.length > 0)
   }
-  const highConviction = sortMode === 'cheap'
-    ? sortByCheap(filtered)
-    : sortByConviction(filtered)
+
+  let highConviction: typeof filtered
+  if (sortMode === 'cheap') {
+    highConviction = sortByCheap(filtered)
+  } else if (sortMode === 'hr') {
+    highConviction = [...filtered].sort(
+      (a, b) => (b.decision?.hr_conviction ?? -1) - (a.decision?.hr_conviction ?? -1),
+    )
+  } else {
+    highConviction = sortByConviction(filtered)
+  }
   const isEmpty = highConviction.length === 0
   
   return (
@@ -139,44 +153,53 @@ export function ConvictionQueue({
             ))}
           </select>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Ranked by {sortMode === 'cheap' ? 'Cheap' : 'Conviction'}
+            Ranked by {sortMode === 'cheap' ? 'Cheap' : sortMode === 'hr' ? 'HR Conv' : 'Conviction'}
           </span>
           <span style={{
             display: 'inline-flex',
             gap: '2px',
             fontSize: '11px',
           }}>
-            <button
-              onClick={() => setSortMode('conviction')}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '2px 6px',
-                fontSize: '11px',
-                color: sortMode === 'conviction' ? 'var(--text-secondary)' : 'var(--text-muted)',
-                borderBottom: sortMode === 'conviction' ? '1px solid var(--text-secondary)' : '1px solid transparent',
-                opacity: sortMode === 'conviction' ? 1 : 0.6,
-              }}
-            >
-              Conviction
-            </button>
-            <button
-              onClick={() => setSortMode('cheap')}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '2px 6px',
-                fontSize: '11px',
-                color: sortMode === 'cheap' ? 'var(--text-secondary)' : 'var(--text-muted)',
-                borderBottom: sortMode === 'cheap' ? '1px solid var(--text-secondary)' : '1px solid transparent',
-                opacity: sortMode === 'cheap' ? 1 : 0.6,
-              }}
-            >
-              Cheap
-            </button>
+            {(['conviction', 'hr', 'cheap'] as const).map(mode => {
+              const label = mode === 'hr' ? 'HR' : mode === 'cheap' ? 'Cheap' : 'Conviction'
+              const active = sortMode === mode
+              return (
+                <button
+                  key={mode}
+                  onClick={() => setSortMode(mode)}
+                  title={mode === 'hr' ? 'Sort by v5 HR conviction (grand-slam probability)' : undefined}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    color: active ? 'var(--text-secondary)' : 'var(--text-muted)',
+                    borderBottom: active ? '1px solid var(--text-secondary)' : '1px solid transparent',
+                    opacity: active ? 1 : 0.6,
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </span>
+          <button
+            onClick={() => setSharpshooterOnly(!sharpshooterOnly)}
+            title="Show only TIER_1 sharpshooter trades (HR conviction ≥ 14)"
+            style={{
+              background: sharpshooterOnly ? '#10B981' : 'none',
+              border: sharpshooterOnly ? '1px solid #10B981' : '1px solid var(--border-default)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              padding: '2px 8px',
+              fontSize: '11px',
+              color: sharpshooterOnly ? '#04131C' : 'var(--text-muted)',
+              fontWeight: sharpshooterOnly ? 700 : 400,
+            }}
+          >
+            Sharpshooter
+          </button>
           <button
             onClick={() => setRulesOnly(!rulesOnly)}
             style={{
@@ -193,14 +216,14 @@ export function ConvictionQueue({
             Has Rules
           </button>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Score ≥ {threshold}
+            {sharpshooterOnly ? 'HR ≥ 14' : `Score ≥ ${threshold}`}
           </span>
         </div>
       </div>
       
       {/* Cards or Empty State */}
       {isEmpty ? (
-        <EmptyState />
+        <EmptyState sharpshooter={sharpshooterOnly} />
       ) : (
         <div 
           style={{ 
