@@ -665,6 +665,7 @@ async def run_decision_logic(
     anti_archetypes_config: Optional[AntiArchetypeConfig] = None,
     feature_sets: Optional[dict[str, Any]] = None,
     opportunities: Optional[dict[str, Any]] = None,
+    v5_policy: Optional[Any] = None,
 ) -> tuple[dict[str, Decision], list[TradeThesis]]:
     """Convenience function to run decision logic stage.
 
@@ -695,6 +696,7 @@ async def run_decision_logic(
         pillar_config=pillar_config,
         archetypes_config=archetypes_config,
         anti_archetypes_config=anti_archetypes_config,
+        v5_policy=v5_policy,
     )
     return await stage.execute(
         run_id=run_id,

@@ -864,6 +864,12 @@ class ScannerOrchestrator:
                             check_concentration=True,
                             generate_theses=False,
                             pillar_config=policy_config.pillars,
+                            archetypes_config=policy_config.archetypes,
+                            anti_archetypes_config=policy_config.anti_archetypes,
+                            feature_sets=feature_sets,
+                            opportunities=filtered_opportunities,
+                            # v5: no-op when policy_config.v5_active=False.
+                            v5_policy=policy_config,
                         )
 
                         # Count verdicts

@@ -535,6 +535,8 @@ async def _run_uv_bridge(run_id: str) -> dict[str, Any]:
                 anti_archetypes_config=policy_config.anti_archetypes,
                 feature_sets=feature_sets,
                 opportunities=opportunities,
+                # v5 dual-conviction: no-op when policy_config.v5_active=False.
+                v5_policy=policy_config,
             )
 
             approve_count = sum(1 for d in decisions.values() if d.verdict == Verdict.APPROVE)
