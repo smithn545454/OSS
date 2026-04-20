@@ -48,6 +48,8 @@ select = ["E", "F", "I", "N", "W"]
 [tool.ruff.lint.per-file-ignores]
 # S, K, T are standard Black-Scholes notation
 "app/selection/greeks.py" = ["N803", "N806"]
+# X, y are standard ML feature-matrix / label notation (sklearn convention)
+"scripts/train_v5_gbm.py" = ["N803", "N806"]
 
 [tool.mypy]
 python_version = "3.12"
