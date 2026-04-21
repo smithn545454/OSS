@@ -556,22 +556,24 @@ export function usePaperTradingPositions(status?: string) {
 
 // Active Positions dashboard. 5-minute polling aligns with the backend's
 // per-(underlying, expiry) quote cache — faster polling would just return
-// the cached snapshot.
+// the cached snapshot. Intraday quote refresh is opt-in via the `refresh`
+// flag; the default (no-refresh) read returns instantly using daily-batch
+// prices. Only explicit refresh-button clicks pay the Polygon cost.
 const LIVE_REFRESH_MS = 5 * 60 * 1000
 
-export function useLivePositions(scanner?: string) {
+export function useLivePositions(scanner: string | undefined, refresh = false) {
   return useQuery({
-    queryKey: ['paper-trading', 'positions', 'live', scanner ?? 'all'] as const,
-    queryFn: () => api.getLivePositions(scanner),
+    queryKey: ['paper-trading', 'positions', 'live', scanner ?? 'all', refresh] as const,
+    queryFn: () => api.getLivePositions(scanner, refresh),
     refetchInterval: LIVE_REFRESH_MS,
     staleTime: 60_000,
   })
 }
 
-export function useLivePositionsSummary() {
+export function useLivePositionsSummary(refresh = false) {
   return useQuery({
-    queryKey: ['paper-trading', 'positions', 'live', 'summary'] as const,
-    queryFn: api.getLivePositionsSummary,
+    queryKey: ['paper-trading', 'positions', 'live', 'summary', refresh] as const,
+    queryFn: () => api.getLivePositionsSummary(refresh),
     refetchInterval: LIVE_REFRESH_MS,
     staleTime: 60_000,
   })
