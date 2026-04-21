@@ -473,9 +473,18 @@ class ScannerOrchestrator:
                         elif opt_type == "PUT":
                             direction = DirectionHint.PUT
 
-                        metrics: dict[str, Any] = {}
+                        metrics: dict[str, Any] = {
+                            "lookback_hours": 8,
+                        }
                         if ticker in original_scanners:
-                            metrics["original_scanners"] = original_scanners[ticker]
+                            scanners_list = original_scanners[ticker]
+                            metrics["original_scanners"] = scanners_list
+                            # originating_scanner (singular) is the canonical
+                            # provenance field — the first real scanner that
+                            # produced the upstream APPROVE. Frontends read
+                            # this; analytics queries group on it.
+                            if scanners_list:
+                                metrics["originating_scanner"] = scanners_list[0]
 
                         opp = Opportunity(
                             underlying_ticker=ticker,

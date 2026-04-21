@@ -917,8 +917,10 @@ export const SCANNER_CONFIGS: Record<string, ScannerConfig> = {
     ],
   },
   REVALIDATION: {
-    label: 'Revalidation',
-    thesis: 'Prior APPROVE refreshed with current prices and Greeks — not a new discovery.',
+    label: 'Re-evaluation',
+    thesis:
+      'Prior APPROVE re-evaluated with current prices and Greeks. Not a new ' +
+      'signal — the originating scanner is recorded in scanner_metrics.originating_scanner.',
     role: 'meta',
     metrics: [],
   },

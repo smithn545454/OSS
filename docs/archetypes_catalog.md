@@ -50,6 +50,12 @@ Same archetype at bullish-calm regime (×1.3): 100 × 0.1569 × 1.0 × 1.3 ≈ *
 
 ### REVALIDATION refinements
 
+> REVALIDATION is a synthetic re-evaluation pass, not a primary scanner —
+> each matched trade is a recent APPROVE being re-scored against current
+> prices and Greeks. `scanner_metrics.originating_scanner` on the
+> opportunity records the real upstream scanner. UI label is
+> "Re-evaluation".
+
 | ID | Conditions | n | Win Wilson lower | Mean P&L |
 |---|---|---|---|---|
 | REVALIDATION_LOW_MP | REVAL × MP<40 | 41 | 71.56% | +71.11% |

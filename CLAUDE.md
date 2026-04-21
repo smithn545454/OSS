@@ -113,6 +113,12 @@ the full design, `docs/archetypes_catalog.md` for the archetype library.
 is in `v5_active_scanners`; otherwise v4.1.0 fallback. `BREAKOUT` and
 `COMPRESSION_EXPANSION` remain on v4.1.0 until positive archetypes surface.
 
+**REVALIDATION is not a primary scanner** — it's a synthetic re-evaluation
+pass that re-injects recent APPROVEs (last 8 hours) so we refresh their
+convictions with current prices and Greeks. Its opportunities carry
+`scanner_metrics.originating_scanner` pointing at the real upstream scanner.
+Frontend and stage_mapper render the label as "Re-evaluation".
+
 **Critical wiring fix during Phase 7 cutover:** `opportunities` and `feature_sets`
 are passed as `list[...]` from the orchestrator but stage helpers expected
 `dict[...]`. `_normalize_opportunities` and `_normalize_feature_sets` in

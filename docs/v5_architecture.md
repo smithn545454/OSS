@@ -82,6 +82,14 @@ BREAKOUT and COMPRESSION_EXPANSION fall through to v4.1.0 since no positive v5
 archetypes exist for them. Anti-archetypes still fire (BREAKOUT × MP_ELITE is 0%
 win rate — hard reject).
 
+> **Note on REVALIDATION.** It is not a primary scanner. It's a synthetic
+> re-evaluation pass that re-injects recent APPROVEs (last 8 hours) so
+> their convictions get refreshed against current prices and Greeks.
+> Each REVALIDATION opportunity carries
+> `scanner_metrics.originating_scanner` pointing at the real upstream
+> scanner that produced the prior APPROVE, so signal attribution stays
+> clean. Frontend and Pipeline Monitor both label it "Re-evaluation".
+
 ## Module map
 
 Under `backend/app/v5/`:
