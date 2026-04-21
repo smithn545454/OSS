@@ -457,10 +457,16 @@ class ScannerOrchestrator:
                                 continue
                             for opp in opps:
                                 if opp.opportunity_id == opp_id:
+                                    # Accept both enum and str scanner_type —
+                                    # deserialized rows from DynamoDB may come
+                                    # back as plain strings.
+                                    def _scanner_key(st: Any) -> str:
+                                        return st.value if hasattr(st, "value") else str(st)
+                                    reval_key = ScannerType.REVALIDATION.value
                                     original_scanners[ticker] = [
-                                        st.scanner_type.value
-                                        for st in opp.scanner_triggers
-                                        if st.scanner_type != ScannerType.REVALIDATION
+                                        _scanner_key(trig.scanner_type)
+                                        for trig in opp.scanner_triggers
+                                        if _scanner_key(trig.scanner_type) != reval_key
                                     ]
                                     break
 
@@ -521,10 +527,13 @@ class ScannerOrchestrator:
             # (scanner_stats covers scanned/triggered at the scanner-class level;
             # this catches post-merge + revalidation counts and maps 1:1 to
             # what the rest of the pipeline will see downstream).
+            # Worker payloads may come back with scanner_type as a raw str
+            # after chunk serialization, so accept both enum and string.
             trigger_counts: dict[str, int] = {}
             for opp in opportunities:
                 for trig in opp.scanner_triggers:
-                    key = trig.scanner_type.value
+                    st = trig.scanner_type
+                    key = st.value if hasattr(st, "value") else str(st)
                     trigger_counts[key] = trigger_counts.get(key, 0) + 1
 
             # v5_active_scanners is the policy's allowlist for v5 scoring.
