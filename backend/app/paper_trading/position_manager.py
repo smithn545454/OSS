@@ -876,6 +876,37 @@ async def _fetch_current_price(
     return None
 
 
+async def _apply_thesis_thresholds(
+    position: PaperPosition, evaluation_id: str
+) -> None:
+    """Copy thesis TP/SL/time-exit onto a synthesized paper position.
+
+    The thesis worker usually does this, but only fires when an open paper
+    position already exists at thesis-generation time. Orphan backfills and
+    REJECT-verdict tracks don't meet that precondition, so we replay it here:
+    look up the most recent TradeThesis for the evaluation and copy fields.
+    """
+    try:
+        from app.db.tables import TradeThesisTable
+        thesis = await TradeThesisTable.get_by_evaluation_id(evaluation_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "ensure_paper_position: thesis lookup failed for %s: %s",
+            evaluation_id, e,
+        )
+        return
+    if thesis is None or thesis.exit_plan is None:
+        return
+
+    exit_plan = thesis.exit_plan
+    if exit_plan.take_profits:
+        position.thesis_tp1_pct = exit_plan.take_profits[0].option_pnl_pct
+    if exit_plan.stop_loss_level:
+        position.thesis_sl_pct = abs(exit_plan.stop_loss_level.option_pnl_pct)
+    if exit_plan.time_exit_level:
+        position.thesis_time_exit_dte = exit_plan.time_exit_level.dte_threshold
+
+
 async def ensure_paper_position_for_real_trade(
     real_trade: dict[str, Any],
     polygon_client: Optional[PolygonClient] = None,
@@ -884,8 +915,9 @@ async def ensure_paper_position_for_real_trade(
 
     Idempotent. If a paper position (open or closed) already exists for the
     evaluation, returns it unchanged. If none exists, synthesizes one from
-    the RealTrade's evaluation snapshot and seeds current_price with a
-    fresh Polygon quote.
+    the RealTrade's evaluation snapshot, seeds current_price with a fresh
+    Polygon quote, and copies any existing thesis TP/SL thresholds from
+    ``TradeThesisTable`` onto the new position.
 
     This enforces the invariant that every RealTrade has a matching
     PaperPosition reachable via ``PaperPositionTable.get_by_evaluation_id``,
@@ -926,6 +958,10 @@ async def ensure_paper_position_for_real_trade(
             (current - position.entry_price) / position.entry_price * 100, 2
         )
 
+    # Copy existing thesis thresholds so the dashboard has TP/SL bars
+    # instead of showing "thesis pending" forever.
+    await _apply_thesis_thresholds(position, evaluation_id)
+
     try:
         await PaperPositionTable.put(position)
     except Exception as e:
@@ -937,9 +973,10 @@ async def ensure_paper_position_for_real_trade(
 
     logger.info(
         "Synthesized paper position %s for orphan real trade "
-        "(eval=%s ticker=%s entry=$%.2f current=$%.2f)",
+        "(eval=%s ticker=%s entry=$%.2f current=$%.2f tp=%s sl=%s)",
         position.position_id, evaluation_id, position.option_ticker,
         position.entry_price, position.current_price,
+        position.thesis_tp1_pct, position.thesis_sl_pct,
     )
     return position
 

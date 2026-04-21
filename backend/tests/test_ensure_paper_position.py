@@ -214,6 +214,65 @@ class TestEnsurePaperPosition:
         lookup.assert_not_awaited()  # bailed before lookup
 
     @pytest.mark.asyncio
+    async def test_copies_existing_thesis_thresholds(self):
+        """Orphan backfill should pull TP/SL from TradeThesisTable if it exists."""
+        from types import SimpleNamespace
+
+        fake_thesis = SimpleNamespace(
+            exit_plan=SimpleNamespace(
+                take_profits=[SimpleNamespace(option_pnl_pct=80.0)],
+                stop_loss_level=SimpleNamespace(option_pnl_pct=-40.0),
+                time_exit_level=SimpleNamespace(dte_threshold=5),
+            )
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_options_chain_minimal = AsyncMock(return_value=[])
+
+        with patch(
+            "app.paper_trading.position_manager.PaperPositionTable.get_by_evaluation_id",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.paper_trading.position_manager.PaperPositionTable.put",
+            new=AsyncMock(),
+        ), patch(
+            "app.db.tables.TradeThesisTable.get_by_evaluation_id",
+            new=AsyncMock(return_value=fake_thesis),
+        ):
+            result = await ensure_paper_position_for_real_trade(
+                _real_trade(), polygon_client=mock_client
+            )
+
+        assert result is not None
+        assert result.thesis_tp1_pct == pytest.approx(80.0)
+        assert result.thesis_sl_pct == pytest.approx(40.0)  # stored as positive magnitude
+        assert result.thesis_time_exit_dte == 5
+
+    @pytest.mark.asyncio
+    async def test_works_when_no_thesis_exists(self):
+        """Backfill without a pre-existing thesis leaves thresholds null."""
+        mock_client = MagicMock()
+        mock_client.get_options_chain_minimal = AsyncMock(return_value=[])
+
+        with patch(
+            "app.paper_trading.position_manager.PaperPositionTable.get_by_evaluation_id",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.paper_trading.position_manager.PaperPositionTable.put",
+            new=AsyncMock(),
+        ), patch(
+            "app.db.tables.TradeThesisTable.get_by_evaluation_id",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await ensure_paper_position_for_real_trade(
+                _real_trade(), polygon_client=mock_client
+            )
+
+        assert result is not None
+        assert result.thesis_tp1_pct is None
+        assert result.thesis_sl_pct is None
+
+    @pytest.mark.asyncio
     async def test_works_for_reject_verdict(self):
         """Tracking a REJECT evaluation should still synth a paper position."""
         trade = _real_trade()
