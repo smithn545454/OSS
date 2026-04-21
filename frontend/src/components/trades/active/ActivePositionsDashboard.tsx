@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Wallet } from 'lucide-react'
+import * as api from '@/lib/api'
 import type { LivePosition } from '@/lib/types'
 import {
   useClosePosition,
@@ -16,11 +17,12 @@ export default function ActivePositionsDashboard() {
   const queryClient = useQueryClient()
   const [scanner, setScanner] = useState<string>('all')
   const [closingId, setClosingId] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // All open positions (scanner filter applied client-side so the chip counts
-  // are accurate regardless of the active filter).
-  const livePositions = useLivePositions()
-  const summary = useLivePositionsSummary()
+  // Initial read uses persisted daily-batch prices (fast). Clicking Refresh
+  // triggers an ad-hoc refetch with refresh=true that fires Polygon calls.
+  const livePositions = useLivePositions(undefined, false)
+  const summary = useLivePositionsSummary(false)
   const closeMut = useClosePosition()
 
   const allPositions = useMemo(
@@ -51,13 +53,30 @@ export default function ActivePositionsDashboard() {
     )
   }
 
-  const handleRefresh = () => {
-    queryClient.invalidateQueries({
-      queryKey: ['paper-trading', 'positions', 'live'],
-    })
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      // Explicit Polygon-backed refresh — bypass cache, scope to active
+      // scanner filter so we stay under the 30s API Gateway budget.
+      const scopedScanner = scanner === 'all' ? undefined : scanner
+      const [fresh, freshSummary] = await Promise.all([
+        api.getLivePositions(scopedScanner, true),
+        api.getLivePositionsSummary(true),
+      ])
+      queryClient.setQueryData(
+        ['paper-trading', 'positions', 'live', scanner ?? 'all', false],
+        fresh
+      )
+      queryClient.setQueryData(
+        ['paper-trading', 'positions', 'live', 'summary', false],
+        freshSummary
+      )
+    } finally {
+      setIsRefreshing(false)
+    }
   }
 
-  const isFetching = livePositions.isFetching || summary.isFetching
+  const isFetching = isRefreshing || livePositions.isFetching || summary.isFetching
 
   if (livePositions.isLoading) {
     return (

@@ -517,18 +517,21 @@ export async function getPaperTradingSummary(): Promise<PaperTradingSummary> {
 }
 
 export async function getLivePositions(
-  scanner?: string
+  scanner?: string,
+  refresh = false
 ): Promise<LivePositionsResponse> {
   const qs = new URLSearchParams()
   if (scanner && scanner !== 'all') qs.set('scanner', scanner)
+  if (refresh) qs.set('refresh', 'true')
   const query = qs.toString()
   return fetchApi<LivePositionsResponse>(
     `/api/paper-trading/positions/live${query ? `?${query}` : ''}`
   )
 }
 
-export async function getLivePositionsSummary(): Promise<LivePositionsSummary> {
-  return fetchApi<LivePositionsSummary>('/api/paper-trading/positions/live/summary')
+export async function getLivePositionsSummary(refresh = false): Promise<LivePositionsSummary> {
+  const query = refresh ? '?refresh=true' : ''
+  return fetchApi<LivePositionsSummary>(`/api/paper-trading/positions/live/summary${query}`)
 }
 
 export async function getPaperTradingPositions(
