@@ -59,6 +59,8 @@ from app.scanners.breakout import BreakoutScanner
 from app.scanners.cheap_options import CheapOptionsScanner
 from app.scanners.compression import CompressionScanner
 from app.scanners.merger import OpportunityMerger
+from app.selection import contract_selector as contract_selector_module
+from app.selection import evaluation_builder as evaluation_builder_module
 from app.selection.contract_selector import ContractSelector
 from app.selection.evaluation_builder import EvaluationBuilder
 from app.services.polygon import AggregatedOptionsVolume, PolygonClient
@@ -513,6 +515,7 @@ class ScannerOrchestrator:
                 opportunities=opportunities,
                 scanner_stats=scanner_stats,
                 merge_stats=merge_stats,
+                polygon=polygon,
             )
 
             # Continue with full pipeline if requested
@@ -606,6 +609,11 @@ class ScannerOrchestrator:
                             run_id, PipelineStage.CONTRACT_SELECTION
                         )
 
+                        # Reset module-level drop counters so Stage 3 metadata
+                        # reflects this run only.
+                        contract_selector_module.reset_drop_counts()
+                        evaluation_builder_module.reset_drop_counts()
+
                         contract_selector = ContractSelector(
                             policy_config.contract_selection,
                             data_provider=data_provider,
@@ -636,13 +644,27 @@ class ScannerOrchestrator:
                         selection_stats = selection_result.telemetry.get_summary()
 
                         # Record Stage 3 event
+                        stage3_metadata = selection_result.telemetry.to_stage_metadata()
+                        stage3_metadata["selector_drops"] = (
+                            contract_selector_module.get_drop_counts()
+                        )
+                        stage3_metadata["evaluation_builder_drops"] = (
+                            evaluation_builder_module.get_drop_counts()
+                        )
+                        stage3_polygon_drops = (
+                            getattr(polygon, "drop_counts", None)
+                            if polygon is not None
+                            else None
+                        )
+                        if isinstance(stage3_polygon_drops, dict):
+                            stage3_metadata["polygon_drops"] = dict(stage3_polygon_drops)
                         await self._pipeline.record_stage_event(
                             run_id=run_id,
                             stage=PipelineStage.CONTRACT_SELECTION,
                             items_in=len(filtered_opportunities),
                             items_out=len(evaluations),
                             drop_reasons={},  # Selection doesn't drop, just ranks
-                            metadata=selection_result.telemetry.to_stage_metadata(),
+                            metadata=stage3_metadata,
                         )
 
                         # Add selection errors
@@ -1420,6 +1442,7 @@ class ScannerOrchestrator:
         opportunities: list[Opportunity],
         scanner_stats: dict[str, dict[str, int]],
         merge_stats: dict[str, int],
+        polygon: Optional[PolygonClient] = None,
     ) -> None:
         """Record stage event for Stage 1 (Opportunity Discovery).
 
@@ -1429,6 +1452,7 @@ class ScannerOrchestrator:
             opportunities: Created opportunities
             scanner_stats: Statistics per scanner
             merge_stats: Statistics from merge operation
+            polygon: PolygonClient used for discovery (for drop telemetry)
         """
         # Calculate drop reasons (tickers that didn't trigger any scanner)
         drop_reasons: dict[str, int] = {}
@@ -1439,6 +1463,26 @@ class ScannerOrchestrator:
             if no_trigger_count > 0:
                 drop_reasons[f"NO_TRIGGER_{scanner_type}"] = no_trigger_count
 
+        # Polygon data-fetch drops (batch fail-open) — surface so Pipeline
+        # Monitor shows tickers that silently never reached any scanner.
+        # Defensive isinstance checks keep mocked PolygonClients in tests
+        # (which expose Mock attributes instead of real dicts) from crashing
+        # telemetry recording.
+        polygon_drops: dict[str, int] = {}
+        polygon_dropped_sample: dict[str, list[str]] = {}
+        raw_drop_counts = getattr(polygon, "drop_counts", None) if polygon is not None else None
+        raw_dropped_tickers = (
+            getattr(polygon, "dropped_tickers", None) if polygon is not None else None
+        )
+        if isinstance(raw_drop_counts, dict):
+            polygon_drops = dict(raw_drop_counts)
+        if isinstance(raw_dropped_tickers, dict):
+            polygon_dropped_sample = {
+                k: list(v[:20])
+                for k, v in raw_dropped_tickers.items()
+                if isinstance(v, list) and v
+            }
+
         # Metadata includes detailed stats
         metadata: dict[str, Any] = {
             "scanner_stats": scanner_stats,
@@ -1448,6 +1492,8 @@ class ScannerOrchestrator:
                 "PUT": merge_stats.get("direction_put", 0),
                 "NONE": merge_stats.get("direction_none", 0),
             },
+            "polygon_drops": polygon_drops,
+            "polygon_dropped_tickers_sample": polygon_dropped_sample,
         }
 
         await self._pipeline.record_stage_event(

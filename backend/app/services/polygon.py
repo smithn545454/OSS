@@ -61,6 +61,21 @@ class PolygonClient:
         self._api_key = settings.polygon_api_key
         self._client: Optional[httpx.AsyncClient] = None
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        # Per-instance drop telemetry so batch fail-open paths are visible in
+        # Pipeline Monitor instead of silently disappearing (see audit C3).
+        self.drop_counts: dict[str, int] = {
+            "daily_bars_json": 0,
+            "grouped_daily_json": 0,
+            "options_chain_json": 0,
+            "options_volume_json": 0,
+            "previous_close_json": 0,
+        }
+        self.dropped_tickers: dict[str, list[str]] = {
+            "daily_bars": [],
+            "options_chain": [],
+            "options_volume": [],
+            "previous_close": [],
+        }
 
     async def __aenter__(self) -> "PolygonClient":
         """Async context manager entry."""
@@ -309,6 +324,7 @@ class PolygonClient:
                         if ticker in day_data:
                             output[ticker].append(day_data[ticker])
                 elif isinstance(day_data, Exception):
+                    self.drop_counts["grouped_daily_json"] += 1
                     logger.error(f"Error fetching grouped daily: {day_data}")
             
             # Sort each ticker's bars by date ascending
@@ -326,12 +342,16 @@ class PolygonClient:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             output: dict[str, list[DailyBar]] = {}
-            for result in results:
+            for ticker, result in zip(tickers, results):
                 if isinstance(result, tuple):
-                    ticker, bars = result
+                    _, bars = result
                     output[ticker] = bars
                 elif isinstance(result, Exception):
-                    logger.error(f"Error in batch fetch: {result}")
+                    self.drop_counts["daily_bars_json"] += 1
+                    self.dropped_tickers["daily_bars"].append(ticker)
+                    logger.error(
+                        f"Polygon daily bars drop ticker={ticker}: {result}"
+                    )
 
             return output
 
@@ -472,12 +492,16 @@ class PolygonClient:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         output: dict[str, list[dict[str, Any]]] = {}
-        for result in results:
+        for ticker, result in zip(tickers, results):
             if isinstance(result, tuple):
-                ticker, chain = result
+                _, chain = result
                 output[ticker] = chain
             elif isinstance(result, Exception):
-                logger.error(f"Error in batch chain fetch: {result}")
+                self.drop_counts["options_chain_json"] += 1
+                self.dropped_tickers["options_chain"].append(ticker)
+                logger.error(
+                    f"Polygon options chain drop ticker={ticker}: {result}"
+                )
 
         return output
 
@@ -571,13 +595,17 @@ class PolygonClient:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         output: dict[str, AggregatedOptionsVolume] = {}
-        for result in results:
+        for ticker, result in zip(tickers, results):
             if isinstance(result, tuple):
-                ticker, vol = result
+                _, vol = result
                 if vol:
                     output[ticker] = vol
             elif isinstance(result, Exception):
-                logger.error(f"Error in batch volume fetch: {result}")
+                self.drop_counts["options_volume_json"] += 1
+                self.dropped_tickers["options_volume"].append(ticker)
+                logger.error(
+                    f"Polygon options volume drop ticker={ticker}: {result}"
+                )
 
         return output
 
@@ -644,13 +672,17 @@ class PolygonClient:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         output: dict[str, dict[str, Any]] = {}
-        for result in results:
+        for ticker, result in zip(tickers, results):
             if isinstance(result, tuple):
-                ticker, data = result
+                _, data = result
                 if data:
                     output[ticker] = data
             elif isinstance(result, Exception):
-                logger.error(f"Error in batch prev close fetch: {result}")
+                self.drop_counts["previous_close_json"] += 1
+                self.dropped_tickers["previous_close"].append(ticker)
+                logger.error(
+                    f"Polygon previous close drop ticker={ticker}: {result}"
+                )
 
         return output
 

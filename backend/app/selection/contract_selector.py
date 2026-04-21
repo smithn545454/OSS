@@ -36,6 +36,25 @@ from app.services.polygon import PolygonClient
 logger = logging.getLogger(__name__)
 
 
+# Module-level drop counters — surfaced in Stage 3 metadata per audit C3.
+# Reset per pipeline run via reset_drop_counts() before contract selection runs.
+_drop_counts: dict[str, int] = {
+    "contract_select": 0,
+    "contract_parse": 0,
+}
+
+
+def get_drop_counts() -> dict[str, int]:
+    """Return a snapshot of contract-selector drop counts."""
+    return dict(_drop_counts)
+
+
+def reset_drop_counts() -> None:
+    """Reset module-level drop counters (call once per pipeline run)."""
+    for key in _drop_counts:
+        _drop_counts[key] = 0
+
+
 @dataclass
 class ContractCandidate:
     """A candidate contract for selection."""
@@ -321,6 +340,7 @@ class ContractSelector:
                         ticker_candidates.extend(forced)
 
             except Exception as e:
+                _drop_counts["contract_select"] += 1
                 error_msg = f"Error selecting contracts for {ticker}: {e}"
                 logger.error(error_msg)
                 ticker_errors.append(error_msg)
@@ -730,6 +750,7 @@ class ContractSelector:
             )
 
         except Exception as e:
+            _drop_counts["contract_parse"] += 1
             logger.debug(f"Error parsing contract: {e}")
             return None
 

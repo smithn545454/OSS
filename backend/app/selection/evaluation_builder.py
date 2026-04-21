@@ -23,6 +23,24 @@ from app.selection.contract_selector import ContractCandidate
 logger = logging.getLogger(__name__)
 
 
+# Module-level drop counters — surfaced in Stage 3 metadata per audit C3.
+_drop_counts: dict[str, int] = {
+    "evaluation_build": 0,
+    "evaluation_missing_opp": 0,
+}
+
+
+def get_drop_counts() -> dict[str, int]:
+    """Return a snapshot of evaluation-builder drop counts."""
+    return dict(_drop_counts)
+
+
+def reset_drop_counts() -> None:
+    """Reset module-level drop counters (call once per pipeline run)."""
+    for key in _drop_counts:
+        _drop_counts[key] = 0
+
+
 class EvaluationBuilder:
     """Builds Evaluation records from selected contract candidates."""
 
@@ -169,6 +187,7 @@ class EvaluationBuilder:
         for candidate in candidates:
             opportunity = opp_by_ticker.get(candidate.underlying_ticker)
             if not opportunity:
+                _drop_counts["evaluation_missing_opp"] += 1
                 logger.warning(
                     f"No opportunity found for ticker {candidate.underlying_ticker}"
                 )
@@ -178,6 +197,7 @@ class EvaluationBuilder:
                 evaluation = self.build_evaluation(candidate, opportunity)
                 evaluations.append(evaluation)
             except Exception as e:
+                _drop_counts["evaluation_build"] += 1
                 logger.error(
                     f"Error building evaluation for {candidate.option_ticker}: {e}"
                 )
