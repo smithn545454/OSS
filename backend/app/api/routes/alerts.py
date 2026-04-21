@@ -24,6 +24,7 @@ class AlertConfigUpdate(BaseModel):
 
     enabled: Optional[bool] = None
     # v5 eligibility
+    hr_only_mode: Optional[bool] = None             # Pure Sharpshooter: disable P track
     hr_conviction_min: Optional[float] = None       # 0-20
     p_conviction_min: Optional[float] = None        # 0-100
     require_hr_archetype: Optional[bool] = None
@@ -32,7 +33,8 @@ class AlertConfigUpdate(BaseModel):
     max_premium: Optional[float] = None             # Optional ceiling; None = off
     # Regime-independent
     tier_1_bypass: Optional[bool] = None
-    cooldown_minutes: Optional[int] = None
+    cooldown_minutes: Optional[int] = None          # Per-contract cooldown
+    ticker_cooldown_minutes: Optional[int] = None   # Per-underlying cooldown
     daily_cap: Optional[int] = None
     quiet_hours_start: Optional[str] = None
     quiet_hours_end: Optional[str] = None
@@ -97,6 +99,10 @@ async def update_alert_config(update: AlertConfigUpdate) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="daily_cap must be >= 1")
     if merged.get("cooldown_minutes", 30) < 1:
         raise HTTPException(status_code=400, detail="cooldown_minutes must be >= 1")
+    if merged.get("ticker_cooldown_minutes", 240) < 0:
+        raise HTTPException(
+            status_code=400, detail="ticker_cooldown_minutes must be >= 0"
+        )
     if merged.get("max_premium") is not None and merged["max_premium"] < 0:
         raise HTTPException(status_code=400, detail="max_premium must be >= 0")
 
@@ -155,6 +161,7 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
     regime_min = config.get("min_regime_alignment", 0.0) or 0.0
     max_premium = config.get("max_premium")
     require_hr = config.get("require_hr_archetype", False)
+    hr_only_mode = config.get("hr_only_mode", False)
     tier_1_bypass = config.get("tier_1_bypass", True)
     allowed_verdicts = config.get("verdicts", ["APPROVE"])
 
@@ -211,7 +218,8 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             breakdown["regimeHeadwind"] += 1
             continue
 
-        # Conviction + fit — either track on its own
+        # Conviction + fit. In HR-only mode the P track is short-circuited —
+        # the evaluation must clear the HR lane on its own.
         hr_pass = (
             hr >= hr_min
             and hr >= V5_HR_FLOOR  # still gated by system APPROVE floor
@@ -222,7 +230,11 @@ async def get_alert_preview(days: int = 3) -> dict[str, Any]:
             and p >= V5_P_FLOOR
             and p_fit >= fit_min
         )
-        if not (hr_pass or p_pass):
+        if hr_only_mode:
+            if not hr_pass:
+                breakdown["bothTracksFailed"] += 1
+                continue
+        elif not (hr_pass or p_pass):
             breakdown["bothTracksFailed"] += 1
             continue
 

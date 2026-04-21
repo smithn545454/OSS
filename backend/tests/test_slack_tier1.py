@@ -5,15 +5,18 @@ Covers:
 - Tier 1 (Sharpshooter) fast-path bypass
 - HR vs P conviction gating
 - require_hr_archetype (sharpshooter-only mode)
+- hr_only_mode (pure Sharpshooter, P track short-circuited)
 - min_archetype_fit, min_regime_alignment
+- Underlying-ticker cooldown (multi-strike dedup) with upgrade path
+- DB-backed daily cap + contract cooldown survive Lambda cold starts
 - infer_verdict_driver
 """
 
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
-from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -33,9 +36,14 @@ from app.services.slack import (  # noqa: E402
 
 
 def _make_config(**overrides):
-    """Build a v5 test alert config with sensible defaults."""
+    """Build a v5 test alert config with sensible defaults.
+
+    Defaults to ``hr_only_mode=False`` so existing dual-track tests keep
+    their original semantics. The new HR-only mode tests opt in explicitly.
+    """
     base = {
         "enabled": True,
+        "hr_only_mode": False,
         "hr_conviction_min": 10.0,
         "p_conviction_min": 70.0,
         "require_hr_archetype": False,
@@ -44,6 +52,7 @@ def _make_config(**overrides):
         "max_premium": None,
         "tier_1_bypass": True,
         "cooldown_minutes": 30,
+        "ticker_cooldown_minutes": 0,  # disabled by default in unit tests
         "daily_cap": 10,
         "quiet_hours_start": "22:00",
         "quiet_hours_end": "08:00",
@@ -56,9 +65,31 @@ def _make_config(**overrides):
     return base
 
 
-def _make_service(config=None):
+def _stub_db(
+    svc: SlackAlertService,
+    *,
+    sent_today: int = 0,
+    last_contract_ts: datetime | None = None,
+    last_ticker_alert: dict | None = None,
+) -> None:
+    """Replace the DynamoDB-backed rate-limit helpers with async stubs.
+
+    By default the service behaves as if no prior alerts exist; callers
+    override individual arguments to simulate cap/cooldown scenarios.
+    """
+    svc._count_sent_today = AsyncMock(return_value=sent_today)  # type: ignore[method-assign]
+    svc._last_alert_for_contract = AsyncMock(  # type: ignore[method-assign]
+        return_value=last_contract_ts
+    )
+    svc._last_alert_for_ticker = AsyncMock(  # type: ignore[method-assign]
+        return_value=last_ticker_alert
+    )
+
+
+def _make_service(config=None, **stub_kwargs):
     svc = SlackAlertService()
     svc.configure(config or _make_config())
+    _stub_db(svc, **stub_kwargs)
     return svc
 
 
@@ -153,9 +184,7 @@ class TestTier1FastPath:
 
     @pytest.mark.asyncio
     async def test_tier1_respects_daily_cap(self):
-        svc = _make_service(_make_config(daily_cap=5))
-        svc._daily_count = 5
-        svc._last_reset_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        svc = _make_service(_make_config(daily_cap=5), sent_today=5)
         result, reason = await svc.should_alert(
             **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
@@ -164,8 +193,10 @@ class TestTier1FastPath:
 
     @pytest.mark.asyncio
     async def test_tier1_respects_cooldown(self):
-        svc = _make_service(_make_config(cooldown_minutes=30))
-        svc._alert_timestamps["AAPL-C-200"] = datetime.now(timezone.utc)
+        svc = _make_service(
+            _make_config(cooldown_minutes=30),
+            last_contract_ts=datetime.now(timezone.utc),
+        )
         result, reason = await svc.should_alert(
             **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_1",
         )
@@ -347,6 +378,150 @@ class TestInferVerdictDriver:
         assert infer_verdict_driver(None, None) is None
         assert infer_verdict_driver(None, 80.0) == "P"
         assert infer_verdict_driver(15.0, None) == "HR"
+
+
+# ============================================================================
+# DB-backed rate limits (daily cap + contract cooldown survive cold starts)
+# ============================================================================
+
+
+class TestDbBackedRateLimits:
+    """Cap + cooldown read from DynamoDB, so fresh Lambda workers can't leak."""
+
+    @pytest.mark.asyncio
+    async def test_daily_cap_enforced_via_dynamodb(self):
+        """N alerts already in ALERT_LOG → (N+1)th must be rejected."""
+        svc = _make_service(_make_config(daily_cap=6), sent_today=6)
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "Daily alert cap" in reason
+
+    @pytest.mark.asyncio
+    async def test_contract_cooldown_survives_cold_start(self):
+        """A fresh service instance still sees the prior contract alert via DB."""
+        prior = datetime.now(timezone.utc) - timedelta(minutes=5)
+        svc = _make_service(
+            _make_config(cooldown_minutes=30),
+            last_contract_ts=prior,
+        )
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW, contract_id="AAPL-C-200", quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "cooldown" in reason
+
+
+# ============================================================================
+# Underlying-ticker cooldown (collapses multi-strike duplicates)
+# ============================================================================
+
+
+class TestTickerCooldown:
+    """Same underlying shouldn't alert twice within the ticker cooldown window."""
+
+    @pytest.mark.asyncio
+    async def test_ticker_cooldown_suppresses_multi_strike(self):
+        """AAPL 150C fires; AAPL 155C within window is suppressed."""
+        prior = datetime.now(timezone.utc) - timedelta(minutes=30)
+        svc = _make_service(
+            _make_config(ticker_cooldown_minutes=240),
+            last_ticker_alert={
+                "ticker": "AAPL",
+                "contract_id": "AAPL-C-150",
+                "timestamp": prior.isoformat(),
+                "hr_conviction": 12.0,
+                "status": "sent",
+            },
+        )
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                **_HR_PASS_KW,  # hr_conviction=12.0
+                ticker="AAPL",
+                contract_id="AAPL-C-155",  # different strike, same ticker
+                quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "in 240min cooldown" in reason
+
+    @pytest.mark.asyncio
+    async def test_ticker_cooldown_upgrade_path(self):
+        """Stronger HR conviction within cooldown replaces the prior alert."""
+        prior = datetime.now(timezone.utc) - timedelta(minutes=30)
+        svc = _make_service(
+            _make_config(ticker_cooldown_minutes=240),
+            last_ticker_alert={
+                "ticker": "AAPL",
+                "contract_id": "AAPL-C-150",
+                "timestamp": prior.isoformat(),
+                "hr_conviction": 10.0,  # weaker than the new candidate below
+                "status": "sent",
+            },
+        )
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=14.5,  # strictly higher than prior 10.0
+                p_conviction=40.0,
+                hr_archetype_matched="HR_MOMENTUM",
+                hr_archetype_fit=85.0,
+                p_archetype_fit=30.0,
+                regime_alignment=1.1,
+                ticker="AAPL",
+                contract_id="AAPL-C-155",
+                quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "HR"
+
+
+# ============================================================================
+# HR-only mode (pure Sharpshooter: disable the P track entirely)
+# ============================================================================
+
+
+class TestHrOnlyMode:
+    """hr_only_mode short-circuits the P track — the user's grand-slam thesis."""
+
+    @pytest.mark.asyncio
+    async def test_hr_only_mode_suppresses_p_driver(self):
+        """Low HR + high P must be rejected when hr_only_mode=True."""
+        svc = _make_service(_make_config(hr_only_mode=True))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=4.0,          # below hr_conviction_min=10
+                p_conviction=100.0,         # high P
+                hr_archetype_matched="HR_X",
+                hr_archetype_fit=90.0,
+                p_archetype_fit=95.0,
+                regime_alignment=1.1,
+                ticker="ONDS",
+                contract_id="ONDS-C-12",
+                quality_tier="TIER_2",
+            )
+        assert result is False
+        assert "HR-only mode" in reason
+
+    @pytest.mark.asyncio
+    async def test_hr_only_mode_allows_hr_driver(self):
+        """High HR passes hr_only_mode regardless of P."""
+        svc = _make_service(_make_config(hr_only_mode=True))
+        with patch.object(svc, "_is_within_quiet_hours", return_value=False):
+            result, reason = await svc.should_alert(
+                hr_conviction=14.0,   # clears min=10
+                p_conviction=20.0,    # P track irrelevant in HR-only mode
+                hr_archetype_matched="HR_MOMENTUM",
+                hr_archetype_fit=85.0,
+                p_archetype_fit=10.0,
+                regime_alignment=1.1,
+                ticker="NVDA",
+                contract_id="NVDA-C-500",
+                quality_tier="TIER_2",
+            )
+        assert result is True
+        assert reason == "HR"
 
 
 # ============================================================================

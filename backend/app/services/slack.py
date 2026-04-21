@@ -44,6 +44,7 @@ V5_HR_TIER1 = 14.0  # hr_conviction ≥ 14 → Sharpshooter / TIER_1
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": False,
     # v5 eligibility (soft filters; Tier 1 bypasses these)
+    "hr_only_mode": True,            # Pure Sharpshooter: short-circuit the P track entirely
     "hr_conviction_min": 10.0,       # ≥10/20 = solid HR bet (above 7.0 APPROVE floor)
     "p_conviction_min": 70.0,        # ≥70/100 = high-base-rate grinder (above 50 floor)
     "require_hr_archetype": False,   # Sharpshooter-only mode: filter pure P-driven trades
@@ -52,7 +53,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_premium": None,             # Optional $ ceiling on option mid (None = off)
     # Hard / regime-independent knobs
     "tier_1_bypass": True,           # Sharpshooter (TIER_1) always alerts
-    "cooldown_minutes": 30,
+    "cooldown_minutes": 30,          # Per-contract cooldown
+    "ticker_cooldown_minutes": 240,  # Per-underlying cooldown (collapses multi-strike dupes)
     "daily_cap": 10,
     "quiet_hours_start": "22:00",
     "quiet_hours_end": "08:00",
@@ -241,11 +243,6 @@ class SlackAlertService:
         # Legacy single webhook from env var (fallback)
         self._legacy_webhook_url = settings.slack_webhook_url
 
-        # Alert tracking (in-memory, per Lambda instance)
-        self._alert_timestamps: dict[str, datetime] = {}
-        self._daily_count = 0
-        self._last_reset_date: str | None = None
-
         # Config — loaded from DynamoDB on first use
         self._config: dict[str, Any] | None = None
         self._config_loaded = False
@@ -288,19 +285,120 @@ class SlackAlertService:
             return now >= quiet_start or now <= quiet_end
         return quiet_start <= now <= quiet_end
 
-    def _check_cooldown(self, contract_id: str) -> bool:
-        """True if contract is outside its cooldown window."""
-        if contract_id not in self._alert_timestamps:
-            return True
-        config = self._config or DEFAULT_CONFIG
-        cooldown = timedelta(minutes=config.get("cooldown_minutes", 30))
-        return datetime.now(timezone.utc) - self._alert_timestamps[contract_id] >= cooldown
+    async def _count_sent_today(self) -> int:
+        """Count ALERT_LOG entries with status='sent' for today (UTC).
 
-    def _reset_daily_count_if_needed(self) -> None:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if self._last_reset_date != today:
-            self._daily_count = 0
-            self._last_reset_date = today
+        Backed by DynamoDB so the daily cap survives Lambda cold starts
+        and multi-worker fan-out. Fails open (returns 0) on DB error — we
+        log a warning rather than silence the whole alert stream.
+        """
+        try:
+            from app.db.dynamodb import get_dynamodb
+            from app.db.tables import PAPER_POSITIONS_TABLE
+
+            db = get_dynamodb()
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            items = await db.query(
+                PAPER_POSITIONS_TABLE,
+                f"{ALERT_LOG_PK_PREFIX}#{today}",
+                limit=500,
+                scan_forward=False,
+            )
+            return sum(1 for item in items if item.get("status") == "sent")
+        except Exception as e:
+            logger.warning(f"Failed to count today's alerts (failing open): {e}")
+            return 0
+
+    async def _last_alert_for_contract(self, contract_id: str) -> datetime | None:
+        """Return the most recent ALERT_LOG timestamp for a contract.
+
+        Looks at today's and yesterday's partitions to handle UTC midnight
+        boundary. Fails open (returns None) on DB error.
+        """
+        try:
+            from app.db.dynamodb import get_dynamodb
+            from app.db.tables import PAPER_POSITIONS_TABLE
+
+            db = get_dynamodb()
+            now = datetime.now(timezone.utc)
+            today = now.strftime("%Y-%m-%d")
+            yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            latest: datetime | None = None
+            for date_str in (today, yesterday):
+                items = await db.query(
+                    PAPER_POSITIONS_TABLE,
+                    f"{ALERT_LOG_PK_PREFIX}#{date_str}",
+                    limit=500,
+                    scan_forward=False,
+                )
+                for item in items:
+                    if item.get("contract_id") != contract_id:
+                        continue
+                    ts = item.get("timestamp")
+                    if not ts:
+                        continue
+                    try:
+                        parsed = datetime.fromisoformat(ts)
+                    except ValueError:
+                        continue
+                    if latest is None or parsed > latest:
+                        latest = parsed
+            return latest
+        except Exception as e:
+            logger.warning(
+                f"Failed to look up contract cooldown for {contract_id} "
+                f"(failing open): {e}"
+            )
+            return None
+
+    async def _last_alert_for_ticker(self, ticker: str) -> dict[str, Any] | None:
+        """Return the most recent ALERT_LOG entry for a ticker (any contract).
+
+        Used by the underlying-ticker cooldown so multiple strikes on the
+        same symbol don't generate separate alerts. Returns the full item
+        (for the upgrade-path conviction comparison). Fails open on DB error.
+        """
+        try:
+            from app.db.dynamodb import get_dynamodb
+            from app.db.tables import PAPER_POSITIONS_TABLE
+
+            db = get_dynamodb()
+            now = datetime.now(timezone.utc)
+            today = now.strftime("%Y-%m-%d")
+            yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            latest: dict[str, Any] | None = None
+            latest_ts: datetime | None = None
+            for date_str in (today, yesterday):
+                items = await db.query(
+                    PAPER_POSITIONS_TABLE,
+                    f"{ALERT_LOG_PK_PREFIX}#{date_str}",
+                    limit=500,
+                    scan_forward=False,
+                )
+                for item in items:
+                    if item.get("ticker") != ticker:
+                        continue
+                    if item.get("status") != "sent":
+                        continue
+                    ts = item.get("timestamp")
+                    if not ts:
+                        continue
+                    try:
+                        parsed = datetime.fromisoformat(ts)
+                    except ValueError:
+                        continue
+                    if latest_ts is None or parsed > latest_ts:
+                        latest_ts = parsed
+                        latest = item
+            return latest
+        except Exception as e:
+            logger.warning(
+                f"Failed to look up ticker cooldown for {ticker} "
+                f"(failing open): {e}"
+            )
+            return None
 
     async def should_alert(
         self,
@@ -312,6 +410,7 @@ class SlackAlertService:
         p_archetype_fit: float | None,
         regime_alignment: float | None,
         contract_id: str,
+        ticker: str | None = None,
         verdict: str = "APPROVE",
         premium: float = 0.0,
         quality_tier: str | None = None,
@@ -323,9 +422,12 @@ class SlackAlertService:
         ``(False, reason)`` otherwise.
 
         Gate order:
-        1. Hard checks (enabled / webhooks / verdict / daily cap / cooldown)
+        1. Hard checks (enabled / webhooks / verdict / daily cap / cooldowns).
+           Caps and cooldowns are DB-backed so they survive Lambda cold starts
+           and fan-out across workers.
         2. Tier 1 bypass — Sharpshooter always alerts (modulo hard checks)
-        3. Soft v5 checks (archetype presence, regime, conviction + fit)
+        3. Soft v5 checks (archetype presence, regime, conviction + fit,
+           HR-only short-circuit)
         4. Premium ceiling (optional convenience filter)
         5. Quiet hours
         """
@@ -343,14 +445,47 @@ class SlackAlertService:
         if verdict not in allowed_verdicts:
             return False, f"Verdict {verdict} not in allowed list {allowed_verdicts}"
 
-        self._reset_daily_count_if_needed()
         daily_cap = config.get("daily_cap", 10)
-        if self._daily_count >= daily_cap:
+        sent_today = await self._count_sent_today()
+        if sent_today >= daily_cap:
             return False, f"Daily alert cap ({daily_cap}) reached"
 
-        if not self._check_cooldown(contract_id):
-            cooldown = config.get("cooldown_minutes", 30)
-            return False, f"Contract in {cooldown}min cooldown"
+        contract_cooldown = config.get("cooldown_minutes", 30)
+        last_contract_ts = await self._last_alert_for_contract(contract_id)
+        if last_contract_ts is not None:
+            elapsed = datetime.now(timezone.utc) - last_contract_ts
+            if elapsed < timedelta(minutes=contract_cooldown):
+                return False, f"Contract in {contract_cooldown}min cooldown"
+
+        # Underlying-ticker cooldown: collapse multi-strike/multi-expiration
+        # duplicates. Upgrade path allows a stronger HR-conviction candidate
+        # to replace an earlier weaker alert within the same window.
+        ticker_cooldown = config.get("ticker_cooldown_minutes", 240)
+        if ticker and ticker_cooldown:
+            last_ticker_alert = await self._last_alert_for_ticker(ticker)
+            if last_ticker_alert is not None:
+                ts = last_ticker_alert.get("timestamp")
+                try:
+                    last_ts = datetime.fromisoformat(ts) if ts else None
+                except ValueError:
+                    last_ts = None
+                if last_ts is not None and (
+                    datetime.now(timezone.utc) - last_ts
+                    < timedelta(minutes=ticker_cooldown)
+                ):
+                    prior_hr = last_ticker_alert.get("hr_conviction") or 0.0
+                    current_hr = hr_conviction or 0.0
+                    if current_hr <= prior_hr:
+                        return (
+                            False,
+                            f"Ticker {ticker} in {ticker_cooldown}min cooldown "
+                            f"(prior HR {prior_hr:.1f} ≥ current {current_hr:.1f})",
+                        )
+                    # Upgrade path: HR conviction improved — allow the alert through.
+                    logger.info(
+                        f"Ticker {ticker} cooldown upgrade: HR "
+                        f"{prior_hr:.1f} → {current_hr:.1f}"
+                    )
 
         # --- Tier 1 fast path ---
         if quality_tier == "TIER_1" and config.get("tier_1_bypass", True):
@@ -373,7 +508,8 @@ class SlackAlertService:
                 f"Regime alignment {regime_alignment} below min {min_regime}",
             )
 
-        # Conviction gate — either track can clear on its own
+        # Conviction gate — in HR-only mode the P track is short-circuited
+        # entirely (pure Sharpshooter); otherwise either track can clear.
         hr_min = config.get("hr_conviction_min", 10.0) or 0.0
         p_min = config.get("p_conviction_min", 70.0) or 0.0
         fit_min = config.get("min_archetype_fit", 60.0) or 0.0
@@ -387,7 +523,17 @@ class SlackAlertService:
             and (p_archetype_fit or 0.0) >= fit_min
         )
 
-        if not (hr_passes or p_passes):
+        if config.get("hr_only_mode", False):
+            if not hr_passes:
+                return (
+                    False,
+                    (
+                        f"HR-only mode: HR track failed "
+                        f"({hr_conviction}/{hr_min}, fit "
+                        f"{hr_archetype_fit}/{fit_min})"
+                    ),
+                )
+        elif not (hr_passes or p_passes):
             return (
                 False,
                 (
@@ -406,8 +552,11 @@ class SlackAlertService:
         if self._is_within_quiet_hours():
             return False, "Within quiet hours"
 
-        # Driver: whichever track cleared more decisively (HR preferred on ties
-        # — sharpshooter-biased by design).
+        # Driver: in HR-only mode it's always HR (by construction); otherwise
+        # whichever track cleared more decisively (HR preferred on ties —
+        # sharpshooter-biased by design).
+        if config.get("hr_only_mode", False):
+            return True, "HR"
         driver = infer_verdict_driver(hr_conviction, p_conviction)
         if driver is None:
             # Both passed the user's floors but neither cleared the v5
@@ -737,6 +886,7 @@ class SlackAlertService:
             p_archetype_fit=p_archetype_fit,
             regime_alignment=regime_alignment,
             contract_id=contract_id,
+            ticker=ticker,
             verdict=verdict,
             premium=premium,
             quality_tier=quality_tier,
@@ -821,8 +971,8 @@ class SlackAlertService:
         if sent_count == 0:
             return False, "All webhook sends failed"
 
-        self._alert_timestamps[contract_id] = datetime.now(timezone.utc)
-        self._daily_count += 1
+        # Cap + cooldown state is derived from ALERT_LOG entries written by
+        # log_alert() above, so there's no in-memory bookkeeping to update.
         return True, None
 
     async def send_test_alert(
