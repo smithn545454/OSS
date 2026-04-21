@@ -508,6 +508,32 @@ class ScannerOrchestrator:
             # Persist opportunities to DynamoDB
             await self._persist_opportunities(opportunities)
 
+            # Count triggers per scanner on the actually-produced opportunities
+            # (scanner_stats covers scanned/triggered at the scanner-class level;
+            # this catches post-merge + revalidation counts and maps 1:1 to
+            # what the rest of the pipeline will see downstream).
+            trigger_counts: dict[str, int] = {}
+            for opp in opportunities:
+                for trig in opp.scanner_triggers:
+                    key = trig.scanner_type.value
+                    trigger_counts[key] = trigger_counts.get(key, 0) + 1
+
+            # v5_active_scanners is the policy's allowlist for v5 scoring.
+            # Emit a warning (not an enforcement block) when triggers land
+            # from scanners outside the allowlist — surfaces audit D1/D2
+            # without changing behavior.
+            active_scanners: set[str] = set(
+                getattr(policy_config, "v5_active_scanners", None) or []
+            )
+            if active_scanners:
+                for scanner_name, count in trigger_counts.items():
+                    if scanner_name not in active_scanners and count > 0:
+                        logger.warning(
+                            "Scanner %s produced %d triggers but is not in "
+                            "v5_active_scanners %s",
+                            scanner_name, count, sorted(active_scanners),
+                        )
+
             # Record Stage 1 event
             await self._record_discovery_stage_event(
                 run_id=run_id,
@@ -516,6 +542,7 @@ class ScannerOrchestrator:
                 scanner_stats=scanner_stats,
                 merge_stats=merge_stats,
                 polygon=polygon,
+                trigger_counts=trigger_counts,
             )
 
             # Continue with full pipeline if requested
@@ -1443,6 +1470,7 @@ class ScannerOrchestrator:
         scanner_stats: dict[str, dict[str, int]],
         merge_stats: dict[str, int],
         polygon: Optional[PolygonClient] = None,
+        trigger_counts: Optional[dict[str, int]] = None,
     ) -> None:
         """Record stage event for Stage 1 (Opportunity Discovery).
 
@@ -1494,6 +1522,7 @@ class ScannerOrchestrator:
             },
             "polygon_drops": polygon_drops,
             "polygon_dropped_tickers_sample": polygon_dropped_sample,
+            "trigger_counts": dict(trigger_counts or {}),
         }
 
         await self._pipeline.record_stage_event(

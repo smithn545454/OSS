@@ -250,12 +250,18 @@ class StageMapper:
         if not scanner_totals:
             return self._build_default_gates_for_stage(1)
 
-        # Build a single gate group showing per-scanner trigger rates
+        # Build a single gate group showing per-scanner trigger rates.
+        # Keep this list in sync with ScannerType in schemas.py so every
+        # scanner that fires gets a human-readable row in Pipeline Monitor
+        # instead of falling back to the raw enum value.
         scanner_labels = {
             "BREAKOUT": "Breakout Scanner",
+            "BREAKDOWN": "Breakdown Scanner",
             "COMPRESSION": "Compression Scanner",
+            "COMPRESSION_EXPANSION": "Compression Scanner",
             "CHEAP_OPTIONS": "Cheap Options Scanner",
             "UNUSUAL_VOLUME": "Unusual Volume Scanner",
+            "REVALIDATION": "Re-evaluation",
         }
 
         rules = []
