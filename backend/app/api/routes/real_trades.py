@@ -287,42 +287,6 @@ async def list_live_trades() -> dict[str, Any]:
     return {"trades": enriched, "count": len(enriched)}
 
 
-@router.get("/live/summary")
-async def live_trades_summary() -> dict[str, Any]:
-    """Portfolio header for the Active Trades dashboard."""
-    from app.paper_trading.live_view import fetch_live_quotes
-    from app.real_trades.live_view import compute_summary, enrich_trade
-
-    trades = await RealTradeTable.list_open(limit=500)
-    if not trades:
-        return compute_summary([])
-
-    paper_by_eval: dict[str, Any] = {}
-    paper_positions = []
-    for t in trades:
-        snap = t.get("snapshot") or {}
-        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
-        if not eval_id:
-            continue
-        paper = await PaperPositionTable.get_by_evaluation_id(eval_id)
-        if paper:
-            paper_by_eval[eval_id] = paper
-            paper_positions.append(paper)
-
-    quotes = await fetch_live_quotes(paper_positions) if paper_positions else {}
-
-    enriched: list[dict[str, Any]] = []
-    for t in trades:
-        snap = t.get("snapshot") or {}
-        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
-        paper = paper_by_eval.get(eval_id) if eval_id else None
-        option_ticker = snap.get("option_ticker") if isinstance(snap, dict) else None
-        quote = quotes.get(option_ticker) if option_ticker else None
-        enriched.append(enrich_trade(t, paper, quote))
-
-    return compute_summary(enriched)
-
-
 @router.get("/stats")
 async def get_trade_stats() -> dict[str, Any]:
     """Get summary statistics for tracked trades."""

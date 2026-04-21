@@ -2,15 +2,12 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Wallet } from 'lucide-react'
 import type { LiveTrade } from '@/lib/types'
-import {
-  useCloseTrade,
-  useLiveTrades,
-  useLiveTradesSummary,
-} from '@/hooks/useApi'
+import { useCloseTrade, useLiveTrades } from '@/hooks/useApi'
 import PortfolioStatStrip from './PortfolioStatStrip'
 import ScannerFilterChips from './ScannerFilterChips'
 import AttentionQueue from './AttentionQueue'
 import PositionsTable from './PositionsTable'
+import { computeSummary } from './summary'
 
 export default function ActivePositionsDashboard() {
   const queryClient = useQueryClient()
@@ -18,13 +15,16 @@ export default function ActivePositionsDashboard() {
   const [closingId, setClosingId] = useState<string | null>(null)
 
   const liveTrades = useLiveTrades()
-  const summary = useLiveTradesSummary()
   const closeMut = useCloseTrade()
 
   const allTrades = useMemo(
     () => liveTrades.data?.trades ?? [],
     [liveTrades.data]
   )
+
+  // Summary is derived from the same list the tables render — no second
+  // network roundtrip. Recomputed on every list change.
+  const summary = useMemo(() => computeSummary(allTrades), [allTrades])
 
   const filtered = useMemo(() => {
     if (scanner === 'all') return allTrades
@@ -58,7 +58,7 @@ export default function ActivePositionsDashboard() {
     queryClient.invalidateQueries({ queryKey: ['trades', 'live'] })
   }
 
-  const isFetching = liveTrades.isFetching || summary.isFetching
+  const isFetching = liveTrades.isFetching
 
   if (liveTrades.isLoading) {
     return (
@@ -83,7 +83,7 @@ export default function ActivePositionsDashboard() {
   return (
     <div className="space-y-5">
       <PortfolioStatStrip
-        summary={summary.data}
+        summary={summary}
         isFetching={isFetching}
         onRefresh={handleRefresh}
       />

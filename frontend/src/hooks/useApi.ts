@@ -557,21 +557,13 @@ export function usePaperTradingPositions(status?: string) {
 // Active Trades dashboard. 5-min polling aligns with the backend's per-
 // (underlying, expiry) quote cache; faster polling would return cached data.
 // Dataset is small (user-tracked trades), so live quotes are always fetched.
+// Summary aggregates live off the list client-side — see computeSummary.
 const LIVE_REFRESH_MS = 5 * 60 * 1000
 
 export function useLiveTrades() {
   return useQuery({
     queryKey: ['trades', 'live'] as const,
     queryFn: api.getLiveTrades,
-    refetchInterval: LIVE_REFRESH_MS,
-    staleTime: 60_000,
-  })
-}
-
-export function useLiveTradesSummary() {
-  return useQuery({
-    queryKey: ['trades', 'live', 'summary'] as const,
-    queryFn: api.getLiveTradesSummary,
     refetchInterval: LIVE_REFRESH_MS,
     staleTime: 60_000,
   })

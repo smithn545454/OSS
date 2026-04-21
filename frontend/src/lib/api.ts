@@ -50,7 +50,6 @@ import type {
   PerformanceBreakdownResponse,
   StockSummary,
   LiveTradesResponse,
-  LiveTradesSummary,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -518,10 +517,6 @@ export async function getPaperTradingSummary(): Promise<PaperTradingSummary> {
 
 export async function getLiveTrades(): Promise<LiveTradesResponse> {
   return fetchApi<LiveTradesResponse>('/api/trades/live')
-}
-
-export async function getLiveTradesSummary(): Promise<LiveTradesSummary> {
-  return fetchApi<LiveTradesSummary>('/api/trades/live/summary')
 }
 
 export async function getPaperTradingPositions(
