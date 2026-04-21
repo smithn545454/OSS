@@ -1,19 +1,19 @@
-"""Live Active-Positions view.
+"""Pure helpers shared by the live-trades dashboard.
 
-Powers the Active Positions dashboard on the My Trades page.
+The Active Trades dashboard (``app/real_trades/live_view.py``) is the sole
+consumer of these helpers. They live here because they depend only on
+PaperPosition and PolygonClient — both of which belong conceptually to the
+paper-trading module — and keeping them here avoids a circular import.
 
-Responsibilities:
-- Refresh intraday quotes for a set of open positions from Polygon (with a
-  short in-memory cache so the dashboard can poll every ~5 min without
-  hammering the API).
-- Derive dashboard-only fields that aren't stored on PaperPosition:
-  dollar_pnl_open, tp_progress_pct, sl_progress_pct, attention_flag, etc.
-- Aggregate open positions into a portfolio summary ($ P&L total, premium
-  at risk, count, last_updated).
+What's here:
+- ``fetch_live_quotes(positions)`` — per-(underlying, expiry) Polygon quote
+  refresh with a 5-minute in-memory cache.
+- ``dollar_pnl_open`` / ``premium_at_risk`` — dollars from price × qty × 100.
+- ``tp_progress_pct`` / ``sl_progress_pct`` — 0–100 scalars for UI bars.
+- ``attention_flag`` — near_tp / near_sl / None classifier.
 
-The daily batch updater in `batch_updater.py` still owns the persistent
-price/PNL/MFE updates and auto-close logic. This module reads the same
-positions and overlays fresher quotes for display only.
+The daily batch updater in ``batch_updater.py`` still owns the persistent
+price/PnL/MFE updates and auto-close logic. Nothing here writes.
 """
 
 from __future__ import annotations
@@ -282,156 +282,3 @@ def attention_flag(
     return None
 
 
-def enrich_position(
-    position: PaperPosition,
-    live_quote: Optional[LiveQuote],
-) -> dict[str, Any]:
-    """Return a JSON-safe dict of the fields the dashboard needs.
-
-    Keeps only what the Active Positions view renders — the existing
-    /positions endpoint covers the long-tail fields for detail pages.
-    When a live quote is available it overrides the persisted
-    current_price; otherwise we fall back to the daily-batch value.
-    """
-    if live_quote is not None:
-        current_price = live_quote.mid
-        last_quote_at = live_quote.fetched_at
-        quote_source = "intraday"
-    else:
-        current_price = position.current_price
-        last_quote_at = position.last_updated
-        quote_source = "daily_batch"
-
-    if position.entry_price > 0:
-        current_pnl_pct = (
-            (current_price - position.entry_price) / position.entry_price * 100
-        )
-    else:
-        current_pnl_pct = 0.0
-
-    dollar_pnl = dollar_pnl_open(
-        position.entry_price, current_price, position.quantity
-    )
-    risk = premium_at_risk(position.entry_price, position.quantity)
-
-    flag = attention_flag(
-        current_pnl_pct, position.thesis_tp1_pct, position.thesis_sl_pct
-    )
-
-    # DTE now, not at entry — a stale dte_at_entry value would be misleading.
-    current_dte: Optional[int] = None
-    if position.expiration_date:
-        try:
-            from app.paper_trading.exit_checker import calculate_dte_from_expiration
-            current_dte = calculate_dte_from_expiration(position.expiration_date)
-        except Exception:  # noqa: BLE001
-            current_dte = position.dte_at_entry
-
-    scanner = position.scanner_source
-    if scanner and scanner.endswith("_SCANNER"):
-        scanner = scanner[: -len("_SCANNER")]
-
-    return {
-        "position_id": position.position_id,
-        "evaluation_id": position.evaluation_id,
-        "option_ticker": position.option_ticker,
-        "underlying_ticker": (
-            position.underlying_ticker
-            or extract_underlying_from_option_ticker(position.option_ticker)
-        ),
-        "option_type": position.option_type,
-        "strike": position.strike,
-        "expiration_date": position.expiration_date,
-        "dte": current_dte,
-        "days_held": position.days_held,
-        "quantity": position.quantity,
-        "entry_price": position.entry_price,
-        "entry_date": position.entry_date,
-        "current_price": round(current_price, 4),
-        "current_pnl_pct": round(current_pnl_pct, 2),
-        "dollar_pnl_open": round(dollar_pnl, 2),
-        "premium_at_risk": round(risk, 2),
-        "max_favorable_excursion": round(position.max_favorable_excursion, 2),
-        "max_adverse_excursion": round(position.max_adverse_excursion, 2),
-        "scanner_source": scanner,
-        "scanner_list": position.scanner_list,
-        "conviction_score": position.conviction_score,
-        "verdict_at_entry": (
-            position.verdict_at_entry.value
-            if hasattr(position.verdict_at_entry, "value")
-            else position.verdict_at_entry
-        ),
-        "quality_tier_at_entry": (
-            position.quality_tier_at_entry.value
-            if position.quality_tier_at_entry
-            and hasattr(position.quality_tier_at_entry, "value")
-            else position.quality_tier_at_entry
-        ),
-        "thesis_tp1_pct": position.thesis_tp1_pct,
-        "thesis_sl_pct": position.thesis_sl_pct,
-        "thesis_time_exit_dte": position.thesis_time_exit_dte,
-        "tp_progress_pct": tp_progress_pct(
-            current_pnl_pct, position.thesis_tp1_pct
-        ),
-        "sl_progress_pct": sl_progress_pct(
-            current_pnl_pct, position.thesis_sl_pct
-        ),
-        "attention_flag": flag,
-        "last_quote_at": last_quote_at,
-        "quote_source": quote_source,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Portfolio summary
-# ---------------------------------------------------------------------------
-
-
-def compute_summary(enriched: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate a list of enriched positions into the dashboard header."""
-    if not enriched:
-        return {
-            "open_count": 0,
-            "dollar_pnl_open_total": 0.0,
-            "premium_at_risk_total": 0.0,
-            "pnl_pct_weighted": 0.0,
-            "attention_count": 0,
-            "near_tp_count": 0,
-            "near_sl_count": 0,
-            "last_updated": None,
-            "quote_sources": {"intraday": 0, "daily_batch": 0},
-        }
-
-    dollar_pnl_total = sum(float(p["dollar_pnl_open"]) for p in enriched)
-    risk_total = sum(float(p["premium_at_risk"]) for p in enriched)
-
-    near_tp = sum(1 for p in enriched if p["attention_flag"] == "near_tp")
-    near_sl = sum(1 for p in enriched if p["attention_flag"] == "near_sl")
-
-    # Weighted blended % return across the book, using premium-at-risk as the
-    # weight — "if I paid $X for each leg, what % of total X am I up or down."
-    if risk_total > 0:
-        pnl_pct_weighted = dollar_pnl_total / risk_total * 100
-    else:
-        pnl_pct_weighted = 0.0
-
-    # Most recent quote wall-clock across the book.
-    last_updated = max(
-        (p.get("last_quote_at") for p in enriched if p.get("last_quote_at")),
-        default=None,
-    )
-
-    intraday = sum(1 for p in enriched if p.get("quote_source") == "intraday")
-    daily = sum(1 for p in enriched if p.get("quote_source") == "daily_batch")
-
-    return {
-        "open_count": len(enriched),
-        "dollar_pnl_open_total": round(dollar_pnl_total, 2),
-        "premium_at_risk_total": round(risk_total, 2),
-        "pnl_pct_weighted": round(pnl_pct_weighted, 2),
-        "attention_count": near_tp + near_sl,
-        "near_tp_count": near_tp,
-        "near_sl_count": near_sl,
-        "last_updated": last_updated,
-        "quote_sources": {"intraday": intraday, "daily_batch": daily},
-    }

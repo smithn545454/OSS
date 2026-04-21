@@ -1,20 +1,20 @@
 import clsx from 'clsx'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Target, X, ExternalLink } from 'lucide-react'
-import type { LivePosition } from '@/lib/types'
+import { AlertTriangle, Target, X, ExternalLink, Zap } from 'lucide-react'
+import type { LiveTrade } from '@/lib/types'
 import { formatExpirationDate } from '@/lib/formatTime'
 import { fmtPct, fmtUsd, pnlColor } from './format'
 import TPSLProgressBar from './TPSLProgressBar'
 
 interface Props {
-  position: LivePosition
-  onClose: (position: LivePosition) => void
+  trade: LiveTrade
+  onClose: (trade: LiveTrade) => void
   closingId: string | null
 }
 
-export default function AttentionCard({ position, onClose, closingId }: Props) {
-  const isNearTp = position.attention_flag === 'near_tp'
-  const isNearSl = position.attention_flag === 'near_sl'
+export default function AttentionCard({ trade, onClose, closingId }: Props) {
+  const isNearTp = trade.attention_flag === 'near_tp'
+  const isNearSl = trade.attention_flag === 'near_sl'
 
   const borderColor = isNearSl
     ? 'border-oss-reject/60'
@@ -22,10 +22,11 @@ export default function AttentionCard({ position, onClose, closingId }: Props) {
       ? 'border-oss-approve/60'
       : 'border-oss-border'
 
-  const ticker = position.underlying_ticker || '—'
-  const optionType = position.option_type || ''
-  const strike = position.strike
-  const expiration = position.expiration_date
+  const ticker = trade.underlying_ticker || '—'
+  const optionType = trade.option_type || ''
+  const strike = trade.strike
+  const expiration = trade.expiration_date
+  const paperClosed = trade.paper_position_status === 'CLOSED'
 
   return (
     <div
@@ -60,9 +61,9 @@ export default function AttentionCard({ position, onClose, closingId }: Props) {
               {formatExpirationDate(expiration)}
             </span>
           )}
-          {position.scanner_source && (
+          {trade.scanner_source && (
             <span className="rounded-md bg-oss-surface px-1.5 py-0.5 text-xs text-oss-text-tertiary border border-oss-border">
-              {position.scanner_source.replace(/_/g, ' ')}
+              {trade.scanner_source.replace(/_/g, ' ')}
             </span>
           )}
         </div>
@@ -74,18 +75,16 @@ export default function AttentionCard({ position, onClose, closingId }: Props) {
         <span
           className={clsx(
             'text-xl font-bold font-mono tracking-tight',
-            pnlColor(position.dollar_pnl_open)
+            pnlColor(trade.dollar_pnl_open)
           )}
         >
-          {fmtUsd(position.dollar_pnl_open, { sign: true })}
+          {fmtUsd(trade.dollar_pnl_open, { sign: true })}
         </span>
-        <span className={clsx('text-sm font-mono', pnlColor(position.current_pnl_pct))}>
-          {fmtPct(position.current_pnl_pct, { sign: true })}
+        <span className={clsx('text-sm font-mono', pnlColor(trade.current_pnl_pct))}>
+          {fmtPct(trade.current_pnl_pct, { sign: true })}
         </span>
-        {position.dte != null && (
-          <span className="ml-auto text-xs text-oss-muted">
-            DTE {position.dte}
-          </span>
+        {trade.dte != null && (
+          <span className="ml-auto text-xs text-oss-muted">DTE {trade.dte}</span>
         )}
       </div>
 
@@ -94,24 +93,26 @@ export default function AttentionCard({ position, onClose, closingId }: Props) {
         {isNearTp && (
           <TPSLProgressBar
             kind="tp"
-            progress={position.tp_progress_pct}
-            label={`To TP (${position.thesis_tp1_pct?.toFixed(0)}%)`}
+            progress={trade.tp_progress_pct}
+            label={`To TP (${trade.thesis_tp1_pct?.toFixed(0)}%)`}
           />
         )}
         {isNearSl && (
           <TPSLProgressBar
             kind="sl"
-            progress={position.sl_progress_pct}
-            label={`To SL (−${position.thesis_sl_pct?.toFixed(0)}%)`}
+            progress={trade.sl_progress_pct}
+            label={`To SL (\u2212${trade.thesis_sl_pct?.toFixed(0)}%)`}
           />
         )}
       </div>
 
+      {paperClosed && <PaperClosedNotice trade={trade} />}
+
       {/* Actions */}
       <div className="flex items-center gap-2 pt-1">
         <button
-          onClick={() => onClose(position)}
-          disabled={closingId === position.position_id}
+          onClick={() => onClose(trade)}
+          disabled={closingId === trade.trade_id}
           className={clsx(
             'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium',
             'border border-oss-reject/40 bg-oss-reject/10 text-oss-reject-text',
@@ -120,10 +121,10 @@ export default function AttentionCard({ position, onClose, closingId }: Props) {
           )}
         >
           <X className="h-3 w-3" />
-          {closingId === position.position_id ? 'Closing…' : 'Close'}
+          {closingId === trade.trade_id ? 'Closing\u2026' : 'Close'}
         </button>
         <Link
-          to={`/paper-trading/positions/${position.position_id}`}
+          to={`/trades/${trade.trade_id}`}
           className={clsx(
             'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs',
             'border border-oss-border bg-oss-surface text-oss-text-secondary',
@@ -156,4 +157,22 @@ function UrgencyBadge({ isNearSl, isNearTp }: { isNearSl: boolean; isNearTp: boo
     )
   }
   return null
+}
+
+function PaperClosedNotice({ trade }: { trade: LiveTrade }) {
+  const price = trade.paper_exit_price
+  const reason = trade.paper_exit_reason
+  const date = trade.paper_exit_date
+  return (
+    <div className="flex items-start gap-2 rounded-md bg-oss-watch/10 border border-oss-watch/30 p-2 text-xs text-oss-watch-text">
+      <Zap className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+      <div>
+        <span className="font-medium">System closed paper position</span>
+        {price != null && <> at ${price.toFixed(2)}</>}
+        {reason && <> ({reason.replace(/_/g, ' ').toLowerCase()})</>}
+        {date && <> on {date}</>}
+        <span className="text-oss-muted"> {'\u2014'} decide whether to close manually.</span>
+      </div>
+    </div>
+  )
 }

@@ -3,12 +3,13 @@
  */
 
 // Enums
-export type ScannerType = 
+export type ScannerType =
   | 'UNUSUAL_VOLUME'
   | 'BREAKOUT'
   | 'BREAKDOWN'
   | 'COMPRESSION_EXPANSION'
   | 'CHEAP_OPTIONS'
+  | 'REVALIDATION'
 
 export type DirectionHint = 'CALL' | 'PUT' | 'NONE'
 
@@ -1363,15 +1364,19 @@ export interface PaperTradingPositionsResponse {
   filter: { status: string } | null
 }
 
-// Active Positions dashboard (My Trades OPEN tab).
-// Lives under /api/paper-trading/positions/live. Fields mirror the backend
-// enrich_position() output; pure-derived fields (dollar_pnl_open,
-// tp_progress_pct, attention_flag) live here and not on PaperPosition.
+// Active Trades dashboard (My Trades Active tab).
+// Lives under /api/trades/live. Each row is a user-tracked RealTrade joined
+// to its paired PaperPosition (open or closed). P&L is computed against the
+// user's fill price on the RealTrade, not the paper position's entry.
 export type AttentionFlag = 'near_tp' | 'near_sl' | null
-export type QuoteSource = 'intraday' | 'daily_batch'
+export type QuoteSource = 'intraday' | 'daily_batch' | 'snapshot'
+export type PaperPositionStatus = 'OPEN' | 'CLOSED' | null
 
-export interface LivePosition {
-  position_id: string
+export interface LiveTrade {
+  trade_id: string
+  tracked_at: string
+  trader: string | null
+  entry_notes: string | null
   evaluation_id: string
   option_ticker: string
   underlying_ticker: string | null
@@ -1382,18 +1387,15 @@ export interface LivePosition {
   days_held: number
   quantity: number
   entry_price: number
-  entry_date: string
   current_price: number
   current_pnl_pct: number
   dollar_pnl_open: number
   premium_at_risk: number
-  max_favorable_excursion: number
-  max_adverse_excursion: number
+  max_favorable_excursion: number | null
+  max_adverse_excursion: number | null
   scanner_source: string | null
-  scanner_list: string[] | null
-  conviction_score: number | null
   verdict_at_entry: string
-  quality_tier_at_entry: string | null
+  conviction_score: number | null
   thesis_tp1_pct: number | null
   thesis_sl_pct: number | null
   thesis_time_exit_dte: number | null
@@ -1402,14 +1404,19 @@ export interface LivePosition {
   attention_flag: AttentionFlag
   last_quote_at: string
   quote_source: QuoteSource
+  paper_position_id: string | null
+  paper_position_status: PaperPositionStatus
+  paper_exit_price: number | null
+  paper_exit_reason: string | null
+  paper_exit_date: string | null
 }
 
-export interface LivePositionsResponse {
-  positions: LivePosition[]
+export interface LiveTradesResponse {
+  trades: LiveTrade[]
   count: number
 }
 
-export interface LivePositionsSummary {
+export interface LiveTradesSummary {
   open_count: number
   dollar_pnl_open_total: number
   premium_at_risk_total: number
@@ -1417,8 +1424,9 @@ export interface LivePositionsSummary {
   attention_count: number
   near_tp_count: number
   near_sl_count: number
+  paper_closed_count: number
   last_updated: string | null
-  quote_sources: { intraday: number; daily_batch: number }
+  quote_sources: { intraday: number; daily_batch: number; snapshot: number }
 }
 
 export interface PerformanceMetricsData {

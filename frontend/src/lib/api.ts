@@ -49,8 +49,8 @@ import type {
   SummaryMetricsResponse,
   PerformanceBreakdownResponse,
   StockSummary,
-  LivePositionsResponse,
-  LivePositionsSummary,
+  LiveTradesResponse,
+  LiveTradesSummary,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -516,22 +516,12 @@ export async function getPaperTradingSummary(): Promise<PaperTradingSummary> {
   return fetchApi<PaperTradingSummary>('/api/paper-trading/summary')
 }
 
-export async function getLivePositions(
-  scanner?: string,
-  refresh = false
-): Promise<LivePositionsResponse> {
-  const qs = new URLSearchParams()
-  if (scanner && scanner !== 'all') qs.set('scanner', scanner)
-  if (refresh) qs.set('refresh', 'true')
-  const query = qs.toString()
-  return fetchApi<LivePositionsResponse>(
-    `/api/paper-trading/positions/live${query ? `?${query}` : ''}`
-  )
+export async function getLiveTrades(): Promise<LiveTradesResponse> {
+  return fetchApi<LiveTradesResponse>('/api/trades/live')
 }
 
-export async function getLivePositionsSummary(refresh = false): Promise<LivePositionsSummary> {
-  const query = refresh ? '?refresh=true' : ''
-  return fetchApi<LivePositionsSummary>(`/api/paper-trading/positions/live/summary${query}`)
+export async function getLiveTradesSummary(): Promise<LiveTradesSummary> {
+  return fetchApi<LiveTradesSummary>('/api/trades/live/summary')
 }
 
 export async function getPaperTradingPositions(

@@ -755,6 +755,195 @@ def extract_expiration_from_option_ticker(option_ticker: str) -> str:
     return "2099-12-31"
 
 
+def _build_paper_position_from_snapshot(snapshot: dict[str, Any]) -> PaperPosition:
+    """Construct a PaperPosition from a RealTrade's evaluation snapshot.
+
+    Used to synthesize a paper position when a user tracks a RealTrade whose
+    evaluation never produced one (e.g. REJECT verdict, or a pipeline run
+    before the paper-trading enrollment path existed). The entry price uses
+    the evaluation's ask — matching how the normal pipeline creates paper
+    positions — not the user's fill price on the RealTrade. The RealTrade
+    keeps its own entry_price for P&L against the user's actual cost basis.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    entry_date = now[:10]
+
+    ask = float(snapshot.get("ask") or 0)
+    mid = float(snapshot.get("mid") or 0)
+    entry_price = ask if ask > 0 else mid
+
+    scanner_source = snapshot.get("scanner_source")
+    if scanner_source and scanner_source.endswith("_SCANNER"):
+        scanner_source = scanner_source[: -len("_SCANNER")]
+
+    verdict_raw = snapshot.get("verdict") or "WATCH"
+    try:
+        verdict = Verdict(verdict_raw)
+    except ValueError:
+        verdict = Verdict.WATCH
+
+    quality_tier: Optional[QualityTier] = None
+    tier_raw = snapshot.get("quality_tier")
+    if tier_raw:
+        try:
+            quality_tier = QualityTier(tier_raw)
+        except ValueError:
+            pass
+
+    return PaperPosition(
+        evaluation_id=snapshot["evaluation_id"],
+        option_ticker=snapshot["option_ticker"],
+        entry_price=entry_price,
+        entry_date=entry_date,
+        quantity=1,
+        verdict_at_entry=verdict,
+        quality_tier_at_entry=quality_tier,
+        current_price=entry_price,
+        current_pnl_pct=0.0,
+        max_favorable_excursion=0.0,
+        max_adverse_excursion=0.0,
+        days_held=0,
+        status=PositionStatus.OPEN,
+        last_updated=now,
+        underlying_ticker=snapshot.get("underlying_ticker"),
+        scanner_source=scanner_source,
+        conviction_score=snapshot.get("final_score"),
+        pillar_premium_leverage=snapshot.get("premium_leverage_score"),
+        pillar_underlying_behavior=snapshot.get("underlying_behavior_score"),
+        pillar_setup_quality=snapshot.get("setup_quality_score"),
+        pillar_directional_conviction=snapshot.get("directional_conviction_score"),
+        pillar_move_potential=snapshot.get("move_potential_score"),
+        pillar_trade_structure=snapshot.get("trade_structure_score"),
+        strike=snapshot.get("strike"),
+        option_type=snapshot.get("option_type"),
+        expiration_date=snapshot.get("expiration_date"),
+        dte_at_entry=snapshot.get("dte"),
+        dte_bucket=snapshot.get("dte_bucket"),
+        entry_delta=snapshot.get("delta"),
+        entry_iv=snapshot.get("iv"),
+        entry_theta=snapshot.get("theta"),
+        entry_underlying_price=snapshot.get("underlying_price"),
+        entry_moneyness_pct=snapshot.get("moneyness_pct"),
+        entry_spread_pct=snapshot.get("spread_pct"),
+        entry_open_interest=snapshot.get("open_interest"),
+        entry_volume=snapshot.get("volume"),
+        archetype_matched=snapshot.get("archetype_matched"),
+        archetype_match_score=snapshot.get("archetype_match_score"),
+    )
+
+
+async def _fetch_current_price(
+    position: PaperPosition,
+    client: PolygonClient,
+) -> Optional[float]:
+    """Return the current mid-price for a paper position's option contract.
+
+    Uses the same chain-minimal pattern as the daily batch updater.
+    Returns None on any failure; callers keep the seeded entry_price.
+    """
+    underlying = (
+        position.underlying_ticker
+        or extract_underlying_from_option_ticker(position.option_ticker)
+    )
+    expiry = (
+        position.expiration_date
+        or extract_expiration_from_option_ticker(position.option_ticker)
+    )
+    try:
+        chain = await client.get_options_chain_minimal(
+            underlying,
+            expiration_date_gte=expiry,
+            expiration_date_lte=expiry,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "ensure_paper_position: chain fetch failed for %s %s: %s",
+            underlying, expiry, e,
+        )
+        return None
+
+    for contract in chain:
+        details = contract.get("details") or {}
+        ticker = details.get("ticker") or contract.get("ticker")
+        if ticker == position.option_ticker or ticker == f"O:{position.option_ticker}":
+            last_quote = contract.get("last_quote") or {}
+            bid = float(last_quote.get("bid") or 0)
+            ask = float(last_quote.get("ask") or 0)
+            if bid and ask:
+                return round((bid + ask) / 2, 4)
+            if bid or ask:
+                return bid or ask
+    return None
+
+
+async def ensure_paper_position_for_real_trade(
+    real_trade: dict[str, Any],
+    polygon_client: Optional[PolygonClient] = None,
+) -> Optional[PaperPosition]:
+    """Guarantee a PaperPosition exists for a RealTrade's evaluation.
+
+    Idempotent. If a paper position (open or closed) already exists for the
+    evaluation, returns it unchanged. If none exists, synthesizes one from
+    the RealTrade's evaluation snapshot and seeds current_price with a
+    fresh Polygon quote.
+
+    This enforces the invariant that every RealTrade has a matching
+    PaperPosition reachable via ``PaperPositionTable.get_by_evaluation_id``,
+    so the Active Trades dashboard can always join the two.
+    """
+    snapshot = real_trade.get("snapshot") or {}
+    if not isinstance(snapshot, dict):
+        snapshot = snapshot.model_dump() if hasattr(snapshot, "model_dump") else {}
+
+    evaluation_id = snapshot.get("evaluation_id")
+    if not evaluation_id:
+        logger.warning(
+            "ensure_paper_position: real trade %s has no evaluation_id in snapshot",
+            real_trade.get("trade_id"),
+        )
+        return None
+
+    existing = await PaperPositionTable.get_by_evaluation_id(evaluation_id)
+    if existing is not None:
+        return existing
+
+    position = _build_paper_position_from_snapshot(snapshot)
+
+    # Seed current_price with a fresh quote so the dashboard's first render
+    # doesn't show a flat 0% P&L on a trade that's been running for days.
+    owns_client = polygon_client is None
+    client_ctx = PolygonClient() if owns_client else None
+    try:
+        client = await client_ctx.__aenter__() if owns_client else polygon_client
+        current = await _fetch_current_price(position, client)
+    finally:
+        if owns_client and client_ctx is not None:
+            await client_ctx.__aexit__(None, None, None)
+
+    if current is not None and position.entry_price > 0:
+        position.current_price = current
+        position.current_pnl_pct = round(
+            (current - position.entry_price) / position.entry_price * 100, 2
+        )
+
+    try:
+        await PaperPositionTable.put(position)
+    except Exception as e:
+        logger.error(
+            "ensure_paper_position: failed to persist synth position "
+            "for eval %s: %s", evaluation_id, e,
+        )
+        return None
+
+    logger.info(
+        "Synthesized paper position %s for orphan real trade "
+        "(eval=%s ticker=%s entry=$%.2f current=$%.2f)",
+        position.position_id, evaluation_id, position.option_ticker,
+        position.entry_price, position.current_price,
+    )
+    return position
+
+
 async def close_position_manually(
     position_id: str,
     exit_price: Optional[float] = None,

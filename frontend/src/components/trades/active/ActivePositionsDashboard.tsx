@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Wallet } from 'lucide-react'
-import * as api from '@/lib/api'
-import type { LivePosition } from '@/lib/types'
+import type { LiveTrade } from '@/lib/types'
 import {
-  useClosePosition,
-  useLivePositions,
-  useLivePositionsSummary,
+  useCloseTrade,
+  useLiveTrades,
+  useLiveTradesSummary,
 } from '@/hooks/useApi'
 import PortfolioStatStrip from './PortfolioStatStrip'
 import ScannerFilterChips from './ScannerFilterChips'
@@ -17,68 +16,51 @@ export default function ActivePositionsDashboard() {
   const queryClient = useQueryClient()
   const [scanner, setScanner] = useState<string>('all')
   const [closingId, setClosingId] = useState<string | null>(null)
-  const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // Initial read uses persisted daily-batch prices (fast). Clicking Refresh
-  // triggers an ad-hoc refetch with refresh=true that fires Polygon calls.
-  const livePositions = useLivePositions(undefined, false)
-  const summary = useLivePositionsSummary(false)
-  const closeMut = useClosePosition()
+  const liveTrades = useLiveTrades()
+  const summary = useLiveTradesSummary()
+  const closeMut = useCloseTrade()
 
-  const allPositions = useMemo(
-    () => livePositions.data?.positions ?? [],
-    [livePositions.data]
+  const allTrades = useMemo(
+    () => liveTrades.data?.trades ?? [],
+    [liveTrades.data]
   )
 
   const filtered = useMemo(() => {
-    if (scanner === 'all') return allPositions
-    return allPositions.filter((p) => p.scanner_source === scanner)
-  }, [allPositions, scanner])
+    if (scanner === 'all') return allTrades
+    return allTrades.filter((t) => t.scanner_source === scanner)
+  }, [allTrades, scanner])
 
-  const attention = filtered.filter((p) => p.attention_flag !== null)
-  const quiet = filtered.filter((p) => p.attention_flag === null)
+  const attention = filtered.filter((t) => t.attention_flag !== null)
+  const quiet = filtered.filter((t) => t.attention_flag === null)
 
-  const handleClose = (position: LivePosition) => {
-    if (!window.confirm(
-      `Close ${position.underlying_ticker ?? position.option_ticker} at current price?`
-    )) {
-      return
-    }
-    setClosingId(position.position_id)
+  const handleClose = (trade: LiveTrade) => {
+    const confirmed = window.confirm(
+      `Close ${trade.underlying_ticker ?? trade.option_ticker} at $${trade.current_price.toFixed(
+        2
+      )}?`
+    )
+    if (!confirmed) return
+    setClosingId(trade.trade_id)
     closeMut.mutate(
-      { positionId: position.position_id },
+      {
+        tradeId: trade.trade_id,
+        exit_price: trade.current_price,
+        exit_reason: 'MANUAL',
+      },
       {
         onSettled: () => setClosingId(null),
       }
     )
   }
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    try {
-      // Explicit Polygon-backed refresh — bypass cache, scope to active
-      // scanner filter so we stay under the 30s API Gateway budget.
-      const scopedScanner = scanner === 'all' ? undefined : scanner
-      const [fresh, freshSummary] = await Promise.all([
-        api.getLivePositions(scopedScanner, true),
-        api.getLivePositionsSummary(true),
-      ])
-      queryClient.setQueryData(
-        ['paper-trading', 'positions', 'live', scanner ?? 'all', false],
-        fresh
-      )
-      queryClient.setQueryData(
-        ['paper-trading', 'positions', 'live', 'summary', false],
-        freshSummary
-      )
-    } finally {
-      setIsRefreshing(false)
-    }
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['trades', 'live'] })
   }
 
-  const isFetching = isRefreshing || livePositions.isFetching || summary.isFetching
+  const isFetching = liveTrades.isFetching || summary.isFetching
 
-  if (livePositions.isLoading) {
+  if (liveTrades.isLoading) {
     return (
       <div className="space-y-4">
         <div className="h-28 animate-pulse rounded-xl bg-oss-surface" />
@@ -88,15 +70,15 @@ export default function ActivePositionsDashboard() {
     )
   }
 
-  if (livePositions.isError) {
+  if (liveTrades.isError) {
     return (
       <div className="rounded-xl border border-oss-reject/40 bg-oss-reject/5 p-6 text-sm text-oss-reject-text">
-        Failed to load positions. Try again.
+        Failed to load trades. Try again.
       </div>
     )
   }
 
-  const empty = allPositions.length === 0
+  const empty = allTrades.length === 0
 
   return (
     <div className="space-y-5">
@@ -110,7 +92,7 @@ export default function ActivePositionsDashboard() {
         <ScannerFilterChips
           value={scanner}
           onChange={setScanner}
-          positions={allPositions}
+          trades={allTrades}
         />
       )}
 
@@ -118,24 +100,24 @@ export default function ActivePositionsDashboard() {
         <div className="rounded-xl border border-oss-border bg-oss-card p-12 text-center">
           <Wallet className="h-12 w-12 text-oss-muted/30 mx-auto mb-4" />
           <p className="text-oss-muted">
-            No open positions. The pipeline will enroll new positions on the next run.
+            No active trades. Track one from an Evaluation Detail page to start monitoring it here.
           </p>
         </div>
       )}
 
       {!empty && filtered.length === 0 && (
         <div className="rounded-xl border border-oss-border bg-oss-card p-8 text-center text-sm text-oss-muted">
-          No open positions match this scanner filter.
+          No active trades match this scanner filter.
         </div>
       )}
 
       <AttentionQueue
-        positions={attention}
+        trades={attention}
         onClose={handleClose}
         closingId={closingId}
       />
       <PositionsTable
-        positions={quiet}
+        trades={quiet}
         onClose={handleClose}
         closingId={closingId}
       />

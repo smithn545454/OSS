@@ -1,11 +1,11 @@
 import clsx from 'clsx'
 import { RefreshCw, AlertTriangle, Wallet, Clock } from 'lucide-react'
-import type { LivePositionsSummary } from '@/lib/types'
+import type { LiveTradesSummary } from '@/lib/types'
 import { formatRelativeTime } from '@/lib/formatTime'
 import { fmtPct, fmtUsd, pnlColor } from './format'
 
 interface Props {
-  summary: LivePositionsSummary | undefined
+  summary: LiveTradesSummary | undefined
   isFetching: boolean
   onRefresh: () => void
 }
@@ -18,9 +18,12 @@ export default function PortfolioStatStrip({ summary, isFetching, onRefresh }: P
   const attentionCount = summary?.attention_count ?? 0
   const intraday = summary?.quote_sources?.intraday ?? 0
   const daily = summary?.quote_sources?.daily_batch ?? 0
+  const snapshot = summary?.quote_sources?.snapshot ?? 0
+  const paperClosed = summary?.paper_closed_count ?? 0
   const lastUpdated = summary?.last_updated
 
-  const hasQuoteDrift = daily > 0 && intraday > 0
+  const staleCount = daily + snapshot
+  const hasQuoteDrift = staleCount > 0 && intraday > 0
 
   return (
     <div className="rounded-xl border border-oss-border bg-oss-card p-5">
@@ -64,6 +67,14 @@ export default function PortfolioStatStrip({ summary, isFetching, onRefresh }: P
                 <AlertTriangle className="h-3 w-3" />
                 {attentionCount} need{attentionCount === 1 ? 's' : ''} attention
               </span>
+            ) : paperClosed > 0 ? (
+              <span
+                className="inline-flex items-center gap-1 text-oss-watch-text"
+                title="System auto-closed the paper position for these trades — decide whether to close manually"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {paperClosed} system-closed
+              </span>
             ) : openCount > 0 ? (
               <span className="text-oss-muted">book is quiet</span>
             ) : null
@@ -97,9 +108,9 @@ export default function PortfolioStatStrip({ summary, isFetching, onRefresh }: P
           {hasQuoteDrift && (
             <span
               className="text-oss-muted italic"
-              title={`${intraday} live quote${intraday === 1 ? '' : 's'}, ${daily} stale from daily batch`}
+              title={`${intraday} live quote${intraday === 1 ? '' : 's'}, ${staleCount} stale`}
             >
-              {daily} stale
+              {staleCount} stale
             </span>
           )}
         </div>

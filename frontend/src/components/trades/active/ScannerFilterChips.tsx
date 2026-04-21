@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import type { LivePosition } from '@/lib/types'
+import type { LiveTrade } from '@/lib/types'
 
 // v5 active scanners + legacy fallbacks (positions may still be open from v4).
 // Kept as a static list so a scanner with zero open positions still shows as
@@ -16,18 +16,18 @@ const SCANNER_OPTIONS: { value: string; label: string }[] = [
 interface Props {
   value: string
   onChange: (value: string) => void
-  positions: LivePosition[]
+  trades: LiveTrade[]
 }
 
-export default function ScannerFilterChips({ value, onChange, positions }: Props) {
-  // Count open positions per scanner so chips show "UV (3)".
-  const counts = positions.reduce<Record<string, number>>((acc, p) => {
-    const key = p.scanner_source || 'UNKNOWN'
+export default function ScannerFilterChips({ value, onChange, trades }: Props) {
+  // Count open trades per scanner so chips show "UV (3)".
+  const counts = trades.reduce<Record<string, number>>((acc, t) => {
+    const key = t.scanner_source || 'UNKNOWN'
     acc[key] = (acc[key] || 0) + 1
     return acc
   }, {})
 
-  const totalCount = positions.length
+  const totalCount = trades.length
   const visibleOptions = SCANNER_OPTIONS.filter(
     (o) => counts[o.value] > 0 || value === o.value
   )

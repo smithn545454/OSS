@@ -179,6 +179,22 @@ async def track_trade(request: TrackTradeRequest) -> dict[str, Any]:
         f"eval={request.evaluation_id} entry=${request.entry_price}"
     )
 
+    # Invariant: every RealTrade must have a matching PaperPosition so the
+    # Active Trades dashboard can join them. For APPROVE/WATCH evaluations
+    # the pipeline's enrollment has already created one; for REJECT or
+    # pre-enrollment evaluations we synthesize from the snapshot.
+    try:
+        from app.paper_trading.position_manager import ensure_paper_position_for_real_trade
+        await ensure_paper_position_for_real_trade(trade.model_dump(mode="json"))
+    except Exception as e:
+        # Don't fail the track-trade request if synth fails — log and move on.
+        # The dashboard will show "thesis pending" for this trade until a
+        # paper position exists.
+        logger.warning(
+            f"ensure_paper_position: synth failed for trade "
+            f"{trade.trade_id} (eval={request.evaluation_id}): {e}"
+        )
+
     return {
         "trade_id": trade.trade_id,
         "status": "OPEN",
@@ -214,6 +230,97 @@ async def list_trades(
         "trades": trades,
         "count": len(trades),
     }
+
+
+@router.get("/live")
+async def list_live_trades() -> dict[str, Any]:
+    """Open RealTrades enriched with live quotes + thesis TP/SL.
+
+    Powers the Active Trades dashboard on the My Trades page. Each row is
+    a user-tracked trade joined to its paired PaperPosition (open or
+    closed — the invariant is that every open RealTrade has a matching
+    paper position). P&L is computed against the user's fill price on the
+    RealTrade, not the paper position's entry.
+    """
+    from app.paper_trading.live_view import fetch_live_quotes
+    from app.real_trades.live_view import enrich_trade
+
+    trades = await RealTradeTable.list_open(limit=500)
+    if not trades:
+        return {"trades": [], "count": 0}
+
+    # Join each trade to its paper position by evaluation_id. GSI1 returns
+    # either OPEN or CLOSED — we pass the result through so the UI can warn
+    # when the system has auto-closed the paper position.
+    paper_by_eval: dict[str, Any] = {}
+    paper_positions = []
+    for t in trades:
+        snap = t.get("snapshot") or {}
+        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
+        if not eval_id:
+            continue
+        paper = await PaperPositionTable.get_by_evaluation_id(eval_id)
+        if paper:
+            paper_by_eval[eval_id] = paper
+            paper_positions.append(paper)
+
+    quotes = await fetch_live_quotes(paper_positions) if paper_positions else {}
+
+    enriched: list[dict[str, Any]] = []
+    for t in trades:
+        snap = t.get("snapshot") or {}
+        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
+        paper = paper_by_eval.get(eval_id) if eval_id else None
+        option_ticker = snap.get("option_ticker") if isinstance(snap, dict) else None
+        quote = quotes.get(option_ticker) if option_ticker else None
+        enriched.append(enrich_trade(t, paper, quote))
+
+    # Attention-first sort: near_sl > near_tp > rest (newest tracked first).
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        flag_rank = {"near_sl": 0, "near_tp": 1}.get(row.get("attention_flag") or "", 2)
+        tracked = row.get("tracked_at") or ""
+        # Sort flag ascending, then tracked_at descending (via negation of lex order).
+        return (flag_rank, "".join(chr(255 - ord(c)) for c in tracked[:25]))
+
+    enriched.sort(key=_sort_key)
+
+    return {"trades": enriched, "count": len(enriched)}
+
+
+@router.get("/live/summary")
+async def live_trades_summary() -> dict[str, Any]:
+    """Portfolio header for the Active Trades dashboard."""
+    from app.paper_trading.live_view import fetch_live_quotes
+    from app.real_trades.live_view import compute_summary, enrich_trade
+
+    trades = await RealTradeTable.list_open(limit=500)
+    if not trades:
+        return compute_summary([])
+
+    paper_by_eval: dict[str, Any] = {}
+    paper_positions = []
+    for t in trades:
+        snap = t.get("snapshot") or {}
+        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
+        if not eval_id:
+            continue
+        paper = await PaperPositionTable.get_by_evaluation_id(eval_id)
+        if paper:
+            paper_by_eval[eval_id] = paper
+            paper_positions.append(paper)
+
+    quotes = await fetch_live_quotes(paper_positions) if paper_positions else {}
+
+    enriched: list[dict[str, Any]] = []
+    for t in trades:
+        snap = t.get("snapshot") or {}
+        eval_id = snap.get("evaluation_id") if isinstance(snap, dict) else None
+        paper = paper_by_eval.get(eval_id) if eval_id else None
+        option_ticker = snap.get("option_ticker") if isinstance(snap, dict) else None
+        quote = quotes.get(option_ticker) if option_ticker else None
+        enriched.append(enrich_trade(t, paper, quote))
+
+    return compute_summary(enriched)
 
 
 @router.get("/stats")
