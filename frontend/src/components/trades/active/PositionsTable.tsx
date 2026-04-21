@@ -30,6 +30,8 @@ export default function PositionsTable({ trades, onClose, closingId }: Props) {
                 <Th>Ticker</Th>
                 <Th>Contract</Th>
                 <Th>Scanner</Th>
+                <Th align="right">Entry</Th>
+                <Th align="right">Current</Th>
                 <Th align="right">$ P&L</Th>
                 <Th align="right">%</Th>
                 <Th align="right">DTE</Th>
@@ -135,6 +137,12 @@ function Row({
         ) : (
           <span className="text-oss-muted text-xs">—</span>
         )}
+      </td>
+      <td className="px-3 py-2.5 text-right font-mono text-oss-text-tertiary">
+        ${trade.entry_price.toFixed(2)}
+      </td>
+      <td className="px-3 py-2.5 text-right font-mono text-oss-text-secondary">
+        ${trade.current_price.toFixed(2)}
       </td>
       <td
         className={clsx(
