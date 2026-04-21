@@ -308,45 +308,35 @@ def update_decisions_with_warnings(
     warnings: dict[str, list[str]],
 ) -> dict[str, Decision]:
     """Update Decision records with concentration warnings.
-    
-    Since Decision is frozen, this creates new Decision objects with warnings.
-    
+
+    Uses Pydantic's ``model_copy(update=...)`` so every field on the
+    Decision (including v4.1.0 archetype fields and v5 dual-conviction
+    fields) is preserved. The previous hand-rolled reconstructor silently
+    dropped any field not in its explicit list, wiping v5_scoring_version,
+    hr_conviction, p_conviction, archetype_matched, and every other v5
+    field whenever a concentration warning fired. That was the root
+    cause of CHEAP_OPTIONS never carrying v5 fields in persisted
+    decisions (audit C1) — CHEAP hits concentration warnings near-100%
+    of the time, so its v5 data always got wiped here.
+
     Args:
         decisions: Dict mapping evaluation_id to Decision
         warnings: Dict mapping evaluation_id to list of warnings
-        
+
     Returns:
         Updated dict mapping evaluation_id to Decision with warnings
     """
     updated: dict[str, Decision] = {}
-    
+
     for eval_id, decision in decisions.items():
         eval_warnings = warnings.get(eval_id, [])
-        
+
         if eval_warnings:
-            # Create new Decision with merged warnings
             all_warnings = list(decision.concentration_warnings) + eval_warnings
-            
-            # Decision is frozen, so we need to create a new one
-            updated[eval_id] = Decision(
-                evaluation_id=decision.evaluation_id,
-                verdict=decision.verdict,
-                quality_tier=decision.quality_tier,
-                final_score=decision.final_score,
-                premium_leverage_score=decision.premium_leverage_score,
-                underlying_behavior_score=decision.underlying_behavior_score,
-                setup_quality_score=decision.setup_quality_score,
-                directional_conviction_score=decision.directional_conviction_score,
-                move_potential_score=decision.move_potential_score,
-                trade_structure_score=decision.trade_structure_score,
-                primary_reason_code=decision.primary_reason_code,
-                supporting_reason_codes=decision.supporting_reason_codes,
-                failed_gates=decision.failed_gates,
-                concentration_warnings=all_warnings,
-                policy_version=decision.policy_version,
-                decided_at=decision.decided_at,
+            updated[eval_id] = decision.model_copy(
+                update={"concentration_warnings": all_warnings}
             )
         else:
             updated[eval_id] = decision
-    
+
     return updated
