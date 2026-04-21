@@ -3,12 +3,13 @@
  */
 
 // Enums
-export type ScannerType = 
+export type ScannerType =
   | 'UNUSUAL_VOLUME'
   | 'BREAKOUT'
   | 'BREAKDOWN'
   | 'COMPRESSION_EXPANSION'
   | 'CHEAP_OPTIONS'
+  | 'REVALIDATION'
 
 export type DirectionHint = 'CALL' | 'PUT' | 'NONE'
 
@@ -2039,6 +2040,7 @@ export interface WebhookChannel {
 export interface AlertConfig {
   enabled: boolean
   // v5 eligibility
+  hr_only_mode: boolean           // Pure Sharpshooter: disable the P track entirely
   hr_conviction_min: number       // 0-20
   p_conviction_min: number        // 0-100
   require_hr_archetype: boolean
@@ -2047,7 +2049,8 @@ export interface AlertConfig {
   max_premium?: number | null
   // Regime-independent
   tier_1_bypass: boolean
-  cooldown_minutes: number
+  cooldown_minutes: number          // Per-contract cooldown (minutes)
+  ticker_cooldown_minutes: number   // Per-underlying cooldown (minutes)
   daily_cap: number
   quiet_hours_start: string
   quiet_hours_end: string

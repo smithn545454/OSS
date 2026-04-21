@@ -674,6 +674,31 @@ export default function AlertsConfig() {
           {/* Conviction gates */}
           <Section title="Conviction Gates" icon={<Target className="h-4 w-4" />}>
             <div className="space-y-6">
+              <div className="flex items-center justify-between py-2 rounded-lg bg-oss-bg px-3 border border-oss-border">
+                <div>
+                  <div className="text-sm font-medium text-oss-text">
+                    ⭐ HR-only mode (pure Sharpshooter)
+                  </div>
+                  <div className="text-xs text-oss-muted mt-0.5">
+                    Short-circuit the P track — only alert on HR-driven
+                    grand-slam setups. Best match for a 200%+ MFE thesis.
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateDraft('hr_only_mode', !draft.hr_only_mode)}
+                  className={clsx(
+                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                    draft.hr_only_mode ? 'bg-oss-accent' : 'bg-oss-border',
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                      draft.hr_only_mode ? 'translate-x-6' : 'translate-x-1',
+                    )}
+                  />
+                </button>
+              </div>
               <HrConvictionSlider
                 value={draft.hr_conviction_min ?? 10}
                 onChange={(v) => updateDraft('hr_conviction_min', v)}
@@ -793,6 +818,32 @@ export default function AlertsConfig() {
                   }
                   min={1}
                   max={120}
+                  className="w-20 rounded-lg border border-oss-border bg-oss-bg px-3 py-1.5 text-right font-mono text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <div className="text-sm text-oss-muted">
+                    Cooldown per underlying (minutes)
+                  </div>
+                  <div className="text-xs text-oss-muted mt-0.5">
+                    Collapses multi-strike and multi-expiration duplicates on
+                    the same ticker. Stronger HR conviction within the window
+                    still fires as an upgrade.
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  value={draft.ticker_cooldown_minutes ?? 240}
+                  onChange={(e) =>
+                    updateDraft(
+                      'ticker_cooldown_minutes',
+                      Math.max(0, parseInt(e.target.value) || 0),
+                    )
+                  }
+                  min={0}
+                  max={1440}
                   className="w-20 rounded-lg border border-oss-border bg-oss-bg px-3 py-1.5 text-right font-mono text-sm text-oss-text focus:border-oss-accent focus:outline-none"
                 />
               </div>
