@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Wallet, TrendingUp, TrendingDown, BarChart3, Brain } from 'lucide-react'
+import { Wallet, Brain } from 'lucide-react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import clsx from 'clsx'
 import { useTrades, useTradeStats } from '@/hooks/useApi'
 import TradeCard from '@/components/trades/TradeCard'
 import TradeAnalysisView from '@/components/trades/TradeAnalysisView'
+import ActivePositionsDashboard from '@/components/trades/active/ActivePositionsDashboard'
 
 type Tab = 'open' | 'closed' | 'analysis'
 
@@ -12,8 +13,10 @@ export default function MyTrades() {
   usePageTitle('My Trades')
   const [activeTab, setActiveTab] = useState<Tab>('open')
   const { data: stats } = useTradeStats()
+  // Only CLOSED tab reads the manually-tracked trade log. The OPEN tab is
+  // powered by the Active Positions dashboard (paper-trading positions).
   const { data: tradesData, isLoading } = useTrades({
-    status: activeTab === 'analysis' ? undefined : activeTab.toUpperCase(),
+    status: activeTab === 'closed' ? 'CLOSED' : undefined,
   })
 
   const trades = tradesData?.trades ?? []
@@ -27,29 +30,13 @@ export default function MyTrades() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-oss-text">My Trades</h1>
-          <p className="text-sm text-oss-muted">Manually tracked real trades</p>
+          <p className="text-sm text-oss-muted">
+            {activeTab === 'open'
+              ? 'Active positions across the book'
+              : 'Manually tracked real trades'}
+          </p>
         </div>
       </div>
-
-      {/* Stats Bar */}
-      {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <StatCard label="Open" value={stats.open_count} />
-          <StatCard label="Closed" value={stats.closed_count} />
-          <StatCard
-            label="Win Rate"
-            value={stats.closed_count > 0 ? `${stats.win_rate}%` : '—'}
-            color={stats.win_rate >= 50 ? 'text-oss-approve' : stats.win_rate > 0 ? 'text-oss-watch' : undefined}
-            icon={stats.win_rate >= 50 ? TrendingUp : TrendingDown}
-          />
-          <StatCard
-            label="Avg Return"
-            value={stats.closed_count > 0 ? `${stats.avg_return_pct > 0 ? '+' : ''}${stats.avg_return_pct}%` : '—'}
-            color={stats.avg_return_pct > 0 ? 'text-oss-approve' : stats.avg_return_pct < 0 ? 'text-oss-reject' : undefined}
-            icon={BarChart3}
-          />
-        </div>
-      )}
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-oss-surface p-1">
@@ -71,10 +58,10 @@ export default function MyTrades() {
               </span>
             ) : (
               <>
-                {tab} Trades
-                {stats && (
+                {tab === 'open' ? 'Active' : 'Closed'}
+                {tab === 'closed' && stats && (
                   <span className="ml-1.5 text-xs text-oss-muted">
-                    ({tab === 'open' ? stats.open_count : stats.closed_count})
+                    ({stats.closed_count})
                   </span>
                 )}
               </>
@@ -84,7 +71,9 @@ export default function MyTrades() {
       </div>
 
       {/* Content */}
-      {activeTab === 'analysis' ? (
+      {activeTab === 'open' ? (
+        <ActivePositionsDashboard />
+      ) : activeTab === 'analysis' ? (
         <TradeAnalysisView />
       ) : isLoading ? (
         <div className="space-y-4">
@@ -95,11 +84,7 @@ export default function MyTrades() {
       ) : trades.length === 0 ? (
         <div className="rounded-xl border border-oss-border bg-oss-card p-12 text-center">
           <Wallet className="h-12 w-12 text-oss-muted/30 mx-auto mb-4" />
-          <p className="text-oss-muted">
-            {activeTab === 'open'
-              ? 'No open trades. Track a trade from the Evaluation Detail page.'
-              : 'No closed trades yet.'}
-          </p>
+          <p className="text-oss-muted">No closed trades yet.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -108,30 +93,6 @@ export default function MyTrades() {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  color,
-  icon: Icon,
-}: {
-  label: string
-  value: number | string
-  color?: string
-  icon?: typeof TrendingUp
-}) {
-  return (
-    <div className="rounded-xl border border-oss-border bg-oss-card p-4">
-      <p className="text-xs text-oss-muted mb-1">{label}</p>
-      <div className="flex items-center gap-2">
-        {Icon && <Icon className={clsx('h-4 w-4', color || 'text-oss-muted')} />}
-        <span className={clsx('text-xl font-bold font-mono', color || 'text-oss-text')}>
-          {value}
-        </span>
-      </div>
     </div>
   )
 }

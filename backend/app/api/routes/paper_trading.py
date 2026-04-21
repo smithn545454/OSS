@@ -331,6 +331,71 @@ async def browse_positions(
     }
 
 
+@router.get("/positions/live")
+async def list_live_positions(
+    scanner: Optional[str] = None,
+) -> dict[str, Any]:
+    """Open positions enriched with intraday quotes and dashboard-only fields.
+
+    Powers the Active Positions dashboard on the My Trades page. Each row
+    carries `dollar_pnl_open`, TP/SL progress, and an `attention_flag` of
+    `near_tp` / `near_sl` / null.
+
+    Args:
+        scanner: Optional scanner filter ('UNUSUAL_VOLUME', 'BREAKDOWN', etc.).
+                 Filtering happens after quote refresh so the returned
+                 summary is still whole-portfolio (callers that need a
+                 scanner-scoped total should aggregate client-side).
+    """
+    from app.paper_trading.live_view import enrich_position, fetch_live_quotes
+
+    positions = await PaperPositionTable.list_open()
+
+    # Optionally filter by scanner *source* — match both the normalized
+    # value and the legacy _SCANNER-suffixed value from the UV Lambda.
+    if scanner and scanner.lower() != "all":
+        target = scanner.upper()
+        alt = f"{target}_SCANNER"
+        positions = [
+            p for p in positions
+            if (p.scanner_source or "").upper() in (target, alt)
+        ]
+
+    quotes = await fetch_live_quotes(positions)
+    enriched = [enrich_position(p, quotes.get(p.option_ticker)) for p in positions]
+
+    # Attention-first sort: near_sl > near_tp > everything else (newest first).
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        flag_rank = {"near_sl": 0, "near_tp": 1}.get(row.get("attention_flag") or "", 2)
+        return (flag_rank, row.get("entry_date") or "")
+
+    enriched.sort(key=_sort_key)
+
+    return {
+        "positions": enriched,
+        "count": len(enriched),
+    }
+
+
+@router.get("/positions/live/summary")
+async def live_positions_summary() -> dict[str, Any]:
+    """Portfolio header for the Active Positions dashboard.
+
+    Returns total $ P&L, premium at risk, open count, attention counts,
+    and the most recent quote timestamp across the book.
+    """
+    from app.paper_trading.live_view import (
+        compute_summary,
+        enrich_position,
+        fetch_live_quotes,
+    )
+
+    positions = await PaperPositionTable.list_open()
+    quotes = await fetch_live_quotes(positions)
+    enriched = [enrich_position(p, quotes.get(p.option_ticker)) for p in positions]
+    return compute_summary(enriched)
+
+
 @router.get("/positions/{position_id}")
 async def get_position(position_id: str) -> dict[str, Any]:
     """Get a specific position by ID.
