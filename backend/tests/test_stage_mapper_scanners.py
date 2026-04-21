@@ -13,8 +13,11 @@ from app.core.schemas import PipelineStage, StageEvent
 from app.observability.stage_mapper import StageMapper
 
 
-def _make_stage1_event(scanner_stats: dict) -> StageEvent:
+def _make_stage1_event(scanner_stats: dict, trigger_counts: dict | None = None) -> StageEvent:
     now = datetime.now(timezone.utc).isoformat()
+    md: dict = {"scanner_stats": scanner_stats}
+    if trigger_counts is not None:
+        md["trigger_counts"] = trigger_counts
     return StageEvent(
         run_id="run-1",
         stage=PipelineStage.OPPORTUNITY_DISCOVERY,
@@ -23,7 +26,7 @@ def _make_stage1_event(scanner_stats: dict) -> StageEvent:
         items_in=1000,
         items_out=300,
         items_dropped=700,
-        metadata={"scanner_stats": scanner_stats},
+        metadata=md,
     )
 
 
@@ -75,3 +78,37 @@ def test_stage1_breakdown_counts_preserve_triggered_and_failed() -> None:
     )
     assert breakdown_rule.passed == 14
     assert breakdown_rule.failed == 986
+
+
+def test_stage1_trigger_counts_surfaces_breakdown_when_absent_from_scanner_stats() -> None:
+    """BREAKDOWN ships as a *trigger variant* inside the Breakout scanner,
+    so it never appears in scanner_stats. The new trigger_counts metadata
+    field surfaces it anyway using the largest scanned universe as a
+    proportional baseline for the 'failed' display.
+    """
+    mapper = StageMapper()
+    event = _make_stage1_event(
+        scanner_stats={
+            "BREAKOUT": {"total_scanned": 1000, "triggered": 90},
+            "CHEAP_OPTIONS": {"total_scanned": 1000, "triggered": 280},
+        },
+        trigger_counts={
+            "BREAKOUT": 80,      # Already in scanner_stats — should not duplicate.
+            "BREAKDOWN": 14,     # Not in scanner_stats — should surface.
+            "REVALIDATION": 22,  # Not in scanner_stats — should surface.
+        },
+    )
+    gates = mapper._build_stage1_gates([event])
+    rules_by_name = {r.name: r for r in gates[0].rules}
+
+    assert "Breakdown Scanner" in rules_by_name
+    breakdown = rules_by_name["Breakdown Scanner"]
+    assert breakdown.passed == 14
+    assert breakdown.failed == 986  # total_scanned - triggered
+
+    assert "Re-evaluation" in rules_by_name
+    reval = rules_by_name["Re-evaluation"]
+    assert reval.passed == 22
+
+    # Breakout row must not double-count — scanner_stats wins.
+    assert rules_by_name["Breakout Scanner"].passed == 90

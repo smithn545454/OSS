@@ -233,9 +233,20 @@ class StageMapper:
     # --- Stage 1: Scanner trigger breakdown ---
 
     def _build_stage1_gates(self, events: list[StageEvent]) -> list[DisplayGate]:
-        """Build Stage 1 gates from scanner_stats metadata."""
+        """Build Stage 1 gates from scanner_stats metadata.
+
+        Merges two sources so every scanner that produced triggers shows up
+        as a row:
+        - ``scanner_stats`` keyed by scanner CLASS type (BREAKOUT,
+          CHEAP_OPTIONS, etc.). Carries scanned/triggered counts per class.
+        - ``trigger_counts`` keyed by scanner_type on emitted triggers
+          (BREAKDOWN, REVALIDATION, and anything else a scanner may emit
+          under a different type than its own class). Produced-trigger
+          count only; no scanned count to back it up.
+        """
         # Aggregate scanner stats across all OPPORTUNITY_DISCOVERY events
         scanner_totals: dict[str, dict[str, int]] = {}
+        trigger_totals: dict[str, int] = {}
         for event in events:
             if event.stage != PipelineStage.OPPORTUNITY_DISCOVERY:
                 continue
@@ -246,6 +257,28 @@ class StageMapper:
                     scanner_totals[scanner_name] = {"total_scanned": 0, "triggered": 0}
                 scanner_totals[scanner_name]["total_scanned"] += int(stats.get("total_scanned", 0))
                 scanner_totals[scanner_name]["triggered"] += int(stats.get("triggered", 0))
+            # Produced-trigger counts capture BREAKDOWN / REVALIDATION /
+            # anything a scanner emits under a scanner_type other than its
+            # own class.
+            counts = meta.get("trigger_counts", {})
+            for scanner_name, n in counts.items():
+                trigger_totals[scanner_name] = trigger_totals.get(scanner_name, 0) + int(n or 0)
+
+        # Fold in trigger_counts entries that don't have a scanner_stats row
+        # (e.g. BREAKDOWN, REVALIDATION). Use the largest total_scanned seen
+        # as a baseline for "failed" so the row is proportional to the
+        # universe the scanner saw.
+        max_scanned = max(
+            (s["total_scanned"] for s in scanner_totals.values()),
+            default=0,
+        )
+        for scanner_name, n in trigger_totals.items():
+            if scanner_name in scanner_totals:
+                continue
+            scanner_totals[scanner_name] = {
+                "total_scanned": max_scanned,
+                "triggered": n,
+            }
 
         if not scanner_totals:
             return self._build_default_gates_for_stage(1)
