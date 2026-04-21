@@ -2145,6 +2145,102 @@ class CalibrationReportTable:
         return False
 
 
+class CalibrationRatesTable:
+    """Operations for v5 archetype rate lookups.
+
+    Stores per-archetype HR/P rate estimates computed by the weekly
+    discovery Lambda. Read at decision time so v5 convictions use live
+    Wilson bounds instead of the seed fallbacks the policy was
+    bootstrapped with.
+
+    Reuses the ``calibration-reports`` table. Partition keys:
+    - ``PK=CALIBRATION#RATES``, ``SK=LATEST`` — the single row
+      DecisionStage reads on init. Overwritten on every weekly run.
+    - ``PK=CALIBRATION#RATES``, ``SK=VERSION#{ISO_timestamp}`` — immutable
+      version history; useful for audit / rollback.
+    """
+
+    TABLE = CALIBRATION_REPORTS_TABLE
+    PK = "CALIBRATION#RATES"
+    SK_LATEST = "LATEST"
+
+    @staticmethod
+    async def save_latest(
+        hr_rates: dict[str, dict[str, Any]],
+        p_rates: dict[str, dict[str, Any]],
+        *,
+        window_start: Optional[str] = None,
+        window_end: Optional[str] = None,
+        policy_version: Optional[str] = None,
+    ) -> None:
+        """Write the current rate lookups to ``LATEST``.
+
+        Args:
+            hr_rates: Map of archetype_id -> {point, lower, upper, n_trades}.
+            p_rates: Map of archetype_id -> {win_point, win_lower, win_upper,
+                mean_pnl_pct, n_trades}.
+            window_start / window_end: ISO8601 dates of the source window
+                (last 8 weeks of closed positions, typically).
+            policy_version: Policy active when rates were computed.
+        """
+        db = get_dynamodb()
+        computed_at = datetime.now(timezone.utc).isoformat()
+        item: dict[str, Any] = {
+            "PK": CalibrationRatesTable.PK,
+            "SK": CalibrationRatesTable.SK_LATEST,
+            "hr_rates": hr_rates,
+            "p_rates": p_rates,
+            "computed_at": computed_at,
+            "window_start": window_start,
+            "window_end": window_end,
+            "policy_version": policy_version,
+        }
+        await db.put_item(CalibrationRatesTable.TABLE, item)
+
+    @staticmethod
+    async def save_version(
+        hr_rates: dict[str, dict[str, Any]],
+        p_rates: dict[str, dict[str, Any]],
+        *,
+        window_start: Optional[str] = None,
+        window_end: Optional[str] = None,
+        policy_version: Optional[str] = None,
+    ) -> str:
+        """Append an immutable versioned snapshot keyed by current UTC time.
+
+        Returns the ISO timestamp used as the version suffix.
+        """
+        db = get_dynamodb()
+        computed_at = datetime.now(timezone.utc).isoformat()
+        item: dict[str, Any] = {
+            "PK": CalibrationRatesTable.PK,
+            "SK": f"VERSION#{computed_at}",
+            "hr_rates": hr_rates,
+            "p_rates": p_rates,
+            "computed_at": computed_at,
+            "window_start": window_start,
+            "window_end": window_end,
+            "policy_version": policy_version,
+        }
+        await db.put_item(CalibrationRatesTable.TABLE, item)
+        return computed_at
+
+    @staticmethod
+    async def get_latest() -> Optional[dict[str, Any]]:
+        """Return the LATEST row or None if the weekly job hasn't run yet."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            CalibrationRatesTable.TABLE,
+            CalibrationRatesTable.PK,
+            CalibrationRatesTable.SK_LATEST,
+        )
+        if not item:
+            return None
+        item.pop("PK", None)
+        item.pop("SK", None)
+        return item
+
+
 class SP500TickerTable:
     """Operations for the sp500-tickers table.
 

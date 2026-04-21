@@ -245,6 +245,35 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for weekly v5 archetype rate recomputation.
+        # Runs Monday 07:00 UTC — needs >= 5 business days of closes.
+        # NOTE: This resource is documentation only. Per CLAUDE.md the
+        # backend stack must never be `cdk deploy`ed (it re-uploads an
+        # unpackaged Lambda zip that lacks dependencies). The actual
+        # EventBridge rule is created via AWS CLI during Phase 2 rollout
+        # and lives here so a future legitimate CDK deploy picks it up.
+        self.calibration_weekly_rule = events.Rule(
+            self,
+            "CalibrationWeeklyRule",
+            rule_name=f"{project_name}-{env_name}-calibration-weekly",
+            description="Recompute v5 archetype HR/P rate lookups weekly",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="7",
+                week_day="MON",
+            ),
+            enabled=True,
+        )
+        self.calibration_weekly_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "calibration_weekly",
+                }),
+            )
+        )
+
         # EventBridge rule for daily paper trading position updates
         # Runs once daily at 4:15 PM ET (21:15 UTC) after market close on weekdays
         self.paper_update_rule = events.Rule(

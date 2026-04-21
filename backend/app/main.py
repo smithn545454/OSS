@@ -935,6 +935,48 @@ async def _run_paper_update_worker(
     }
 
 
+async def _run_calibration_weekly(event: dict[str, Any]) -> dict[str, Any]:
+    """Weekly v5 archetype rate recomputation.
+
+    Computes Wilson-bound HR/P rates per active archetype from the last
+    N weeks of closed paper positions and writes them to
+    ``CalibrationRatesTable``. DecisionStage picks them up on its next
+    instantiation, replacing the seed-fallback path.
+
+    Event payload (all optional):
+        discovery_weeks (int, default 8): Sliding window.
+        persist_rates (bool, default True): If False, compute but don't
+            write — useful for dry runs.
+    """
+    from app.calibration.weekly_runner import run_weekly_discovery
+
+    discovery_weeks = int(event.get("discovery_weeks") or 8)
+    persist_rates = bool(event.get("persist_rates", True))
+
+    summary = await run_weekly_discovery(
+        discovery_weeks=discovery_weeks,
+        persist_rates=persist_rates,
+    )
+    logger.info(
+        "calibration_weekly: n_positions=%d hr=%d p=%d persisted=%s",
+        summary.get("n_positions", 0),
+        summary.get("hr_rates_count", 0),
+        summary.get("p_rates_count", 0),
+        summary.get("persisted", False),
+    )
+    # Strip the large per-archetype maps before returning — full payload
+    # stays in logs and DynamoDB.
+    return {
+        "status": "success",
+        "generated_at": summary.get("generated_at"),
+        "n_positions": summary.get("n_positions"),
+        "hr_rates_count": summary.get("hr_rates_count"),
+        "p_rates_count": summary.get("p_rates_count"),
+        "persisted": summary.get("persisted"),
+        "policy_version": summary.get("policy_version"),
+    }
+
+
 async def _run_earnings_refresh() -> dict[str, Any]:
     """Run daily bulk earnings refresh from Finnhub.
 
@@ -1529,6 +1571,11 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             # Daily earnings cache refresh from Finnhub
             logger.info("Received earnings_refresh event from EventBridge")
             return asyncio.run(_run_earnings_refresh())
+
+        elif action == "calibration_weekly":
+            # Weekly v5 archetype rate lookup recomputation
+            logger.info("Received calibration_weekly event from EventBridge")
+            return asyncio.run(_run_calibration_weekly(event))
 
         elif action == "price_history_refresh":
             # Pillar v4: append yesterday's bar to oss-dev-price-history.

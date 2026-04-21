@@ -84,6 +84,78 @@ def _normalize_feature_sets(feature_sets: Any) -> dict[str, Any]:
     return {}
 
 
+def _materialize_rate_lookups(
+    raw: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Convert persisted rate dicts into RateEstimate / PRateEstimate maps.
+
+    Takes the ``{"hr_rates": {...}, "p_rates": {...}}`` payload stored by
+    ``CalibrationRatesTable`` and returns two dicts keyed by archetype_id
+    that ``compute_v5_envelope`` consumes. Archetypes with ``n_trades == 0``
+    are dropped so the archetype rate path falls through to seed fallback
+    cleanly. Returns ``(None, None)`` when no rates are available — the
+    v5 pipeline interprets that as seed-fallback.
+    """
+    if not raw:
+        return None, None
+
+    from decimal import Decimal
+
+    from app.calibration.archetype_rates import RateEstimate
+    from app.v5.p_conviction import PRateEstimate
+
+    def _f(v: Any) -> float:
+        if isinstance(v, Decimal):
+            return float(v)
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _i(v: Any) -> int:
+        if isinstance(v, Decimal):
+            return int(v)
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    hr_raw = raw.get("hr_rates") or {}
+    p_raw = raw.get("p_rates") or {}
+
+    hr_lookup: dict[str, RateEstimate] = {}
+    for aid, row in hr_raw.items():
+        if not isinstance(row, dict):
+            continue
+        n = _i(row.get("n_trades"))
+        if n <= 0:
+            continue
+        hr_lookup[aid] = RateEstimate(
+            point=_f(row.get("point")),
+            lower=_f(row.get("lower")),
+            upper=_f(row.get("upper")),
+            n_effective=n,
+            n_raw=n,
+        )
+
+    p_lookup: dict[str, PRateEstimate] = {}
+    for aid, row in p_raw.items():
+        if not isinstance(row, dict):
+            continue
+        n = _i(row.get("n_trades"))
+        if n <= 0:
+            continue
+        p_lookup[aid] = PRateEstimate(
+            win_point=_f(row.get("win_point")),
+            win_lower=_f(row.get("win_lower")),
+            win_upper=_f(row.get("win_upper")),
+            mean_pnl_pct=_f(row.get("mean_pnl_pct")),
+            n_effective=n,
+        )
+
+    return (hr_lookup or None, p_lookup or None)
+
+
 class DecisionStage:
     """Stage 7: Decision Logic.
     
@@ -106,6 +178,7 @@ class DecisionStage:
         archetypes_config: Optional[ArchetypeConfig] = None,
         anti_archetypes_config: Optional[AntiArchetypeConfig] = None,
         v5_policy: Optional[Any] = None,
+        v5_rate_lookups: Optional[dict[str, Any]] = None,
     ) -> None:
         """Initialize the decision stage.
 
@@ -120,6 +193,12 @@ class DecisionStage:
                 computes a :class:`V5Envelope` per evaluation and
                 threads it into the decision. Shadow-only unless the
                 scanner is in ``v5_policy.v5_active_scanners``.
+            v5_rate_lookups: Pre-loaded rate lookups keyed ``hr_rates`` and
+                ``p_rates`` (each a dict of archetype_id -> raw rate dict
+                as persisted by :class:`CalibrationRatesTable`). Passed
+                here rather than loaded inside the stage so the async
+                DB fetch happens once in the caller, not per invocation.
+                ``None`` preserves the seed-fallback path.
         """
         self._orchestrator = orchestrator or PipelineOrchestrator()
         self._config = decision_config or DecisionConfig()
@@ -132,6 +211,7 @@ class DecisionStage:
         self._archetypes_config = archetypes_config
         self._anti_archetypes_config = anti_archetypes_config
         self._v5_policy = v5_policy
+        self._v5_rate_lookups = v5_rate_lookups
         self._thesis_generator = None  # Lazy init to avoid import if not needed
 
     def _compute_archetype_results(
@@ -242,6 +322,9 @@ class DecisionStage:
 
         feature_sets = _normalize_feature_sets(feature_sets)
         opportunities = _normalize_opportunities(opportunities)
+        hr_rate_lookup, p_rate_lookup = _materialize_rate_lookups(
+            self._v5_rate_lookups
+        )
         envelopes: dict[str, Any] = {}
         for evaluation in evaluations:
             eval_id = evaluation.evaluation_id
@@ -272,9 +355,9 @@ class DecisionStage:
                     ctx,
                     self._v5_policy,
                     pillar_scores=pillar_scores,
-                    hr_rate_lookup=None,   # Seed-fallback; Phase 7+ wires live rates
-                    p_rate_lookup=None,
-                    regime=None,           # Neutral; Phase 7+ wires SPY/VIX
+                    hr_rate_lookup=hr_rate_lookup,
+                    p_rate_lookup=p_rate_lookup,
+                    regime=None,           # Neutral; regime wiring is a separate phase
                 )
                 envelopes[eval_id] = envelope
             except Exception as exc:
@@ -736,6 +819,21 @@ async def run_decision_logic(
     Returns:
         Tuple of (Dict mapping evaluation_id to Decision, List of TradeThesis)
     """
+    # Load v5 calibration rate lookups if v5 is active. Single DB read
+    # per pipeline run — pass None on any failure so v5 falls back to
+    # seed rates rather than crashing the decision stage.
+    v5_rate_lookups: Optional[dict[str, Any]] = None
+    if v5_policy is not None and getattr(v5_policy, "v5_active", False):
+        try:
+            from app.db.tables import CalibrationRatesTable
+            v5_rate_lookups = await CalibrationRatesTable.get_latest()
+        except Exception as exc:
+            logger.warning(
+                "v5 rate lookup fetch failed; falling back to seed rates: %s",
+                exc,
+            )
+            v5_rate_lookups = None
+
     stage = DecisionStage(
         orchestrator=orchestrator,
         decision_config=decision_config,
@@ -745,6 +843,7 @@ async def run_decision_logic(
         archetypes_config=archetypes_config,
         anti_archetypes_config=anti_archetypes_config,
         v5_policy=v5_policy,
+        v5_rate_lookups=v5_rate_lookups,
     )
     return await stage.execute(
         run_id=run_id,
