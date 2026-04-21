@@ -554,6 +554,29 @@ export function usePaperTradingPositions(status?: string) {
   })
 }
 
+// Active Positions dashboard. 5-minute polling aligns with the backend's
+// per-(underlying, expiry) quote cache — faster polling would just return
+// the cached snapshot.
+const LIVE_REFRESH_MS = 5 * 60 * 1000
+
+export function useLivePositions(scanner?: string) {
+  return useQuery({
+    queryKey: ['paper-trading', 'positions', 'live', scanner ?? 'all'] as const,
+    queryFn: () => api.getLivePositions(scanner),
+    refetchInterval: LIVE_REFRESH_MS,
+    staleTime: 60_000,
+  })
+}
+
+export function useLivePositionsSummary() {
+  return useQuery({
+    queryKey: ['paper-trading', 'positions', 'live', 'summary'] as const,
+    queryFn: api.getLivePositionsSummary,
+    refetchInterval: LIVE_REFRESH_MS,
+    staleTime: 60_000,
+  })
+}
+
 export function usePaperTradingMetrics() {
   return useQuery({
     queryKey: ['paper-trading', 'metrics'] as const,

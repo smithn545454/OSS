@@ -49,6 +49,8 @@ import type {
   SummaryMetricsResponse,
   PerformanceBreakdownResponse,
   StockSummary,
+  LivePositionsResponse,
+  LivePositionsSummary,
 } from './types'
 
 // Use VITE_API_URL in production (full backend URL), empty string for development (Vite proxy handles it)
@@ -512,6 +514,21 @@ export async function getPositionsPaginated(params: {
 
 export async function getPaperTradingSummary(): Promise<PaperTradingSummary> {
   return fetchApi<PaperTradingSummary>('/api/paper-trading/summary')
+}
+
+export async function getLivePositions(
+  scanner?: string
+): Promise<LivePositionsResponse> {
+  const qs = new URLSearchParams()
+  if (scanner && scanner !== 'all') qs.set('scanner', scanner)
+  const query = qs.toString()
+  return fetchApi<LivePositionsResponse>(
+    `/api/paper-trading/positions/live${query ? `?${query}` : ''}`
+  )
+}
+
+export async function getLivePositionsSummary(): Promise<LivePositionsSummary> {
+  return fetchApi<LivePositionsSummary>('/api/paper-trading/positions/live/summary')
 }
 
 export async function getPaperTradingPositions(

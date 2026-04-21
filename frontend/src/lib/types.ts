@@ -1363,6 +1363,64 @@ export interface PaperTradingPositionsResponse {
   filter: { status: string } | null
 }
 
+// Active Positions dashboard (My Trades OPEN tab).
+// Lives under /api/paper-trading/positions/live. Fields mirror the backend
+// enrich_position() output; pure-derived fields (dollar_pnl_open,
+// tp_progress_pct, attention_flag) live here and not on PaperPosition.
+export type AttentionFlag = 'near_tp' | 'near_sl' | null
+export type QuoteSource = 'intraday' | 'daily_batch'
+
+export interface LivePosition {
+  position_id: string
+  evaluation_id: string
+  option_ticker: string
+  underlying_ticker: string | null
+  option_type: string | null
+  strike: number | null
+  expiration_date: string | null
+  dte: number | null
+  days_held: number
+  quantity: number
+  entry_price: number
+  entry_date: string
+  current_price: number
+  current_pnl_pct: number
+  dollar_pnl_open: number
+  premium_at_risk: number
+  max_favorable_excursion: number
+  max_adverse_excursion: number
+  scanner_source: string | null
+  scanner_list: string[] | null
+  conviction_score: number | null
+  verdict_at_entry: string
+  quality_tier_at_entry: string | null
+  thesis_tp1_pct: number | null
+  thesis_sl_pct: number | null
+  thesis_time_exit_dte: number | null
+  tp_progress_pct: number | null
+  sl_progress_pct: number | null
+  attention_flag: AttentionFlag
+  last_quote_at: string
+  quote_source: QuoteSource
+}
+
+export interface LivePositionsResponse {
+  positions: LivePosition[]
+  count: number
+}
+
+export interface LivePositionsSummary {
+  open_count: number
+  dollar_pnl_open_total: number
+  premium_at_risk_total: number
+  pnl_pct_weighted: number
+  attention_count: number
+  near_tp_count: number
+  near_sl_count: number
+  last_updated: string | null
+  quote_sources: { intraday: number; daily_batch: number }
+}
+
 export interface PerformanceMetricsData {
   total_positions: number
   open_positions: number
