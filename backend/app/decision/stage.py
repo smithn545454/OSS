@@ -314,7 +314,20 @@ class DecisionStage:
         Phase 5 scope. Phase 7 will add a rolling rate estimator that
         caches Wilson bounds per archetype at Lambda init.
         """
+        logger.info(
+            "v5_envelopes_start: v5_policy_present=%s v5_active=%s eval_count=%d "
+            "rate_lookups_present=%s",
+            self._v5_policy is not None,
+            (getattr(self._v5_policy, "v5_active", None) if self._v5_policy else None),
+            len(evaluations),
+            self._v5_rate_lookups is not None,
+        )
         if self._v5_policy is None or not getattr(self._v5_policy, "v5_active", False):
+            logger.warning(
+                "v5_envelopes_skip: guard tripped v5_policy=%s v5_active=%s",
+                self._v5_policy is not None,
+                (getattr(self._v5_policy, "v5_active", None) if self._v5_policy else None),
+            )
             return {}
 
         from app.pillars.models import ScoringContext
@@ -325,9 +338,13 @@ class DecisionStage:
         hr_rate_lookup, p_rate_lookup = _materialize_rate_lookups(
             self._v5_rate_lookups
         )
+        scanner_counts: dict[str, int] = {}
+        envelope_counts = {"created": 0, "failed": 0}
         envelopes: dict[str, Any] = {}
         for evaluation in evaluations:
             eval_id = evaluation.evaluation_id
+            scanner = getattr(evaluation, "scanner_source", None) or "NONE"
+            scanner_counts[scanner] = scanner_counts.get(scanner, 0) + 1
             try:
                 ctx = ScoringContext.from_evaluation_and_features(
                     evaluation=evaluation,
@@ -360,10 +377,20 @@ class DecisionStage:
                     regime=None,           # Neutral; regime wiring is a separate phase
                 )
                 envelopes[eval_id] = envelope
+                envelope_counts["created"] += 1
             except Exception as exc:
+                envelope_counts["failed"] += 1
                 logger.warning(
-                    "v5 envelope computation failed for %s: %s", eval_id, exc
+                    "v5_envelope_fail: eval_id=%s scanner=%s exc=%r",
+                    eval_id, scanner, exc,
                 )
+        logger.info(
+            "v5_envelopes_done: scanners=%s created=%d failed=%d total_returned=%d",
+            scanner_counts,
+            envelope_counts["created"],
+            envelope_counts["failed"],
+            len(envelopes),
+        )
         return envelopes
 
     async def execute(

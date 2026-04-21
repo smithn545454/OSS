@@ -521,6 +521,21 @@ class DecisionCalculator:
         archetype_map = archetype_results or {}
         envelope_map = v5_envelopes or {}
 
+        # Phase 5a instrumentation: log how many envelopes arrived per scanner
+        # so we can tell whether CHEAP_OPTIONS envelopes go missing before
+        # the calculator vs after.
+        envelope_scanner_counts: dict[str, int] = {}
+        for ev in evaluations:
+            sc = getattr(ev, "scanner_source", None) or "NONE"
+            has = "HAS_ENV" if ev.evaluation_id in envelope_map else "NO_ENV"
+            key = f"{sc}|{has}"
+            envelope_scanner_counts[key] = envelope_scanner_counts.get(key, 0) + 1
+        logger.info(
+            "decisions_batch: eval_count=%d envelope_map_size=%d scanner_env=%s",
+            len(evaluations), len(envelope_map), envelope_scanner_counts,
+        )
+
+        v5_field_counts: dict[str, int] = {}
         for evaluation in evaluations:
             try:
                 eval_id = evaluation.evaluation_id
@@ -546,10 +561,15 @@ class DecisionCalculator:
                     ctx, eval_warnings, v5_policy=v5_policy,
                 )
                 decisions[eval_id] = decision
+                sc = getattr(evaluation, "scanner_source", None) or "NONE"
+                key = f"{sc}|{'v5' if getattr(decision, 'v5_scoring_version', None) else 'novs'}"
+                v5_field_counts[key] = v5_field_counts.get(key, 0) + 1
 
             except Exception as e:
                 logger.error(f"Error computing decision for {evaluation.evaluation_id}: {e}")
                 continue
+
+        logger.info("decisions_batch_done: v5_field_counts=%s", v5_field_counts)
 
         approves = sum(1 for d in decisions.values() if d.verdict == Verdict.APPROVE)
         watches = sum(1 for d in decisions.values() if d.verdict == Verdict.WATCH)
