@@ -346,13 +346,13 @@ export default function UnderlyingStockDetails({ ticker, data: propData }: Under
               {d.pct_from_52w_high != null ? `${fmt(d.pct_from_52w_high, 1)}%` : '—'}
             </span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col gap-1">
             {d.homepage_url && (
               <a
                 href={d.homepage_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors"
+                className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors w-fit"
               >
                 <ExternalLink className="h-3 w-3" />
                 Website
@@ -362,7 +362,7 @@ export default function UnderlyingStockDetails({ ticker, data: propData }: Under
               href={`https://finance.yahoo.com/quote/${ticker}/`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors"
+              className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors w-fit"
             >
               <ExternalLink className="h-3 w-3" />
               Yahoo Finance
