@@ -346,7 +346,7 @@ export default function UnderlyingStockDetails({ ticker, data: propData }: Under
               {d.pct_from_52w_high != null ? `${fmt(d.pct_from_52w_high, 1)}%` : '—'}
             </span>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             {d.homepage_url && (
               <a
                 href={d.homepage_url}
