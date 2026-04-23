@@ -15,12 +15,17 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# The UV worker imports `from utils.buckets import ...` as a sibling package inside
+# its Lambda deployment bundle. Add that directory to sys.path so tests can import it.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambdas", "unusual_volume"))
 
 
 # ============================================================================
@@ -173,6 +178,159 @@ class TestPublisherLambda:
             body = json.loads(result["body"])
             assert "scan_id" in body
             assert body.get("tickers_queued", 0) >= 0
+
+    def _run_publisher_with_time(self, mocked_now: datetime) -> list[dict]:
+        """Run the publisher with datetime.now patched; return published message bodies."""
+        from moto import mock_aws
+
+        with mock_aws():
+            import boto3
+
+            region = "us-east-1"
+            dynamodb = boto3.resource("dynamodb", region_name=region)
+            sns = boto3.client("sns", region_name=region)
+
+            for table_name in ("oss-test-sp500-tickers", "oss-test-scan-runs"):
+                dynamodb.create_table(
+                    TableName=table_name,
+                    KeySchema=[
+                        {"AttributeName": "PK", "KeyType": "HASH"},
+                        {"AttributeName": "SK", "KeyType": "RANGE"},
+                    ],
+                    AttributeDefinitions=[
+                        {"AttributeName": "PK", "AttributeType": "S"},
+                        {"AttributeName": "SK", "AttributeType": "S"},
+                    ],
+                    BillingMode="PAY_PER_REQUEST",
+                )
+
+            ticker_table = dynamodb.Table("oss-test-sp500-tickers")
+            ticker_table.put_item(
+                Item={"PK": "TICKER_LIST", "SK": "AAPL", "ticker": "AAPL", "is_active": True}
+            )
+
+            topic_resp = sns.create_topic(Name="test-topic")
+            os.environ["SNS_TOPIC_ARN"] = topic_resp["TopicArn"]
+
+            import importlib
+            import lambdas.unusual_volume.publisher as pub_module
+            importlib.reload(pub_module)
+
+            pub_module.dynamodb = dynamodb
+            pub_module.sns_client = sns
+            pub_module.sp500_table = dynamodb.Table("oss-test-sp500-tickers")
+            pub_module.scan_runs_table = dynamodb.Table("oss-test-scan-runs")
+
+            published: list[dict] = []
+            real_publish = sns.publish
+
+            def capture_publish(**kwargs):
+                published.append(json.loads(kwargs["Message"]))
+                return real_publish(**kwargs)
+
+            sns.publish = capture_publish  # type: ignore[assignment]
+            pub_module.sns_client = sns
+
+            class _FixedDatetime(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return mocked_now if tz is None else mocked_now.astimezone(tz)
+
+            with patch("lambdas.unusual_volume.publisher.datetime", _FixedDatetime):
+                result = pub_module.lambda_handler({}, None)
+
+            assert result["statusCode"] == 200, result
+            return published
+
+    def test_publisher_sets_record_oi_at_2100_utc(self):
+        """Publisher fires at 21:00 UTC → record_oi=True in every message."""
+        mocked_now = datetime(2026, 4, 23, 21, 0, 0, tzinfo=timezone.utc)
+        messages = self._run_publisher_with_time(mocked_now)
+        assert len(messages) == 1
+        assert messages[0]["record_oi"] is True
+
+    def test_publisher_record_oi_false_midday(self):
+        """Publisher at 15:30 UTC → record_oi=False (not the snapshot slot)."""
+        mocked_now = datetime(2026, 4, 23, 15, 30, 0, tzinfo=timezone.utc)
+        messages = self._run_publisher_with_time(mocked_now)
+        assert len(messages) == 1
+        assert messages[0]["record_oi"] is False
+
+    def test_publisher_record_oi_false_at_2115(self):
+        """Publisher at 21:15 UTC → record_oi=False. Only the 21:00 slot records."""
+        mocked_now = datetime(2026, 4, 23, 21, 15, 0, tzinfo=timezone.utc)
+        messages = self._run_publisher_with_time(mocked_now)
+        assert len(messages) == 1
+        assert messages[0]["record_oi"] is False
+
+
+# ============================================================================
+# Worker OI Gate Tests
+# ============================================================================
+
+
+class TestWorkerOIGate:
+    """Tests that _record_oi_snapshots is gated on the record_oi flag."""
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self):
+        os.environ["DYNAMODB_TABLE_PREFIX"] = "oss-test"
+        os.environ["POLYGON_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:123:secret:fake"
+        yield
+
+    def _invoke_worker(self, record_oi_field: Any) -> MagicMock:
+        """Invoke worker.lambda_handler with a mocked options chain; return the mock for
+        _record_oi_snapshots so the test can inspect whether it was called.
+
+        record_oi_field: what to put in the SQS body. Pass the sentinel "MISSING" to
+        omit the field entirely (simulates pre-deploy in-flight messages).
+        """
+        import importlib
+        import lambdas.unusual_volume.worker as worker_module
+        importlib.reload(worker_module)
+
+        options_chain = [
+            {
+                "details": {
+                    "ticker": "O:AAPL260320C00185000",
+                    "expiration_date": "2026-06-19",
+                    "contract_type": "CALL",
+                    "strike_price": 185,
+                },
+                "day": {"volume": 1000},
+                "open_interest": 500,
+                "last_quote": {"bid": 1.0, "ask": 1.05},
+            }
+        ]
+
+        body: dict[str, Any] = {"scan_id": "test-scan", "ticker": "AAPL"}
+        if record_oi_field != "MISSING":
+            body["record_oi"] = record_oi_field
+
+        sqs_event = {"Records": [{"body": json.dumps(body)}]}
+
+        with patch.object(worker_module, "_fetch_options_chain", return_value=options_chain), \
+             patch.object(worker_module, "_get_previous_close", return_value=180.0), \
+             patch.object(worker_module, "_get_expected_volume", return_value=None), \
+             patch.object(worker_module, "_record_oi_snapshots", return_value=1) as mock_record:
+            worker_module.lambda_handler(sqs_event, None)
+
+        return mock_record
+
+    def test_worker_records_oi_when_flag_true(self):
+        """record_oi=True → _record_oi_snapshots is called once."""
+        mock_record = self._invoke_worker(True)
+        assert mock_record.call_count == 1
+
+    def test_worker_skips_oi_when_flag_false(self):
+        """record_oi=False → _record_oi_snapshots is NOT called."""
+        mock_record = self._invoke_worker(False)
+        assert mock_record.call_count == 0
+
+    def test_worker_skips_oi_when_flag_missing(self):
+        """Legacy/in-flight message without record_oi → default False, no writes."""
+        mock_record = self._invoke_worker("MISSING")
+        assert mock_record.call_count == 0
 
 
 # ============================================================================

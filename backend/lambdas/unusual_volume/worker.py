@@ -102,14 +102,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             body = json.loads(record.get("body", "{}"))
             scan_id = body.get("scan_id", "unknown")
             ticker = body.get("ticker", "")
+            # Default False: in-flight messages from pre-deploy publishers lack the field;
+            # we'd rather miss one day of OI than double-bill during rollout.
+            record_oi = body.get("record_oi", False)
 
             if not ticker:
                 logger.warning(f"Missing ticker in message: {body}")
                 continue
 
-            logger.info(f"Processing ticker: {ticker} (scan: {scan_id})")
+            logger.info(f"Processing ticker: {ticker} (scan: {scan_id}, record_oi={record_oi})")
 
-            result = _process_ticker(scan_id, ticker)
+            result = _process_ticker(scan_id, ticker, record_oi)
             results.append(result)
 
         except Exception as e:
@@ -129,12 +132,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     }
 
 
-def _process_ticker(scan_id: str, ticker: str) -> dict:
+def _process_ticker(scan_id: str, ticker: str, record_oi: bool = False) -> dict:
     """Process a single ticker for unusual volume detection.
 
     Args:
         scan_id: Scan identifier
         ticker: Underlying ticker symbol
+        record_oi: If True, write today's OI snapshots for scannable contracts
 
     Returns:
         Processing result summary
@@ -161,12 +165,17 @@ def _process_ticker(scan_id: str, ticker: str) -> dict:
     as_of_date = date.today().isoformat()
     ttl = int((datetime.now(timezone.utc) + timedelta(hours=TTL_HOURS)).timestamp())
 
-    # Record OI snapshots for all scannable contracts (feeds future baseline computation)
-    try:
-        oi_count = _record_oi_snapshots(options_chain, as_of_date)
-        logger.info(f"{ticker}: recorded {oi_count} OI snapshots")
-    except Exception as e:
-        logger.error(f"{ticker}: failed to record OI snapshots: {e}")
+    # Record OI snapshots for all scannable contracts (feeds future baseline computation).
+    # Gated on record_oi so only 1 of 36 daily runs writes — snapshots are idempotent per
+    # (contract, date) and the 20-day baseline needs just one row per day.
+    if record_oi:
+        try:
+            oi_count = _record_oi_snapshots(options_chain, as_of_date)
+            logger.info(f"{ticker}: recorded {oi_count} OI snapshots")
+        except Exception as e:
+            logger.error(f"{ticker}: failed to record OI snapshots: {e}")
+    else:
+        logger.debug(f"{ticker}: skipping OI snapshot (not the daily snapshot run)")
 
     candidates_found = 0
     contracts_passed_prefilter = 0
