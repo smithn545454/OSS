@@ -900,12 +900,30 @@ async def list_approve_evaluations(
             else:
                 earnings_by_ticker_raw[t] = result
 
-        # Filter out items near earnings
+        # Exclude only contracts whose expiration falls within `earnings_days`
+        # after the earnings date. Options expiring before earnings carry no
+        # earnings exposure; long-dated options where earnings is a minor
+        # fraction of their life are also kept.
+        today = datetime.now(timezone.utc).date()
         kept_items: list[dict[str, Any]] = []
         for item in items:
             ticker = item.get("underlying_ticker", "")
             days_to = earnings_by_ticker_raw.get(ticker)
-            if days_to is not None and days_to <= earnings_days:
+            expiration_str = item.get("expiration_date", "")
+
+            exclude = False
+            if days_to is not None and expiration_str:
+                try:
+                    exp_date = datetime.strptime(
+                        expiration_str[:10], "%Y-%m-%d"
+                    ).date()
+                    dte = (exp_date - today).days
+                    if days_to <= dte <= days_to + earnings_days:
+                        exclude = True
+                except (ValueError, TypeError):
+                    pass
+
+            if exclude:
                 excluded_for_earnings.append({
                     "ticker": ticker,
                     "earningsDate": (
