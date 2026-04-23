@@ -65,6 +65,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         scan_id = _generate_scan_id()
         logger.info(f"Starting scan: {scan_id}")
 
+        # Decide once per run whether workers should write today's OI snapshots.
+        # Snapshots are idempotent per (contract, date) — 1 write/day per contract
+        # is sufficient for the 20-day baseline. Flag only the 21:00 UTC firing
+        # (first slot of hour 21) to avoid redundant writes on the other 35 runs.
+        now = datetime.now(timezone.utc)
+        record_oi = now.hour == 21 and now.minute < 15
+        logger.info(f"record_oi={record_oi} (hour={now.hour}, minute={now.minute})")
+
         # Fetch all active tickers
         tickers = _get_sp500_tickers()
         logger.info(f"Found {len(tickers)} active tickers")
@@ -83,7 +91,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         _create_scan_run(scan_id, len(tickers))
 
         # Publish messages to SNS
-        success_count, error_count = _publish_ticker_messages(scan_id, tickers)
+        success_count, error_count = _publish_ticker_messages(scan_id, tickers, record_oi)
 
         # Update scan run with queue counts
         _update_scan_run_queued(scan_id, success_count, error_count)
@@ -170,12 +178,15 @@ def _create_scan_run(scan_id: str, ticker_count: int) -> None:
     logger.info(f"Created scan run record for {scan_id}")
 
 
-def _publish_ticker_messages(scan_id: str, tickers: list[str]) -> tuple[int, int]:
+def _publish_ticker_messages(
+    scan_id: str, tickers: list[str], record_oi: bool
+) -> tuple[int, int]:
     """Publish SNS messages for each ticker.
 
     Args:
         scan_id: Scan identifier to include in messages
         tickers: List of tickers to publish
+        record_oi: If True, workers will record today's OI snapshots
 
     Returns:
         Tuple of (success_count, error_count)
@@ -192,6 +203,7 @@ def _publish_ticker_messages(scan_id: str, tickers: list[str]) -> tuple[int, int
                 "scan_id": scan_id,
                 "ticker": ticker,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "record_oi": record_oi,
             }
 
             sns_client.publish(

@@ -417,7 +417,7 @@ class TestWorkerHandler:
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
         assert body["records_processed"] == 1
-        mock_proc.assert_called_once_with("s1", "AAPL")
+        mock_proc.assert_called_once_with("s1", "AAPL", False)
 
     def test_handler_skips_missing_ticker(self):
         """Records without ticker are skipped gracefully."""
