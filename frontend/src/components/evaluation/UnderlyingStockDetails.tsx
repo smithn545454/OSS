@@ -346,17 +346,28 @@ export default function UnderlyingStockDetails({ ticker, data: propData }: Under
               {d.pct_from_52w_high != null ? `${fmt(d.pct_from_52w_high, 1)}%` : '—'}
             </span>
           </div>
-          {d.homepage_url && (
+          <div className="flex items-center gap-4">
+            {d.homepage_url && (
+              <a
+                href={d.homepage_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Website
+              </a>
+            )}
             <a
-              href={d.homepage_url}
+              href={`https://finance.yahoo.com/quote/${ticker}/`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs text-oss-muted hover:text-oss-accent transition-colors"
             >
               <ExternalLink className="h-3 w-3" />
-              Website
+              Yahoo Finance
             </a>
-          )}
+          </div>
         </div>
 
         {/* Right: Price Context */}
