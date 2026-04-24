@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Wallet, Brain } from 'lucide-react'
+import { Wallet, Brain, Download } from 'lucide-react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import clsx from 'clsx'
 import { useTrades, useTradeStats } from '@/hooks/useApi'
@@ -8,6 +8,66 @@ import TradeAnalysisView from '@/components/trades/TradeAnalysisView'
 import ActivePositionsDashboard from '@/components/trades/active/ActivePositionsDashboard'
 
 type Tab = 'open' | 'closed' | 'analysis'
+
+const API_BASE = import.meta.env.VITE_API_URL || ''
+
+function isoToday(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function isoDaysAgo(days: number): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function ExportCsvControl() {
+  const [start, setStart] = useState(isoDaysAgo(90))
+  const [end, setEnd] = useState(isoToday())
+
+  const invalid = !start || !end || start > end
+
+  const handleExport = () => {
+    if (invalid) return
+    const url = `${API_BASE}/api/trades/export.csv?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    // Use a hidden anchor click so the browser treats the response as a download
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="date"
+        value={start}
+        onChange={(e) => setStart(e.target.value)}
+        className="rounded-lg border border-oss-border bg-oss-bg px-2 py-1.5 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+        aria-label="Export start date"
+      />
+      <span className="text-xs text-oss-muted">to</span>
+      <input
+        type="date"
+        value={end}
+        onChange={(e) => setEnd(e.target.value)}
+        className="rounded-lg border border-oss-border bg-oss-bg px-2 py-1.5 text-sm text-oss-text focus:border-oss-accent focus:outline-none"
+        aria-label="Export end date"
+      />
+      <button
+        onClick={handleExport}
+        disabled={invalid}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-oss-accent px-3 py-1.5 text-sm font-semibold text-black hover:bg-oss-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        title={invalid ? 'Start must be on or before end' : 'Download trades as CSV'}
+      >
+        <Download className="h-4 w-4" />
+        Export CSV
+      </button>
+    </div>
+  )
+}
 
 export default function MyTrades() {
   usePageTitle('My Trades')
@@ -24,18 +84,21 @@ export default function MyTrades() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-oss-accent/10">
-          <Wallet className="h-5 w-5 text-oss-accent" />
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-oss-accent/10">
+            <Wallet className="h-5 w-5 text-oss-accent" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-oss-text">My Trades</h1>
+            <p className="text-sm text-oss-muted">
+              {activeTab === 'open'
+                ? 'Active positions across the book'
+                : 'Manually tracked real trades'}
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-oss-text">My Trades</h1>
-          <p className="text-sm text-oss-muted">
-            {activeTab === 'open'
-              ? 'Active positions across the book'
-              : 'Manually tracked real trades'}
-          </p>
-        </div>
+        <ExportCsvControl />
       </div>
 
       {/* Tabs */}

@@ -2519,6 +2519,30 @@ class RealTradeTable:
         return await RealTradeTable.list_by_status("CLOSED", limit=limit)
 
     @staticmethod
+    async def list_by_date_range(
+        status: str,
+        start_date: str,
+        end_date: str,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        """List trades in a status partition whose tracked_at falls in [start_date, end_date].
+
+        SK format is `{tracked_at}#{trade_id}` where tracked_at is an ISO-8601
+        timestamp, so lexicographic BETWEEN on SK is equivalent to a date-range
+        filter on tracked_at. The inclusive end bound uses the high tilde
+        sentinel so any trade tracked on end_date (regardless of time) matches.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            RealTradeTable.TABLE,
+            f"TRADE#{status}",
+            sk_condition={"between": [start_date, f"{end_date}~"]},
+            limit=limit,
+            scan_forward=False,
+        )
+        return [RealTradeTable._strip_keys(item) for item in items]
+
+    @staticmethod
     async def list_by_ticker(ticker: str, limit: int = 50) -> list[dict[str, Any]]:
         """List all trades for a ticker via GSI1."""
         db = get_dynamodb()

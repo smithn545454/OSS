@@ -6,10 +6,15 @@ evaluation snapshot at the moment of tracking for later AI analysis.
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 import logging
+import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.helpers.evaluation_snapshot import build_evaluation_snapshot_data
@@ -230,6 +235,174 @@ async def list_trades(
         "trades": trades,
         "count": len(trades),
     }
+
+
+_CSV_COLUMNS = [
+    "trade_id",
+    "entry_date",
+    "entry_time",
+    "ticker",
+    "structure",
+    "direction",
+    "strikes",
+    "dte_at_entry",
+    "entry_credit",
+    "oss_score",
+    "oss_pillars_json",
+    "dq_grade",
+    "rationale",
+    "exit_date",
+    "exit_time",
+    "outcome",
+    "pnl_pct",
+    "pnl_dollars",
+    "post_trade_note",
+]
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _split_iso(ts: Optional[str]) -> tuple[str, str]:
+    """Split an ISO-8601 timestamp into (date, time) strings.
+
+    Accepts the `YYYY-MM-DDTHH:MM:SS[.ffffff][+TZ]` format stored on
+    `tracked_at` and `closed_at`. Returns ("", "") when ts is missing.
+    """
+    if not ts:
+        return "", ""
+    if "T" in ts:
+        date_part, _, time_rest = ts.partition("T")
+        # Strip sub-second precision and timezone for readability
+        time_part = time_rest.split(".")[0].split("+")[0].split("-")[0]
+        return date_part, time_part
+    return ts[:10], ""
+
+
+def _derive_dq_grade(snap: dict[str, Any]) -> str:
+    """Grade data quality at entry based on presence of Greeks + IV.
+
+    A = all of {delta, iv, theta, vega} non-zero
+    B = at least one present and non-zero
+    C = none present or all zero
+    """
+    fields = ["delta", "iv", "theta", "vega"]
+    present = sum(1 for f in fields if float(snap.get(f) or 0) != 0)
+    if present == len(fields):
+        return "A"
+    if present > 0:
+        return "B"
+    return "C"
+
+
+def _pillars_json(snap: dict[str, Any]) -> str:
+    """Serialize every pillar / conviction score on the snapshot as JSON.
+
+    Includes v3 pillars, v4 pillars, and v5 dual-conviction fields. Missing
+    fields are preserved as null so downstream consumers can tell which
+    regime produced the trade.
+    """
+    keys = [
+        # v3
+        "premium_leverage_score",
+        "underlying_behavior_score",
+        "setup_quality_score",
+        # v4
+        "directional_conviction_score",
+        "move_potential_score",
+        "trade_structure_score",
+        # v5 dual-conviction
+        "hr_conviction",
+        "hr_archetype_matched",
+        "hr_archetype_fit",
+        "p_conviction",
+        "p_archetype_matched",
+        "p_archetype_fit",
+        "regime_alignment",
+        "gbm_hr_score",
+        "gbm_p_score",
+        "v5_scoring_version",
+    ]
+    payload = {k: snap.get(k) for k in keys}
+    return json.dumps(payload, separators=(",", ":"), default=str)
+
+
+def _trade_to_csv_row(trade: dict[str, Any]) -> list[Any]:
+    """Project a RealTrade dict into the export's CSV column order."""
+    snap = trade.get("snapshot") or {}
+    if not isinstance(snap, dict):
+        snap = {}
+
+    option_type = str(snap.get("option_type") or "").lower()
+    direction = (
+        "bullish" if option_type == "call"
+        else "bearish" if option_type == "put"
+        else ""
+    )
+    structure = f"long_{option_type}" if option_type else "single_leg_long"
+
+    entry_date, entry_time = _split_iso(trade.get("tracked_at"))
+    exit_date = trade.get("exit_date") or ""
+    _, exit_time = _split_iso(trade.get("closed_at"))
+
+    return [
+        trade.get("trade_id", ""),
+        entry_date,
+        entry_time,
+        snap.get("underlying_ticker", ""),
+        structure,
+        direction,
+        snap.get("strike", ""),
+        snap.get("dte", ""),
+        trade.get("entry_price", ""),
+        snap.get("final_score", ""),
+        _pillars_json(snap),
+        _derive_dq_grade(snap),
+        trade.get("entry_notes") or "",
+        exit_date,
+        exit_time,
+        trade.get("exit_reason") or "",
+        trade.get("realized_pnl_pct", ""),
+        trade.get("realized_pnl_dollars", ""),
+        trade.get("exit_notes") or "",
+    ]
+
+
+@router.get("/export.csv")
+async def export_trades_csv(
+    start: str = Query(..., description="Inclusive start YYYY-MM-DD (on tracked_at)"),
+    end: str = Query(..., description="Inclusive end YYYY-MM-DD (on tracked_at)"),
+) -> StreamingResponse:
+    """Export tracked trades whose entry date falls in [start, end] as CSV.
+
+    Range is inclusive on both ends and applies to `tracked_at` (entry
+    timestamp), not `closed_at`. Trades still open during the window are
+    included with empty exit columns.
+    """
+    if not _DATE_RE.match(start) or not _DATE_RE.match(end):
+        raise HTTPException(
+            status_code=400,
+            detail="start and end must be YYYY-MM-DD",
+        )
+    if start > end:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    open_trades = await RealTradeTable.list_by_date_range("OPEN", start, end, limit=None)
+    closed_trades = await RealTradeTable.list_by_date_range("CLOSED", start, end, limit=None)
+    trades = open_trades + closed_trades
+    trades.sort(key=lambda t: t.get("tracked_at") or "", reverse=True)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_CSV_COLUMNS)
+    for trade in trades:
+        writer.writerow(_trade_to_csv_row(trade))
+
+    filename = f"trades_{start}_{end}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/live")
