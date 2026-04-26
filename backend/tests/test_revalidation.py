@@ -6,7 +6,7 @@ Part 2: API superseded-APPROVE suppression
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from unittest.mock import AsyncMock, patch
 
@@ -119,21 +119,23 @@ class TestForceInclude:
     def test_force_include_from_chain_finds_contract(self):
         """Force-include picks up a contract from the chain that wasn't normally selected."""
         selector = self._make_selector()
+        # Use a date 30 days out so it lands in bucket B (22-45 DTE) regardless of when this runs.
+        exp = (date.today() + timedelta(days=30)).isoformat()
         chain = [
-            _polygon_chain_item("O:TEST260515C00100000", bid=0.80, ask=0.90),
-            _polygon_chain_item("O:TEST260515C00110000", bid=0.50, ask=0.60),
+            _polygon_chain_item("O:TEST_A_C00100000", bid=0.80, ask=0.90, expiration=exp),
+            _polygon_chain_item("O:TEST_A_C00110000", bid=0.50, ask=0.60, expiration=exp),
         ]
 
         forced = selector._force_include_from_chain(
             ticker="TEST",
             underlying_price=100.0,
             chain=chain,
-            force_tickers={"O:TEST260515C00110000"},
-            already_selected={"O:TEST260515C00100000"},
+            force_tickers={"O:TEST_A_C00110000"},
+            already_selected={"O:TEST_A_C00100000"},
         )
 
         assert len(forced) == 1
-        assert forced[0].option_ticker == "O:TEST260515C00110000"
+        assert forced[0].option_ticker == "O:TEST_A_C00110000"
         assert forced[0].mid == pytest.approx(0.55, abs=0.01)
         assert forced[0].dte_bucket == DTEBucket.B
 
@@ -176,10 +178,11 @@ class TestForceInclude:
         """Force-include ignores contracts whose DTE falls outside all bucket ranges."""
         selector = self._make_selector()
         # DTE 3 is below bucket A minimum of 7
+        exp = (date.today() + timedelta(days=3)).isoformat()
         chain = [
             _polygon_chain_item(
-                "O:TEST260405C00100000",
-                expiration="2026-04-05",  # ~3 DTE from today (Apr 2)
+                "O:TEST_NEAR_C00100000",
+                expiration=exp,
             )
         ]
 
@@ -187,7 +190,7 @@ class TestForceInclude:
             ticker="TEST",
             underlying_price=100.0,
             chain=chain,
-            force_tickers={"O:TEST260405C00100000"},
+            force_tickers={"O:TEST_NEAR_C00100000"},
             already_selected=set(),
         )
 
