@@ -1125,77 +1125,6 @@ function DecisionExplanation({ decision }: DecisionExplanationProps) {
 }
 
 // ============================================================================
-// Gate Journey Component (Timeline Visualization)
-// ============================================================================
-
-interface GateJourneyProps {
-  gates: GateResultDetail[]
-}
-
-function GateJourney({ gates }: GateJourneyProps) {
-  // Calculate margin status for each gate
-  const getMarginStatus = (gate: GateResultDetail): 'pass' | 'pass-narrow' | 'fail' => {
-    if (!gate.passed) return 'fail'
-    
-    // Check if passed by narrow margin (within 10%)
-    const threshold = gate.threshold_value
-    const measured = gate.measured_value
-    
-    const op = gate.operator as string
-    if (op === 'gte' || op === '>=') {
-      const margin = (measured - threshold) / threshold
-      return margin < 0.1 ? 'pass-narrow' : 'pass'
-    } else if (op === 'lte' || op === '<=') {
-      const margin = (threshold - measured) / threshold
-      return margin < 0.1 ? 'pass-narrow' : 'pass'
-    }
-    
-    return 'pass'
-  }
-  
-  const enabledGates = gates.filter(g => g.enabled)
-
-  return (
-    <div className="rounded-xl border border-oss-border bg-oss-surface p-4 sm:p-6">
-      <h3 className="text-lg font-medium text-oss-text mb-6">Gate Journey</h3>
-      
-      <div className="gate-journey">
-        {enabledGates.map((gate) => {
-          const status = getMarginStatus(gate)
-          
-          return (
-            <div key={gate.gate_id} className="gate-node">
-              <div className={`gate-node-circle gate-node-circle--${status}`}>
-                {status === 'fail' ? '✗' : '✓'}
-              </div>
-              <span className="gate-node-label">
-                {gate.gate_id.replace(/_/g, ' ')}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-      
-      {/* Legend */}
-      <div className="flex justify-center gap-6 mt-6 pt-4 border-t border-oss-border">
-        <div className="flex items-center gap-2 text-xs text-oss-muted">
-          <span className="w-3 h-3 rounded-full bg-oss-approve" />
-          Pass
-        </div>
-        <div className="flex items-center gap-2 text-xs text-oss-muted">
-          <span className="w-3 h-3 rounded-full bg-oss-watch" />
-          Pass (Narrow)
-        </div>
-        <div className="flex items-center gap-2 text-xs text-oss-muted">
-          <span className="w-3 h-3 rounded-full bg-oss-reject" />
-          Fail
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
 // Hero Section Component
 // ============================================================================
 
@@ -1506,9 +1435,6 @@ export default function EvaluationDetail() {
 
       {/* Paper Tracking */}
       <PaperTrackingPanel position={position} />
-
-      {/* Gate Journey Timeline */}
-      <GateJourney gates={gate_results} />
 
       {/* Gate Results (Detailed) */}
       <GateResultsPanel gates={gate_results} allPassed={summary.all_gates_passed} />
