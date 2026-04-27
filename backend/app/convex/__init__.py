@@ -29,6 +29,14 @@ from app.convex.backtest import (
     run_convex_backtest,
     trading_days,
 )
+from app.convex.historical_providers import (
+    HistoricalFuturePriceHistoryProvider,
+    HistoricalOptionPriceProvider,
+    HistoricalProviderBundle,
+    HistoricalStage2InputsProvider,
+    HistoricalStage3InputsProvider,
+    HistoricalStage4InputsProvider,
+)
 from app.convex.iv_extraction import (
     CompletenessReport,
     ContractRow,
@@ -167,6 +175,13 @@ __all__ = [
     "run_backtest_day",
     "run_convex_backtest",
     "trading_days",
+    # Historical providers (Phase 8 backtest wiring)
+    "HistoricalFuturePriceHistoryProvider",
+    "HistoricalOptionPriceProvider",
+    "HistoricalProviderBundle",
+    "HistoricalStage2InputsProvider",
+    "HistoricalStage3InputsProvider",
+    "HistoricalStage4InputsProvider",
     # IV extraction (Phase 0.5 backfill)
     "ContractRow",
     "IVMetrics",
