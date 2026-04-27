@@ -525,6 +525,82 @@ class DatabaseStack(Stack):
             removal_policy=removal_policy,
         )
 
+        # 19. Convex Mode universe snapshots (monthly refresh)
+        # PK=`UNIVERSE`, SK=`{snapshot_date}` (YYYY-MM-DD).
+        self.convex_universe_snapshots_table = dynamodb.Table(
+            self,
+            "ConvexUniverseSnapshotsTable",
+            table_name=f"{self.table_prefix}-convex-universe-snapshots",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+
+        # 20. Convex Mode per-stage event records (one row per ticker per stage)
+        # PK=`RUN#{run_id}`, SK=`{ticker}#STAGE#{stage}`. TTL retains ~90 days.
+        self.convex_stage_events_table = dynamodb.Table(
+            self,
+            "ConvexStageEventsTable",
+            table_name=f"{self.table_prefix}-convex-stage-events",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+            time_to_live_attribute="ttl",
+        )
+
+        # 21. Catalyst calendar (earnings, FDA PDUFA, macro events for Stage 2A)
+        # PK=`TICKER#{symbol}` or `TICKER#MACRO`, SK=`EVENT#{date}#{type}`.
+        self.catalyst_calendar_table = dynamodb.Table(
+            self,
+            "CatalystCalendarTable",
+            table_name=f"{self.table_prefix}-catalyst-calendar",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+
+        # 22. Convex evaluations (final per-candidate APPROVE records).
+        # PK=`TICKER#{symbol}`, SK=`{generated_at}#{eval_id}`.
+        # GSI1 partitions by tier (`TIER#A|B|C`) → generated_at for the
+        # Opportunities-Convex page tier filter.
+        self.convex_evaluations_table = dynamodb.Table(
+            self,
+            "ConvexEvaluationsTable",
+            table_name=f"{self.table_prefix}-convex-evaluations",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=billing_mode,
+            removal_policy=removal_policy,
+        )
+        self.convex_evaluations_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         # Collect all tables for permissions
         self.all_tables = [
             self.policies_table,
@@ -549,6 +625,10 @@ class DatabaseStack(Stack):
             self.calibration_reports_table,
             self.real_trades_table,
             self.stock_summaries_table,
+            self.convex_universe_snapshots_table,
+            self.convex_stage_events_table,
+            self.catalyst_calendar_table,
+            self.convex_evaluations_table,
         ]
 
         # Outputs

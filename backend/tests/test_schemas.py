@@ -109,7 +109,12 @@ class TestEnumStability:
         }
 
     def test_verdict_members(self):
-        assert set(Verdict) == {Verdict.APPROVE, Verdict.WATCH, Verdict.REJECT}
+        assert set(Verdict) == {
+            Verdict.APPROVE,
+            Verdict.WATCH,
+            Verdict.REJECT,
+            Verdict.CONVEX_APPROVE,
+        }
 
     def test_quality_tier_members(self):
         assert set(QualityTier) == {

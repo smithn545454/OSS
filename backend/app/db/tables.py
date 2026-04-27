@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.schemas import (
+    CatalystCalendarEntry,
+    ConvexEvaluation,
+    ConvexStageEventRecord,
+    ConvexUniverseSnapshot,
     Decision,
     EarningsEvent,
     Evaluation,
@@ -52,6 +56,10 @@ SCAN_STATUS_TABLE = "scan-status"
 SP500_TICKERS_TABLE = "sp500-tickers"
 REAL_TRADES_TABLE = "real-trades"
 STOCK_SUMMARIES_TABLE = "stock-summaries"
+CONVEX_UNIVERSE_SNAPSHOTS_TABLE = "convex-universe-snapshots"
+CONVEX_STAGE_EVENTS_TABLE = "convex-stage-events"
+CATALYST_CALENDAR_TABLE = "catalyst-calendar"
+CONVEX_EVALUATIONS_TABLE = "convex-evaluations"
 
 
 class PolicyTable:
@@ -2729,3 +2737,321 @@ class StockSummaryTable:
             item.pop("SK", None)
             return StockSummary(**item)
         return None
+
+
+class ConvexUniverseSnapshotTable:
+    """Operations for the convex-universe-snapshots table.
+
+    Holds monthly snapshots of the Convex Mode kinetic universe. Each entry
+    captures the eligible ticker set plus per-ticker strength inputs used by
+    downstream tier assignment.
+
+    Schema: PK=`UNIVERSE`, SK=`{snapshot_date}` (YYYY-MM-DD).
+    """
+
+    TABLE = CONVEX_UNIVERSE_SNAPSHOTS_TABLE
+
+    @staticmethod
+    async def put(snapshot: ConvexUniverseSnapshot) -> None:
+        """Store a universe snapshot."""
+        db = get_dynamodb()
+        item = snapshot.to_dynamodb_item()
+        item["PK"] = "UNIVERSE"
+        item["SK"] = snapshot.snapshot_date
+        await db.put_item(ConvexUniverseSnapshotTable.TABLE, item)
+
+    @staticmethod
+    async def get_latest() -> Optional[ConvexUniverseSnapshot]:
+        """Get the most recent universe snapshot."""
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexUniverseSnapshotTable.TABLE,
+            "UNIVERSE",
+            limit=1,
+            scan_forward=False,
+        )
+        if items:
+            item = items[0]
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return ConvexUniverseSnapshot(**item)
+        return None
+
+    @staticmethod
+    async def get_by_date(snapshot_date: str) -> Optional[ConvexUniverseSnapshot]:
+        """Get the universe snapshot for a specific date."""
+        db = get_dynamodb()
+        item = await db.get_item(
+            ConvexUniverseSnapshotTable.TABLE, "UNIVERSE", snapshot_date
+        )
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            return ConvexUniverseSnapshot(**item)
+        return None
+
+
+class ConvexStageEventTable:
+    """Operations for the convex-stage-events table.
+
+    Records per-ticker, per-stage Convex pipeline outcomes for inspection on
+    the Evaluation Detail page and the failed-candidates debug page.
+
+    Schema: PK=`RUN#{run_id}`, SK=`{ticker}#STAGE#{stage}`.
+    """
+
+    TABLE = CONVEX_STAGE_EVENTS_TABLE
+
+    @staticmethod
+    async def put(record: ConvexStageEventRecord) -> None:
+        """Store a stage event."""
+        db = get_dynamodb()
+        item = record.to_dynamodb_item()
+        item["PK"] = f"RUN#{record.run_id}"
+        item["SK"] = f"{record.ticker}#STAGE#{record.stage}"
+        await db.put_item(ConvexStageEventTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(records: list[ConvexStageEventRecord]) -> None:
+        """Store multiple stage events."""
+        db = get_dynamodb()
+        items = []
+        for record in records:
+            item = record.to_dynamodb_item()
+            item["PK"] = f"RUN#{record.run_id}"
+            item["SK"] = f"{record.ticker}#STAGE#{record.stage}"
+            items.append(item)
+        for i in range(0, len(items), 25):
+            batch = items[i : i + 25]
+            await db.batch_write(ConvexStageEventTable.TABLE, batch)
+
+    @staticmethod
+    async def list_by_run(
+        run_id: str, limit: int = 5000
+    ) -> list[ConvexStageEventRecord]:
+        """List all stage events for a Convex pipeline run."""
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexStageEventTable.TABLE,
+            f"RUN#{run_id}",
+            limit=limit,
+        )
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(ConvexStageEventRecord(**item))
+        return records
+
+    @staticmethod
+    async def list_for_ticker(
+        run_id: str, ticker: str
+    ) -> list[ConvexStageEventRecord]:
+        """List the stage events for a single ticker within a run.
+
+        Returns up to four records (one per stage) ordered by stage number.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexStageEventTable.TABLE,
+            f"RUN#{run_id}",
+            sk_prefix=f"{ticker}#STAGE#",
+            limit=10,
+        )
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(ConvexStageEventRecord(**item))
+        records.sort(key=lambda r: r.stage)
+        return records
+
+
+class CatalystCalendarTable:
+    """Operations for the catalyst-calendar table.
+
+    Holds scheduled catalyst events used by Convex Stage 2 (Catalyst Layer):
+    earnings (denormalized from earnings-cache), FDA PDUFA (manual seed v1),
+    macro (FOMC/CPI/NFP), investor days, product launches.
+
+    Schema: PK=`TICKER#{symbol}` (or `MACRO`),
+    SK=`EVENT#{event_date}#{event_type}`.
+    """
+
+    TABLE = CATALYST_CALENDAR_TABLE
+
+    @staticmethod
+    async def put(entry: CatalystCalendarEntry) -> None:
+        """Store a catalyst calendar entry."""
+        db = get_dynamodb()
+        item = entry.to_dynamodb_item()
+        item["PK"] = f"TICKER#{entry.ticker}"
+        item["SK"] = f"EVENT#{entry.event_date}#{entry.event_type}"
+        await db.put_item(CatalystCalendarTable.TABLE, item)
+
+    @staticmethod
+    async def list_for_ticker(
+        ticker: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[CatalystCalendarEntry]:
+        """List upcoming catalyst events for a ticker.
+
+        Args:
+            ticker: Ticker symbol (or "MACRO" for macro events)
+            start_date: Optional inclusive lower bound (YYYY-MM-DD)
+            end_date: Optional inclusive upper bound (YYYY-MM-DD)
+            limit: Max records returned
+        """
+        db = get_dynamodb()
+        sk_condition = None
+        if start_date and end_date:
+            sk_condition = {
+                "between": [f"EVENT#{start_date}", f"EVENT#{end_date}~"]
+            }
+        elif start_date:
+            sk_condition = {"gte": f"EVENT#{start_date}"}
+        elif end_date:
+            sk_condition = {"lte": f"EVENT#{end_date}~"}
+        items = await db.query(
+            CatalystCalendarTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=limit,
+            sk_condition=sk_condition,
+        )
+        records = []
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+            records.append(CatalystCalendarEntry(**item))
+        return records
+
+    @staticmethod
+    async def delete(
+        ticker: str, event_date: str, event_type: str
+    ) -> None:
+        """Delete a catalyst calendar entry."""
+        db = get_dynamodb()
+        await db.delete_item(
+            CatalystCalendarTable.TABLE,
+            f"TICKER#{ticker}",
+            f"EVENT#{event_date}#{event_type}",
+        )
+
+
+class ConvexEvaluationTable:
+    """Operations for the convex-evaluations table.
+
+    Stores final per-candidate Convex Mode CONVEX_APPROVE records. Read by
+    the API routes that drive the Opportunities-Convex page and the
+    Evaluation Detail walkthrough.
+
+    Schema:
+        PK = ``TICKER#{ticker}``
+        SK = ``{generated_at}#{evaluation_id}``  (most recent first when
+             scan_forward=False)
+        GSI1PK = ``TIER#{A|B|C}`` for tier-filtered queries
+        GSI1SK = ``{generated_at}``
+    """
+
+    TABLE = CONVEX_EVALUATIONS_TABLE
+
+    @staticmethod
+    async def put(evaluation: ConvexEvaluation) -> None:
+        """Persist a Convex evaluation."""
+        db = get_dynamodb()
+        item = evaluation.to_dynamodb_item()
+        item["PK"] = f"TICKER#{evaluation.ticker}"
+        item["SK"] = f"{evaluation.generated_at}#{evaluation.evaluation_id}"
+        item["GSI1PK"] = f"TIER#{evaluation.convex_tier}"
+        item["GSI1SK"] = evaluation.generated_at
+        await db.put_item(ConvexEvaluationTable.TABLE, item)
+
+    @staticmethod
+    async def put_batch(evaluations: list[ConvexEvaluation]) -> None:
+        """Persist many evaluations."""
+        db = get_dynamodb()
+        items = []
+        for ev in evaluations:
+            item = ev.to_dynamodb_item()
+            item["PK"] = f"TICKER#{ev.ticker}"
+            item["SK"] = f"{ev.generated_at}#{ev.evaluation_id}"
+            item["GSI1PK"] = f"TIER#{ev.convex_tier}"
+            item["GSI1SK"] = ev.generated_at
+            items.append(item)
+        for i in range(0, len(items), 25):
+            await db.batch_write(ConvexEvaluationTable.TABLE, items[i : i + 25])
+
+    @staticmethod
+    async def get_by_id(
+        ticker: str, evaluation_id: str
+    ) -> Optional[ConvexEvaluation]:
+        """Look up a Convex evaluation by ticker + ID.
+
+        Scans the ticker partition since the SK is composite
+        (``generated_at#evaluation_id``). For low-cardinality tickers
+        this is fine; for more aggressive lookups we'd add a GSI on
+        evaluation_id.
+        """
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexEvaluationTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=200,
+            scan_forward=False,
+        )
+        for item in items:
+            if item.get("evaluation_id") == evaluation_id:
+                for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                    item.pop(k, None)
+                return ConvexEvaluation(**item)
+        return None
+
+    @staticmethod
+    async def list_by_tier(
+        tier: str, limit: int = 50
+    ) -> list[ConvexEvaluation]:
+        """List recent evaluations for a tier (A/B/C), most recent first."""
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexEvaluationTable.TABLE,
+            f"TIER#{tier.upper()}",
+            limit=limit,
+            scan_forward=False,
+            index_name="GSI1",
+        )
+        out = []
+        for item in items:
+            for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(k, None)
+            out.append(ConvexEvaluation(**item))
+        return out
+
+    @staticmethod
+    async def list_recent(limit: int = 50) -> list[ConvexEvaluation]:
+        """List recent evaluations across all tiers (A → B → C combined)."""
+        out: list[ConvexEvaluation] = []
+        for tier in ("A", "B", "C"):
+            out.extend(await ConvexEvaluationTable.list_by_tier(tier, limit=limit))
+        out.sort(key=lambda e: e.generated_at, reverse=True)
+        return out[:limit]
+
+    @staticmethod
+    async def list_by_ticker(
+        ticker: str, limit: int = 20
+    ) -> list[ConvexEvaluation]:
+        """List recent evaluations for a single ticker."""
+        db = get_dynamodb()
+        items = await db.query(
+            ConvexEvaluationTable.TABLE,
+            f"TICKER#{ticker}",
+            limit=limit,
+            scan_forward=False,
+        )
+        out = []
+        for item in items:
+            for k in ("PK", "SK", "GSI1PK", "GSI1SK"):
+                item.pop(k, None)
+            out.append(ConvexEvaluation(**item))
+        return out

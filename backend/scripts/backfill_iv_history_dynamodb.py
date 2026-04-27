@@ -57,6 +57,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_OPTIONAL_COLUMNS = ("iv_30d", "iv_60d", "iv_25d_put", "iv_25d_call")
+
+
+def _table_to_records(
+    table, ticker_filter: Optional[set[str]]
+) -> list[dict]:
+    """Convert a PyArrow IV-history table into records, including new columns
+    when present. Old parquet files that only have ``atm_iv`` still work.
+    """
+    column_names = set(table.schema.names)
+    tickers = table.column("ticker").to_pylist()
+    dates = table.column("date").to_pylist()
+    atm_ivs = table.column("atm_iv").to_pylist()
+
+    optional_lists: dict[str, list] = {}
+    for col in _OPTIONAL_COLUMNS:
+        if col in column_names:
+            optional_lists[col] = table.column(col).to_pylist()
+
+    records: list[dict] = []
+    for i in range(len(tickers)):
+        ticker = tickers[i]
+        if ticker_filter and ticker not in ticker_filter:
+            continue
+        atm_iv = atm_ivs[i]
+        if atm_iv is None or atm_iv <= 0:
+            # ATM IV is the foundational column — skip rows missing it.
+            continue
+        rec = {
+            "ticker": ticker,
+            "date": dates[i],
+            "atm_iv": atm_iv,
+        }
+        for col, values in optional_lists.items():
+            v = values[i]
+            if v is not None and v > 0:
+                rec[col] = v
+        records.append(rec)
+    return records
+
+
 def read_parquet_records(
     input_dir: Optional[Path] = None,
     s3_bucket: Optional[str] = None,
@@ -72,7 +113,10 @@ def read_parquet_records(
         ticker_filter: Optional set of tickers to include
 
     Returns:
-        List of dicts with ticker, date, atm_iv keys
+        List of dicts with ticker, date, atm_iv keys plus optional
+        iv_30d / iv_60d / iv_25d_put / iv_25d_call when those columns
+        are present in the parquet files (Convex Mode multi-tenor +
+        skew backfill).
     """
     import pyarrow.parquet as pq
 
@@ -92,20 +136,7 @@ def read_parquet_records(
                 continue
 
             table = pq.read_table(parquet_file)
-            tickers = table.column("ticker").to_pylist()
-            dates = table.column("date").to_pylist()
-            ivs = table.column("atm_iv").to_pylist()
-
-            for i in range(len(tickers)):
-                ticker = tickers[i]
-                if ticker_filter and ticker not in ticker_filter:
-                    continue
-                if ivs[i] is not None and ivs[i] > 0:
-                    all_records.append({
-                        "ticker": ticker,
-                        "date": dates[i],
-                        "atm_iv": ivs[i],
-                    })
+            all_records.extend(_table_to_records(table, ticker_filter))
 
     elif s3_bucket:
         import boto3
@@ -132,21 +163,7 @@ def read_parquet_records(
                 obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
                 buf = io.BytesIO(obj["Body"].read())
                 table = pq.read_table(buf)
-
-                tickers = table.column("ticker").to_pylist()
-                dates = table.column("date").to_pylist()
-                ivs = table.column("atm_iv").to_pylist()
-
-                for i in range(len(tickers)):
-                    ticker = tickers[i]
-                    if ticker_filter and ticker not in ticker_filter:
-                        continue
-                    if ivs[i] is not None and ivs[i] > 0:
-                        all_records.append({
-                            "ticker": ticker,
-                            "date": dates[i],
-                            "atm_iv": ivs[i],
-                        })
+                all_records.extend(_table_to_records(table, ticker_filter))
             except Exception as e:
                 logger.warning(f"Error reading {s3_key}: {e}")
 
@@ -164,12 +181,17 @@ async def write_to_dynamodb(records: list[dict], dry_run: bool = False) -> int:
         Number of records written
     """
     if dry_run:
-        # Count unique tickers and date range
+        # Count unique tickers, date range, and per-column coverage.
         tickers = set(r["ticker"] for r in records)
         dates = sorted(set(r["date"] for r in records))
         logger.info(f"DRY RUN: Would write {len(records)} records")
         logger.info(f"  Tickers: {len(tickers)}")
         logger.info(f"  Date range: {dates[0]} to {dates[-1]}" if dates else "  No dates")
+        if records:
+            for col in ("atm_iv", "iv_30d", "iv_60d", "iv_25d_put", "iv_25d_call"):
+                count = sum(1 for r in records if r.get(col) is not None)
+                pct = (count / len(records)) * 100
+                logger.info(f"  {col:14s}: {pct:5.1f}%  ({count} / {len(records)})")
         return 0
 
     # Import after path setup
@@ -177,13 +199,18 @@ async def write_to_dynamodb(records: list[dict], dry_run: bool = False) -> int:
     from app.core.schemas import IVHistory
     from app.db.tables import IVHistoryTable
 
-    # Build IVHistory objects
+    # Build IVHistory objects, populating multi-tenor + skew fields when
+    # available in the source parquet (Convex Mode Phase 0.5 backfill).
     iv_records = []
     for r in records:
         iv_records.append(IVHistory(
             ticker=r["ticker"],
             date=r["date"],
             atm_iv=r["atm_iv"],
+            iv_30d=r.get("iv_30d"),
+            iv_60d=r.get("iv_60d"),
+            iv_25d_put=r.get("iv_25d_put"),
+            iv_25d_call=r.get("iv_25d_call"),
         ))
 
     # Write in batches of 500 (put_batch handles 25-item DynamoDB limit internally)
@@ -212,10 +239,21 @@ async def verify_backfill(sample_tickers: list[str]) -> None:
         records = await IVHistoryTable.list_by_ticker(ticker, limit=100)
         if records:
             dates = [r.date for r in records]
+            latest = records[0]
+            extra = []
+            if latest.iv_30d is not None:
+                extra.append(f"iv_30d={latest.iv_30d:.4f}")
+            if latest.iv_60d is not None:
+                extra.append(f"iv_60d={latest.iv_60d:.4f}")
+            if latest.iv_25d_put is not None and latest.iv_25d_call is not None:
+                extra.append(
+                    f"skew={latest.iv_25d_put:.4f}/{latest.iv_25d_call:.4f}"
+                )
+            extras_str = (" " + " ".join(extra)) if extra else ""
             logger.info(
                 f"  {ticker}: {len(records)} days "
                 f"({min(dates)} to {max(dates)}), "
-                f"latest IV={records[0].atm_iv:.4f}"
+                f"latest atm={latest.atm_iv:.4f}{extras_str}"
             )
         else:
             logger.info(f"  {ticker}: No records")

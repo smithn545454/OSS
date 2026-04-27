@@ -25,6 +25,7 @@ from mangum import Mangum
 from app.api.routes import alerts as alerts_routes
 from app.api.routes import backtest as backtest_routes
 from app.api.routes import calibration as calibration_routes
+from app.api.routes import convex as convex_routes
 from app.api.routes import evaluations as evaluations_routes
 from app.api.routes import health as health_routes
 from app.api.routes import llm as llm_routes
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts_routes.router, prefix="/api/alerts", tags=["Alerts"])
     app.include_router(backtest_routes.router, prefix="/api/backtest", tags=["Backtest"])
     app.include_router(real_trades_routes.router, prefix="/api/trades", tags=["Real Trades"])
+    app.include_router(convex_routes.router, prefix="/api/convex", tags=["Convex Mode"])
 
     return app
 
@@ -828,6 +830,89 @@ async def _run_scheduled_scan() -> dict[str, Any]:
         return await _run_coordinator_scan()
     else:
         return await _run_worker_scan()
+
+
+async def _run_convex_universe_refresh() -> dict[str, Any]:
+    """Monthly Convex Mode kinetic-universe construction.
+
+    Triggered by EventBridge on the 1st of each month. Reads the active
+    policy's optionable watchlist, fetches live market metadata via
+    Polygon, runs the Stage 1 gates, and persists a versioned
+    ``ConvexUniverseSnapshot``.
+    """
+    from app.convex.polygon_fetcher import PolygonMetadataFetcher
+    from app.convex.universe_builder import UniverseConstructor
+    from app.core.policy import PolicyTable
+    from app.core.watchlist import WatchlistManager
+    from app.services.polygon import PolygonClient
+
+    logger.info("Convex universe refresh starting")
+    policy = await PolicyTable.get_active()
+    if policy is None:
+        logger.error("No active policy; aborting Convex universe refresh.")
+        return {"status": "error", "error": "no_active_policy"}
+
+    convex_cfg = policy.config.convex
+    if not convex_cfg.enabled:
+        logger.info(
+            "Convex Mode disabled in policy; building universe anyway "
+            "(snapshot is harmless until pipeline activated)."
+        )
+
+    watchlist = await WatchlistManager.from_policy_async(policy.config)
+    tickers = list(watchlist.tickers)
+    logger.info(
+        "Convex universe refresh: %d candidate tickers from watchlist",
+        len(tickers),
+    )
+
+    async with PolygonClient() as polygon:
+        fetcher = PolygonMetadataFetcher(polygon)
+        constructor = UniverseConstructor(convex_cfg, fetcher)
+        snapshot = await constructor.build_snapshot(
+            tickers=tickers, policy_version=policy.version
+        )
+
+    return {
+        "status": "ok",
+        "snapshot_date": snapshot.snapshot_date,
+        "total_count": snapshot.total_count,
+        "sector_distribution": snapshot.sector_distribution,
+    }
+
+
+async def _run_convex_daily_run() -> dict[str, Any]:
+    """Daily Convex Mode pipeline run.
+
+    Triggered by EventBridge at 22:30 UTC weekdays (after the 22:00
+    daily data capture settles). Loads the most recent kinetic-universe
+    snapshot, runs the four-stage pipeline against live data via the
+    production providers, persists per-stage events, and returns a
+    summary suitable for CloudWatch logging.
+    """
+    from app.convex.daily_runner import run_daily_convex_pipeline
+    from app.core.policy import PolicyTable
+    from app.services.polygon import PolygonClient
+
+    logger.info("Convex daily pipeline starting")
+    policy = await PolicyTable.get_active()
+    if policy is None:
+        logger.error("No active policy; aborting Convex daily run.")
+        return {"status": "error", "error": "no_active_policy"}
+
+    convex_cfg = policy.config.convex
+    if not convex_cfg.enabled:
+        logger.info("Convex Mode disabled in policy; daily run is a no-op.")
+        return {"status": "ok", "skipped": True, "reason": "convex_disabled"}
+
+    async with PolygonClient() as polygon:
+        result = await run_daily_convex_pipeline(
+            config=convex_cfg,
+            polygon_client=polygon,
+            policy_version=policy.version,
+        )
+
+    return {"status": "ok", **result.summary_dict()}
 
 
 async def _run_paper_update() -> dict[str, Any]:
@@ -1620,6 +1705,16 @@ def handler(event: dict[str, Any], context: Any) -> Any:
             ticker = event.get("ticker", "")
             logger.info(f"Received stock_summary_worker event (ticker={ticker})")
             return asyncio.run(_run_stock_summary_worker(event))
+
+        elif action == "convex_universe_refresh":
+            # Convex Mode: monthly kinetic-universe construction job.
+            logger.info("Received convex_universe_refresh event")
+            return asyncio.run(_run_convex_universe_refresh())
+
+        elif action == "convex_daily_run":
+            # Convex Mode: daily four-stage pipeline (post EOD data settle).
+            logger.info("Received convex_daily_run event")
+            return asyncio.run(_run_convex_daily_run())
 
         else:
             logger.warning(f"Unknown scheduler action: {action}")

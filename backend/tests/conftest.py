@@ -412,6 +412,9 @@ def moto_dynamodb():
             "calibration-reports",
             "scan-status",
             "paper-snapshots",
+            "convex-universe-snapshots",
+            "convex-stage-events",
+            "catalyst-calendar",
         ]
         for name in simple_tables:
             db.create_table(TableName=f"{table_prefix}-{name}", **pk_sk_schema)
@@ -446,6 +449,15 @@ def moto_dynamodb():
         # Gate results: GSI1
         db.create_table(
             TableName=f"{table_prefix}-gate-results",
+            KeySchema=pk_sk_schema["KeySchema"],
+            AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
+            GlobalSecondaryIndexes=gsi1,
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Convex evaluations: GSI1 (tier-filtered queries)
+        db.create_table(
+            TableName=f"{table_prefix}-convex-evaluations",
             KeySchema=pk_sk_schema["KeySchema"],
             AttributeDefinitions=pk_sk_schema["AttributeDefinitions"] + gsi1_attrs,
             GlobalSecondaryIndexes=gsi1,

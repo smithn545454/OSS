@@ -351,6 +351,60 @@ class BackendStack(Stack):
             )
         )
 
+        # EventBridge rule for Convex Mode kinetic-universe construction.
+        # Runs monthly on the 1st at 02:00 UTC (well outside market hours)
+        # to refresh the eligible universe from price-history + Polygon
+        # ticker reference data. Disabled by default; enabled at cutover.
+        self.convex_universe_refresh_rule = events.Rule(
+            self,
+            "ConvexUniverseRefreshRule",
+            rule_name=f"{project_name}-{env_name}-convex-universe-refresh",
+            description="Monthly Convex Mode kinetic-universe snapshot rebuild",
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="2",
+                day="1",
+                month="*",
+                year="*",
+            ),
+            enabled=False,
+        )
+        self.convex_universe_refresh_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "convex_universe_refresh",
+                }),
+            )
+        )
+
+        # EventBridge rule for daily Convex pipeline run.
+        # Runs weekdays at 22:30 UTC — after the 22:00 daily data-capture
+        # settles and before pre-market alerts. Disabled by default; the
+        # cutover plan flips it on once Phase 8 backtest validation is done.
+        self.convex_daily_rule = events.Rule(
+            self,
+            "ConvexDailyRule",
+            rule_name=f"{project_name}-{env_name}-convex-daily-run",
+            description="Daily Convex Mode four-stage pipeline run",
+            schedule=events.Schedule.cron(
+                minute="30",
+                hour="22",
+                week_day="MON-FRI",
+            ),
+            enabled=False,
+        )
+        self.convex_daily_rule.add_target(
+            targets.LambdaFunction(
+                self.lambda_function,
+                event=events.RuleTargetInput.from_object({
+                    "source": "oss.scheduler",
+                    "action": "convex_daily_run",
+                }),
+            )
+        )
+
         # EventBridge rule for Pillar v4 earnings-history 1-day-move
         # backfill. Runs 60 minutes after the price-history refresh so
         # yesterday's bars are guaranteed present when we compute moves.

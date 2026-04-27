@@ -14,6 +14,9 @@ import TradeDetail from './pages/TradeDetail'
 import AlertsConfig from './pages/AlertsConfig'
 import Backtesting from './pages/Backtesting'
 import Opps from './pages/Opps'
+import ConvexOpportunities from './pages/ConvexOpportunities'
+import ConvexEvaluationDetail from './pages/ConvexEvaluationDetail'
+import ConvexFailedCandidates from './pages/ConvexFailedCandidates'
 import { useIsMobile } from './hooks/useIsMobile'
 import { usePageTitle } from './hooks/usePageTitle'
 
@@ -83,6 +86,19 @@ function App() {
           element={
             <EvaluationErrorBoundary>
               <EvaluationDetail />
+            </EvaluationErrorBoundary>
+          }
+        />
+        <Route path="convex" element={<ConvexOpportunities />} />
+        <Route
+          path="convex/runs/:runId/failed"
+          element={<ConvexFailedCandidates />}
+        />
+        <Route
+          path="convex/:ticker/:evaluationId"
+          element={
+            <EvaluationErrorBoundary>
+              <ConvexEvaluationDetail />
             </EvaluationErrorBoundary>
           }
         />

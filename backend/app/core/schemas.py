@@ -83,6 +83,10 @@ class Verdict(str, Enum):
     APPROVE = "APPROVE"
     WATCH = "WATCH"
     REJECT = "REJECT"
+    # Convex Mode (parallel pipeline). Distinct from APPROVE so existing
+    # consumers that filter on verdict == "APPROVE" stay scoped to the
+    # legacy regime; Convex consumers opt in explicitly.
+    CONVEX_APPROVE = "CONVEX_APPROVE"
 
 
 class QualityTier(str, Enum):
@@ -385,6 +389,41 @@ class GateResult(OSSBaseModel):
 
 
 # ============================================================================
+# Convex Mode Stage Payloads
+# ============================================================================
+
+
+class ConvexStagePayload(OSSBaseModel):
+    """Result of a single Convex Mode stage for one candidate.
+
+    Each stage emits a binary PASS/FAIL gate plus a strength measure and a
+    structured human-readable explanation. Stage-specific fields live in
+    ``criteria`` and ``extras`` to keep this base shape stable across stages.
+    """
+
+    stage: int  # 1, 2, 3, or 4
+    stage_name: str
+    result: Literal["PASS", "FAIL"]
+    summary: str
+    criteria: dict[str, Any] = Field(default_factory=dict)
+    strength_inputs: dict[str, Any] = Field(default_factory=dict)
+    strength: Optional[float] = None  # Aggregate strength for ranking
+    extras: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConvexStagesPayload(OSSBaseModel):
+    """All four Convex stage payloads bundled for persistence on a Decision.
+
+    Stages may be None if the candidate failed at an earlier stage.
+    """
+
+    stage_1: Optional[ConvexStagePayload] = None
+    stage_2: Optional[ConvexStagePayload] = None
+    stage_3: Optional[ConvexStagePayload] = None
+    stage_4: Optional[ConvexStagePayload] = None
+
+
+# ============================================================================
 # Decision (Section 8.5)
 # ============================================================================
 
@@ -482,6 +521,19 @@ class Decision(OSSBaseModel):
     gbm_hr_score: Optional[float] = None      # GBM P(HR200) × 100, 0–100
     gbm_p_score: Optional[float] = None       # GBM P(profit) × 100, 0–100
     v5_scoring_version: Optional[str] = None  # "v5.0.0" when v5 was the writer
+
+    # Convex Mode (parallel pipeline). All None on legacy decisions.
+    # Populated only when verdict == Verdict.CONVEX_APPROVE.
+    convex_tier: Optional[Literal["A", "B", "C"]] = None
+    convex_stages: Optional[ConvexStagesPayload] = None
+    # Geometric mean of stage strengths — within-tier ranking only, never displayed.
+    convex_strength_composite: Optional[float] = None
+    # Smart Money Confirmation: UV directional skew aligns with Stage 3 thesis.
+    # Visibility-only at launch; does not auto-promote tier.
+    smart_money_confirmation: Optional[bool] = None
+    # Per-tier sizing recommendation surfaced on Evaluation Detail.
+    # E.g. "Tier A — 50% of standard sizing".
+    position_sizing_recommendation: Optional[str] = None
 
     def is_v4(self) -> bool:
         """Return True if this decision carries the v4 pillar trio."""
@@ -701,6 +753,7 @@ class PipelineRunCreate(BaseModel):
 class UnusualVolumeConfig(OSSBaseModel):
     """Unusual Volume scanner configuration."""
 
+    enabled: bool = True
     volume_ratio_threshold: float = 2.0
     oi_change_threshold_pct: float = 15.0
 
@@ -708,12 +761,14 @@ class UnusualVolumeConfig(OSSBaseModel):
 class BreakoutConfig(OSSBaseModel):
     """Breakout/Breakdown scanner configuration."""
 
+    enabled: bool = True
     lookback_days: int = 20
 
 
 class CompressionConfig(OSSBaseModel):
     """Compression→Expansion scanner configuration."""
 
+    enabled: bool = True
     atr_period: int = 14
     compression_multiplier: float = 1.10
     break_pct: float = 2.0
@@ -722,6 +777,7 @@ class CompressionConfig(OSSBaseModel):
 class CheapOptionsConfig(OSSBaseModel):
     """Cheap Options scanner configuration."""
 
+    enabled: bool = True
     iv_rv_ratio_max: float = 1.10
     iv_percentile_max: int = 40
     # Directional momentum filter — when enabled, CHEAP_OPTIONS only fires
@@ -1546,6 +1602,74 @@ class ThesisConfig(OSSBaseModel):
     fallback_enabled: bool = True  # Try alternate provider if preferred fails
 
 
+class ConvexConfig(OSSBaseModel):
+    """Convex Mode pipeline configuration.
+
+    Convex Mode is a parallel four-stage gated scanner targeting asymmetric
+    long-premium "exploder" setups. It runs alongside the legacy 8-stage
+    scanner pipeline and emits Decisions with verdict=CONVEX_APPROVE and a
+    convex_tier (A/B/C). All thresholds are config-driven and tunable post
+    cutover. See docs/convex-mode-impact-report.md for context.
+    """
+
+    # Master kill switch. When False the Convex pipeline does not run.
+    enabled: bool = False
+
+    # ---- Stage 1 — Kinetic Universe (monthly refresh) ----
+    universe_min_options_volume: int = 5000
+    universe_min_market_cap: float = 1_000_000_000.0
+    universe_max_atm_spread_pct: float = 5.0
+    universe_min_tail_events_252d: int = 8
+    universe_hv_regime_min: float = 0.7
+    universe_hv_regime_max: float = 1.5
+    universe_max_sector_pct: float = 0.25  # Cap any sector at 25% of universe
+
+    # ---- Stage 2 — Catalyst Layer (daily) ----
+    catalyst_event_window_min_days: int = 5
+    catalyst_event_window_max_days: int = 30
+    catalyst_compression_signals_required: int = 2  # of 5 signals
+    catalyst_compression_bbw_percentile_max: int = 20
+    catalyst_compression_atr_ratio_max: float = 0.75
+    catalyst_compression_range_percentile_max: int = 25
+    catalyst_compression_breakout_proximity_pct: float = 3.0
+    catalyst_compression_volume_ratio_max: float = 0.85
+    catalyst_uv_volume_multiplier: float = 4.0
+    catalyst_uv_oi_growth_pct_5d: float = 50.0
+    catalyst_sympathy_peer_move_threshold_pct: float = 5.0
+    catalyst_sympathy_lookback_days: int = 5
+
+    # ---- Stage 3 — Volatility Mispricing (daily) ----
+    vol_iv_rank_max: int = 40
+    vol_iv_percentile_max: int = 35
+    vol_iv_hv_ratio_max: float = 1.10
+
+    # ---- Stage 4 — Contract Selection (daily) ----
+    contract_delta_min: float = 0.25
+    contract_delta_max: float = 0.35
+    contract_delta_straddle: float = 0.50
+    contract_dte_min: int = 30
+    contract_dte_max: int = 60
+    contract_dte_post_event_buffer: int = 14
+    contract_max_spread_pct: float = 8.0
+    contract_min_open_interest: int = 500
+
+    # ---- Tier thresholds ----
+    tier_a_stage2_strength_min: float = 0.75
+    tier_a_stage3_composite_min: float = 0.70
+    tier_b_stage2_strength_min: float = 0.50
+    tier_b_stage3_composite_min: float = 0.40
+
+    # ---- Position sizing (% of standard OSS sizing) ----
+    sizing_tier_a_pct: float = 0.50
+    sizing_tier_b_pct: float = 0.35
+    sizing_tier_c_pct: float = 0.25
+
+    # ---- Smart Money Confirmation ----
+    # Visibility-only at launch. Set True to allow Convex tier promotion when
+    # UV directional skew aligns with Stage 3 thesis.
+    smart_money_promotes_tier: bool = False
+
+
 class PolicyConfig(OSSBaseModel):
     """Complete policy configuration (Policy v3.0.0)."""
 
@@ -1575,6 +1699,9 @@ class PolicyConfig(OSSBaseModel):
     v5_gbm_enabled: bool = False                           # GBM co-scorer kill switch
     v5_gbm_hr_weight: float = 0.5                          # Cap on GBM HR contribution
     v5_gbm_p_weight: float = 0.7                           # Cap on GBM P contribution
+
+    # Convex Mode (parallel pipeline). Disabled by default; enabled at cutover.
+    convex: ConvexConfig = Field(default_factory=ConvexConfig)
 
 
 class PolicyChangelog(OSSBaseModel):
@@ -1650,17 +1777,25 @@ class FeatureValue(OSSBaseModel):
 class IVHistory(OSSBaseModel):
     """Historical IV data for a ticker.
 
-    Used to calculate IV percentile (252-day rank) for the Cheap Options scanner.
-    Records are stored daily and retained for at least 252 trading days.
+    Used to calculate IV percentile (252-day rank) for the Cheap Options scanner
+    and term-structure / skew metrics for Convex Mode Stage 3 (Volatility
+    Mispricing). Records are stored daily and retained for at least 252 trading
+    days. Multi-tenor and skew fields are populated by the Convex backfill
+    (Phase 0.5); legacy records have only ``atm_iv`` populated.
     """
 
     ticker: str  # Partition key
     date: str  # Sort key (YYYY-MM-DD)
-    atm_iv: float  # ATM IV proxy for that day
+    atm_iv: float  # ATM IV proxy for that day (front-month, ~30 DTE)
     atm_call_iv: Optional[float] = None  # Individual ATM call IV
     atm_put_iv: Optional[float] = None  # Individual ATM put IV
     rv20: Optional[float] = None  # 20-day realized volatility
     iv_rv_ratio: Optional[float] = None  # IV/RV ratio
+    # Convex Mode Stage 3 inputs (Phase 0.5 backfill).
+    iv_30d: Optional[float] = None       # ~30 DTE IV (front-month, explicit)
+    iv_60d: Optional[float] = None       # ~60 DTE IV (term-structure shape)
+    iv_25d_put: Optional[float] = None   # 25-delta put IV (skew positioning)
+    iv_25d_call: Optional[float] = None  # 25-delta call IV (skew positioning)
     recorded_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -1758,6 +1893,155 @@ class OIHistory(OSSBaseModel):
     open_interest: int
     volume: Optional[int] = None
     recorded_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+# ============================================================================
+# Convex Mode — Universe, Stage Events, Catalyst Calendar
+# ============================================================================
+
+
+class ConvexUniverseEntry(OSSBaseModel):
+    """One ticker in a Convex Mode kinetic-universe snapshot.
+
+    Captured monthly by the universe-construction job. Strength inputs are
+    used downstream by tier assignment.
+    """
+
+    ticker: str
+    sector: Optional[str] = None
+    market_cap: Optional[float] = None
+    avg_options_volume_30d: Optional[float] = None
+    avg_atm_spread_pct: Optional[float] = None
+    tail_event_count_252d: int = 0  # Count of |daily move| > 2σ over trailing year
+    hv_regime_ratio: Optional[float] = None  # HV20 / HV60
+    historical_max_30d_move_pct: Optional[float] = None
+
+
+class ConvexUniverseSnapshot(OSSBaseModel):
+    """Monthly snapshot of the Convex Mode kinetic universe.
+
+    Stored in ``oss-dev-convex-universe-snapshots`` with PK=`UNIVERSE`,
+    SK=`{snapshot_date}`. Read by the daily Convex pipeline as the eligible
+    universe for Stages 2-4. Refreshed on the 1st of each month.
+    """
+
+    snapshot_date: str  # YYYY-MM-DD
+    policy_version: str
+    tickers: list[ConvexUniverseEntry]
+    total_count: int
+    sector_distribution: dict[str, int] = Field(default_factory=dict)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class ConvexStageEventRecord(OSSBaseModel):
+    """Per-ticker, per-stage Convex pipeline outcome record.
+
+    Stored in ``oss-dev-convex-stage-events`` with PK=`RUN#{run_id}`,
+    SK=`{ticker}#STAGE#{stage}`. Used by the Evaluation Detail page
+    walkthrough and the failed-candidates debug page (\"why didn't ticker
+    XYZ make it?\"). Distinct from the existing pipeline-level StageEvent
+    table which records aggregate stage telemetry.
+    """
+
+    run_id: str
+    ticker: str
+    stage: int  # 1, 2, 3, or 4
+    payload: ConvexStagePayload
+    recorded_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class CatalystEventType(str, Enum):
+    """Type of catalyst event tracked in the Convex catalyst calendar."""
+
+    EARNINGS = "EARNINGS"
+    FDA_PDUFA = "FDA_PDUFA"
+    INVESTOR_DAY = "INVESTOR_DAY"
+    PRODUCT_LAUNCH = "PRODUCT_LAUNCH"
+    FOMC = "FOMC"
+    CPI = "CPI"
+    NFP = "NFP"
+    OTHER_MACRO = "OTHER_MACRO"
+
+
+class CatalystCalendarEntry(OSSBaseModel):
+    """Scheduled catalyst event for a ticker (or for a macro index).
+
+    Stored in ``oss-dev-catalyst-calendar`` with PK=`TICKER#{symbol}` (or
+    PK=`MACRO`), SK=`EVENT#{event_date}#{event_type}`. Earnings entries are
+    denormalized from ``earnings-cache`` for fast Convex Stage 2 lookup; FDA
+    PDUFA and macro entries are seeded manually for v1 (per impact report).
+    """
+
+    ticker: str  # "MACRO" for non-ticker-specific events
+    event_date: str  # YYYY-MM-DD
+    event_type: CatalystEventType
+    confirmed: bool = False
+    source: Optional[str] = None  # "finnhub", "manual", "biopharmcatalyst", etc.
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_updated: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+# ============================================================================
+# Convex Mode — Final per-candidate evaluation record
+# ============================================================================
+
+
+class ConvexSelectedContract(OSSBaseModel):
+    """The contract Stage 4 selected for a Convex APPROVE.
+
+    Slim shape capturing only the fields the UI needs; mirrors
+    ``ConvexContractCandidate`` but lives here so it can persist without
+    pulling the full ``ConvexContractCandidate`` dataclass into the
+    schema module.
+    """
+
+    option_ticker: str
+    option_type: Literal["CALL", "PUT"]
+    strike: float
+    expiry: str  # YYYY-MM-DD
+    dte: int
+    delta: float
+    bid: float
+    ask: float
+    open_interest: int
+    volume: int
+
+
+class ConvexEvaluation(OSSBaseModel):
+    """One Convex Mode CONVEX_APPROVE recorded for the UI + downstream consumers.
+
+    Stored in ``oss-dev-convex-evaluations`` with PK=`TICKER#{ticker}`,
+    SK=`{generated_at}#{evaluation_id}`. GSI1 partitions by tier
+    (``TIER#A``/``B``/``C``) → ``generated_at`` so the Opportunities-like
+    list page can filter by tier with a single query.
+
+    This is a *Convex-specific* record distinct from the legacy
+    ``Evaluation`` schema (which carries fields like Greeks, moneyness,
+    feasibility ratios that the Convex pipeline doesn't compute). The
+    Decision payload nested here carries the ``CONVEX_APPROVE`` verdict
+    and ``convex_stages`` walkthrough so the Evaluation Detail page can
+    render without consulting the legacy table.
+    """
+
+    evaluation_id: str
+    run_id: str
+    ticker: str
+    direction: str  # "bullish" | "bearish" | "ambiguous"
+    convex_tier: Literal["A", "B", "C"]
+    composite_strength: float
+    smart_money_confirmation: bool
+    selected_call: Optional[ConvexSelectedContract] = None
+    selected_put: Optional[ConvexSelectedContract] = None
+    decision: Decision
+    generated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 

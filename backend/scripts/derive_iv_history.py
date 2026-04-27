@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """Derive IV history from options chain parquet files.
 
-For each date, loads the options parquet and for each ticker finds ATM
-contracts (delta ~0.50, DTE 30-45) to compute daily ATM IV.
+For each date, loads the options parquet and for each ticker emits the
+multi-tenor + 25Δ skew IV metrics consumed by Convex Mode Stage 3
+(Volatility Mispricing). The extraction logic lives in
+``app.convex.iv_extraction`` so it stays pure-function and unit-testable.
+
+Output schema (extended for Convex Mode):
+    - ticker, date
+    - atm_iv             — legacy field (back-compat with old readers)
+    - iv_30d             — front-month tenor (~30 DTE ATM)
+    - iv_60d             — 60-day tenor for term structure
+    - iv_25d_put         — 25-delta put for skew
+    - iv_25d_call        — 25-delta call for skew
 
 Output path:
     {output_dir}/iv-history/date=YYYY-MM-DD/data.parquet
@@ -22,15 +32,24 @@ from __future__ import annotations
 import argparse
 import io
 import logging
-import os
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+# Add backend to path so app.convex.iv_extraction imports cleanly when run
+# as a standalone script.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.convex.iv_extraction import (  # noqa: E402
+    ContractRow,
+    IVMetrics,
+    extract_iv_metrics,
+    summarise_completeness,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,76 +63,68 @@ IV_HISTORY_SCHEMA = pa.schema(
         ("ticker", pa.string()),
         ("date", pa.string()),
         ("atm_iv", pa.float64()),
+        ("iv_30d", pa.float64()),
+        ("iv_60d", pa.float64()),
+        ("iv_25d_put", pa.float64()),
+        ("iv_25d_call", pa.float64()),
     ]
 )
 
 
-def compute_atm_iv_for_date(table: pa.Table, trade_date: str) -> list[dict]:
-    """Extract per-ticker ATM IV from an options parquet table.
-
-    ATM selection: contracts with |delta| between 0.35-0.65, DTE 20-60.
-    Average bid_iv + ask_iv for selected contracts.
-    """
+def _table_to_contract_rows(table: pa.Table) -> list[ContractRow]:
+    """Convert a PyArrow options-chains table into ContractRow objects."""
     tickers = table.column("ticker").to_pylist()
     deltas = table.column("delta").to_pylist()
     bid_ivs = table.column("bid_iv").to_pylist()
     ask_ivs = table.column("ask_iv").to_pylist()
     expiry_dates = table.column("expiry_date").to_pylist()
 
-    # Group by ticker
-    ticker_ivs: dict[str, list[float]] = defaultdict(list)
-
+    rows: list[ContractRow] = []
     for i in range(len(tickers)):
-        ticker = tickers[i]
-        delta = deltas[i] if deltas[i] is not None else 0.0
-        bid_iv = bid_ivs[i] if bid_ivs[i] is not None else 0.0
-        ask_iv = ask_ivs[i] if ask_ivs[i] is not None else 0.0
-
-        # ATM filter: |delta| between 0.35-0.65
-        abs_delta = abs(delta)
-        if abs_delta < 0.35 or abs_delta > 0.65:
-            continue
-
-        # DTE filter: 20-60 days
-        expiry = str(expiry_dates[i]) if expiry_dates[i] else ""
-        if not expiry or expiry <= trade_date:
-            continue
-        # Rough DTE calculation
-        try:
-            from datetime import date as dt
-
-            exp_d = dt.fromisoformat(expiry)
-            td_d = dt.fromisoformat(trade_date)
-            dte = (exp_d - td_d).days
-            if dte < 20 or dte > 60:
-                continue
-        except (ValueError, TypeError):
-            continue
-
-        # Average bid/ask IV
-        mid_iv = (bid_iv + ask_iv) / 2 if (bid_iv + ask_iv) > 0 else bid_iv or ask_iv
-        if mid_iv > 0:
-            ticker_ivs[ticker].append(mid_iv)
-
-    # Compute average IV per ticker
-    results = []
-    for ticker, ivs in ticker_ivs.items():
-        if ivs:
-            avg_iv = sum(ivs) / len(ivs)
-            results.append(
-                {
-                    "ticker": ticker,
-                    "date": trade_date,
-                    "atm_iv": round(avg_iv, 6),
-                }
+        rows.append(
+            ContractRow(
+                ticker=tickers[i],
+                expiry_date=str(expiry_dates[i]) if expiry_dates[i] else "",
+                delta=deltas[i],
+                bid_iv=bid_ivs[i],
+                ask_iv=ask_ivs[i],
             )
+        )
+    return rows
 
-    return results
+
+def compute_iv_metrics_for_date(table: pa.Table, trade_date: str) -> list[IVMetrics]:
+    """Extract per-ticker multi-tenor + skew IV metrics from an options table.
+
+    Delegates to ``app.convex.iv_extraction.extract_iv_metrics`` so the
+    selection logic stays pure-function and unit-testable.
+    """
+    rows = _table_to_contract_rows(table)
+    return extract_iv_metrics(rows, trade_date)
+
+
+def _metrics_to_arrow(metrics: list[IVMetrics]) -> pa.Table:
+    """Convert IVMetrics records to a PyArrow table matching IV_HISTORY_SCHEMA."""
+    return pa.table(
+        {
+            "ticker": pa.array([m.ticker for m in metrics], type=pa.string()),
+            "date": pa.array([m.date for m in metrics], type=pa.string()),
+            "atm_iv": pa.array([m.atm_iv for m in metrics], type=pa.float64()),
+            "iv_30d": pa.array([m.iv_30d for m in metrics], type=pa.float64()),
+            "iv_60d": pa.array([m.iv_60d for m in metrics], type=pa.float64()),
+            "iv_25d_put": pa.array([m.iv_25d_put for m in metrics], type=pa.float64()),
+            "iv_25d_call": pa.array(
+                [m.iv_25d_call for m in metrics], type=pa.float64()
+            ),
+        },
+        schema=IV_HISTORY_SCHEMA,
+    )
 
 
 def process_local(input_dir: Path, output_dir: Optional[Path], dry_run: bool) -> int:
     """Process local parquet files."""
     dates_processed = 0
+    all_metrics: list[IVMetrics] = []
 
     for date_dir in sorted(input_dir.iterdir()):
         if not date_dir.is_dir() or not date_dir.name.startswith("date="):
@@ -125,37 +136,46 @@ def process_local(input_dir: Path, output_dir: Optional[Path], dry_run: bool) ->
             continue
 
         table = pq.ParquetFile(parquet_file).read()
-        records = compute_atm_iv_for_date(table, trade_date)
+        metrics = compute_iv_metrics_for_date(table, trade_date)
 
         if dry_run:
-            logger.info(f"  {trade_date}: {len(records)} tickers with ATM IV")
+            logger.info(f"  {trade_date}: {len(metrics)} tickers with IV metrics")
+            all_metrics.extend(metrics)
             dates_processed += 1
             continue
 
-        if records and output_dir:
+        if metrics and output_dir:
             out_path = output_dir / "iv-history" / f"date={trade_date}" / "data.parquet"
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_table = pa.table(
-                {
-                    "ticker": pa.array([r["ticker"] for r in records], type=pa.string()),
-                    "date": pa.array([r["date"] for r in records], type=pa.string()),
-                    "atm_iv": pa.array([r["atm_iv"] for r in records], type=pa.float64()),
-                },
-                schema=IV_HISTORY_SCHEMA,
-            )
-            pq.write_table(out_table, out_path, compression="snappy")
+            pq.write_table(_metrics_to_arrow(metrics), out_path, compression="snappy")
 
+        all_metrics.extend(metrics)
         dates_processed += 1
         if dates_processed % 50 == 0:
             logger.info(f"  Processed {dates_processed} dates...")
 
+    # Coverage summary so the operator can see column-by-column completeness
+    # before kicking off the DynamoDB backfill.
+    if all_metrics:
+        report = summarise_completeness(all_metrics)
+        coverage = report.coverage_pct()
+        logger.info("Coverage across all processed dates:")
+        for col, pct in coverage.items():
+            logger.info(f"  {col:14s}: {pct:5.1f}%  ({_count(report, col)} / {report.total_rows})")
+
     return dates_processed
+
+
+def _count(report, col: str) -> int:
+    """Look up the count attribute on CompletenessReport for a column name."""
+    return getattr(report, f"rows_with_{col}")
 
 
 def process_s3(bucket: str, dry_run: bool) -> int:
     """Process S3 parquet files with parallel workers."""
-    import boto3
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    import boto3
 
     s3 = boto3.client("s3")
 
@@ -178,26 +198,18 @@ def process_s3(bucket: str, dry_run: bool) -> int:
         obj = thread_s3.get_object(Bucket=bucket, Key=s3_key)
         buf = io.BytesIO(obj["Body"].read())
         table = pq.ParquetFile(buf).read()
-        records = compute_atm_iv_for_date(table, trade_date)
+        metrics = compute_iv_metrics_for_date(table, trade_date)
 
-        if not dry_run and records:
-            out_table = pa.table(
-                {
-                    "ticker": pa.array([r["ticker"] for r in records], type=pa.string()),
-                    "date": pa.array([r["date"] for r in records], type=pa.string()),
-                    "atm_iv": pa.array([r["atm_iv"] for r in records], type=pa.float64()),
-                },
-                schema=IV_HISTORY_SCHEMA,
-            )
+        if not dry_run and metrics:
             out_buf = io.BytesIO()
-            pq.write_table(out_table, out_buf, compression="snappy")
+            pq.write_table(_metrics_to_arrow(metrics), out_buf, compression="snappy")
             thread_s3.put_object(
                 Bucket=bucket,
                 Key=f"iv-history/date={trade_date}/data.parquet",
                 Body=out_buf.getvalue(),
             )
 
-        return trade_date, len(records)
+        return trade_date, len(metrics)
 
     dates_processed = 0
     start = time.time()
@@ -243,7 +255,7 @@ def main():
 
     elapsed = time.time() - overall_start
     logger.info(f"\n{'='*60}")
-    logger.info(f"COMPLETE")
+    logger.info("COMPLETE")
     logger.info(f"{'='*60}")
     logger.info(f"Dates processed: {dates_processed}")
     logger.info(f"Elapsed time:    {elapsed:.1f}s")

@@ -307,11 +307,23 @@ class ScannerOrchestrator:
             # PHASE 2: Fast Scanners (Breakout + Compression)
             # These scanners only need daily bars (already cached)
             # Run them first to identify tickers we can skip in Phase 3
+            #
+            # Each scanner is gated by its policy.scanner.{name}.enabled flag
+            # so paused scanners are skipped without code changes.
             # ================================================================
             logger.info("Phase 2: Running fast scanners (Breakout, Compression)...")
             phase2_start = datetime.now(timezone.utc)
 
-            fast_scanners = [BreakoutScanner(), CompressionScanner()]
+            fast_scanners: list[BaseScanner] = []
+            if policy_config.scanner.breakout.enabled and (
+                self._scanners_enabled is None or "breakout" in self._scanners_enabled
+            ):
+                fast_scanners.append(BreakoutScanner())
+            if policy_config.scanner.compression.enabled and (
+                self._scanners_enabled is None or "compression" in self._scanners_enabled
+            ):
+                fast_scanners.append(CompressionScanner())
+
             phase2_results, phase2_stats, phase2_errors = await self._run_scanner_phase(
                 scanners=fast_scanners,
                 tickers=tickers,
@@ -344,7 +356,11 @@ class ScannerOrchestrator:
             # ================================================================
             remaining_tickers = [t for t in tickers if t not in phase2_triggered]
 
-            if remaining_tickers:
+            cheap_options_enabled = policy_config.scanner.cheap_options.enabled and (
+                self._scanners_enabled is None or "cheap_options" in self._scanners_enabled
+            )
+
+            if remaining_tickers and cheap_options_enabled:
                 logger.info(f"Phase 3: Running options scanners on {len(remaining_tickers)} tickers...")
                 phase3_start = datetime.now(timezone.utc)
 
@@ -366,6 +382,8 @@ class ScannerOrchestrator:
                 logger.info(
                     f"Phase 3 complete: {phase3_triggered} triggered, {phase3_duration}ms"
                 )
+            elif not cheap_options_enabled:
+                logger.info("Phase 3: Skipped (cheap_options scanner disabled by policy)")
             else:
                 logger.info("Phase 3: Skipped (all tickers triggered in Phase 2)")
 
@@ -376,8 +394,11 @@ class ScannerOrchestrator:
             # Only active in backtest mode (data_provider set, no polygon).
             # ================================================================
             uv_enabled = (
-                self._scanners_enabled is None
-                or "unusual_volume" in self._scanners_enabled
+                policy_config.scanner.unusual_volume.enabled
+                and (
+                    self._scanners_enabled is None
+                    or "unusual_volume" in self._scanners_enabled
+                )
             )
             if uv_enabled and data_provider and not polygon:
                 from app.scanners.historical_uv import HistoricalUVScanner
