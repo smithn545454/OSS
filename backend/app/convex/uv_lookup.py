@@ -94,19 +94,26 @@ async def lookup_uv_signal(
 
     try:
         table = boto3.resource("dynamodb", region_name=region).Table(table_name)
-        resp = table.query(
-            IndexName=_INDEX_NAME,
-            KeyConditionExpression=(
+        items: list[dict] = []
+        kwargs: dict = {
+            "IndexName": _INDEX_NAME,
+            "KeyConditionExpression": (
                 "underlying_ticker = :t AND created_at >= :since"
             ),
-            ExpressionAttributeValues={":t": ticker, ":since": cutoff_iso},
-            Limit=500,  # Cap protection — typical ticker has <50 flagged contracts
-        )
+            "ExpressionAttributeValues": {":t": ticker, ":since": cutoff_iso},
+        }
+        # Paginate — hot tickers (NVDA, TSLA) can have thousands of UV
+        # detections per 24h across the scanner's 15-min cadence.
+        while True:
+            resp = table.query(**kwargs)
+            items.extend(resp.get("Items", []))
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key or len(items) >= 5000:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
     except Exception as e:
         logger.warning("UV GSI query failed for %s: %s", ticker, e)
         return None
-
-    items = resp.get("Items", [])
     detection_count = len(items)
     if detection_count == 0:
         return UVSignal(
