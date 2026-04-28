@@ -124,6 +124,19 @@ class UnusualVolumeStack(Stack):
                 name="created_at", type=dynamodb.AttributeType.STRING
             ),
         )
+        # Ticker-indexed lookup so Convex Stage 4 can ask "any UV detection
+        # for ticker X today?" without scanning the SCAN_ID-keyed primary
+        # index. Worker already writes ``underlying_ticker`` + ``created_at``
+        # on every row.
+        self.candidates_table.add_global_secondary_index(
+            index_name="underlying-ticker-index",
+            partition_key=dynamodb.Attribute(
+                name="underlying_ticker", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="created_at", type=dynamodb.AttributeType.STRING
+            ),
+        )
 
         # 4. Scan Runs table
         self.scan_runs_table = dynamodb.Table(
