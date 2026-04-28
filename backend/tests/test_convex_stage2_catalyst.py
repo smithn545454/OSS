@@ -439,12 +439,23 @@ class TestEvaluateStage2:
         assert payload.extras["selected_catalyst_type"] == "date_known"
         assert payload.strength == pytest.approx(1.0)
 
-    def test_uv_only_passes_when_only_signal(self):
+    def test_uv_alone_no_longer_admits_stage2_pass(self):
+        """UV is evidence, not a catalyst — it cannot admit a Stage 2 PASS
+        on its own. UV detection is preserved as telemetry for Stage 4."""
+        # Use a noisy close series that won't trigger compression on its own.
+        rng = random.Random(31)
+        closes = [100.0]
+        for _ in range(260):
+            closes.append(closes[-1] * math.exp(rng.gauss(0, 0.04)))
         inputs = self._stage2_inputs(
+            closes=closes,
             today_options_volume=500,
-            avg_options_volume_30d=100,  # 5× — passes 4× threshold
+            avg_options_volume_30d=100,  # 5× — UV detector triggers
         )
         payload, detections = evaluate_stage2(inputs, "2026-04-26", self.cfg)
-        assert payload.result == "PASS"
-        assert payload.extras["selected_catalyst_type"] == "unusual_volume"
+        # No catalyst signal (no compression / date-known / sympathy) — Stage 2 FAILS
+        # despite UV firing.
+        assert payload.result == "FAIL"
+        # UV preserved as telemetry on the payload + detection bag.
         assert detections["unusual_volume"].detected is True
+        assert payload.criteria["unusual_volume_telemetry"]["detected"] is True

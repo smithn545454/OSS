@@ -470,10 +470,23 @@ def evaluate_stage2(
     today_iso: str,
     config: ConvexConfig,
 ) -> tuple[ConvexStagePayload, dict[str, object]]:
-    """Run all four detectors and return a Stage 2 payload + raw detections.
+    """Run catalyst detectors and return a Stage 2 payload + raw detections.
+
+    Stage 2 fires on three CATALYST signals — the reasons something might
+    explode in the near future:
+        - date_known: a scheduled event (earnings, FDA, FOMC) ahead
+        - compression: coiled-spring price pattern
+        - sympathy: a sector peer just reacted with a meaningful move
+
+    Unusual volume is NOT a Stage 2 catalyst — UV is *evidence* of smart
+    money positioning, not a reason a trade is convex. Convex moved UV
+    detection to Stage 4 as a confirmation flag (see
+    ``smart_money_confirmation``). UV alone admitting a trade was the
+    historic source of false-positive momentum-chasing entries — the
+    pipeline now requires a real catalyst, with UV as a tiebreaker.
 
     The detections dict is returned alongside the payload so Stage 4 can
-    consult UV directional skew when flagging Smart Money Confirmation.
+    consult catalyst context when picking contracts.
     """
     date_known = detect_date_known_catalyst(
         inputs.calendar_entries, today_iso, config
@@ -486,33 +499,35 @@ def evaluate_stage2(
         inputs.nearest_significant_level_pct,
         config,
     )
-    uv = detect_unusual_volume(
+    sympathy = detect_sympathy(
+        inputs.sector, inputs.ticker, inputs.peer_reactions, config
+    )
+
+    # UV is computed here only for telemetry / debug visibility. It does
+    # NOT contribute to Stage 2 PASS/FAIL or the strength composite.
+    uv_telemetry = detect_unusual_volume(
         inputs.today_total_options_volume,
         inputs.avg_options_volume_30d,
         inputs.today_call_options_volume,
         inputs.today_put_options_volume,
         config,
     )
-    sympathy = detect_sympathy(
-        inputs.sector, inputs.ticker, inputs.peer_reactions, config
-    )
 
     detected_any = any(
-        (date_known.detected, compression.detected, uv.detected, sympathy.detected)
+        (date_known.detected, compression.detected, sympathy.detected)
     )
 
     selected_strength = max(
         date_known.strength,
         compression.strength,
-        uv.strength,
         sympathy.strength,
     )
     selected_type = _pick_strongest_type(
-        date_known, compression, uv, sympathy
+        date_known, compression, _stub_uv(), sympathy
     )
 
     summary = _build_summary(
-        inputs.ticker, detected_any, date_known, compression, uv, sympathy
+        inputs.ticker, detected_any, date_known, compression, _stub_uv(), sympathy
     )
 
     payload = ConvexStagePayload(
@@ -523,8 +538,10 @@ def evaluate_stage2(
         criteria={
             "date_known": _date_known_dict(date_known),
             "state_based": _compression_dict(compression),
-            "unusual_volume": _uv_dict(uv),
             "sympathy": _sympathy_dict(sympathy),
+            # UV preserved as telemetry — Stage 4 uses live chain skew
+            # directly rather than this Stage 2-time snapshot.
+            "unusual_volume_telemetry": _uv_dict(uv_telemetry),
         },
         strength=selected_strength if detected_any else 0.0,
         extras={
@@ -535,10 +552,19 @@ def evaluate_stage2(
     detections = {
         "date_known": date_known,
         "compression": compression,
-        "unusual_volume": uv,
         "sympathy": sympathy,
+        # uv_telemetry exposed for Stage 4 (informational only)
+        "unusual_volume": uv_telemetry,
     }
     return payload, detections
+
+
+def _stub_uv() -> "UVDetection":
+    """Return a non-detected UVDetection for shared helpers that still
+    expect the original 4-detector tuple shape (summary builder, type
+    picker). Stage 2 PASS no longer depends on UV — this stub keeps the
+    helpers simple without restructuring them."""
+    return UVDetection(detected=False, magnitude=0.0, directional_skew=None, strength=0.0)
 
 
 def _pick_strongest_type(

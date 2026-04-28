@@ -88,6 +88,7 @@ from app.convex.stage3_volatility import (
 )
 from app.convex.stage4_contract import (
     ConvexContractCandidate,
+    RecommendedContract,
     RejectedAlternative,
     Stage4Inputs,
     Stage4Result,
@@ -151,6 +152,7 @@ __all__ = [
     "infer_direction",
     # Stage 4
     "ConvexContractCandidate",
+    "RecommendedContract",
     "RejectedAlternative",
     "Stage4Inputs",
     "Stage4Result",

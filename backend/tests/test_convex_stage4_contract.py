@@ -325,3 +325,88 @@ class TestEvaluateStage4Straddle:
         ]
         result = evaluate_stage4(self._straddle_inputs(contracts), self.cfg)
         assert result.payload.result == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# Contract menu (Phase post-cutover refinement)
+# ---------------------------------------------------------------------------
+
+
+class TestContractMenu:
+    """The Stage 4 contract menu surfaces 1-3 recommended alternatives."""
+
+    cfg = ConvexConfig(enabled=True)
+
+    def _bullish_inputs(
+        self, contracts: list[ConvexContractCandidate]
+    ) -> Stage4Inputs:
+        return Stage4Inputs(
+            ticker="NVDA",
+            underlying_price=140.0,
+            direction="bullish",
+            catalyst_type="state_based",
+            catalyst_date_iso=None,
+            measured_move_pct=10.0,
+            historical_event_move_pct=None,
+            available_contracts=contracts,
+            today_iso="2026-04-28",
+        )
+
+    def test_menu_includes_primary(self):
+        contracts = [
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+        ]
+        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        assert result.payload.result == "PASS"
+        assert len(result.contract_menu) >= 1
+        assert result.contract_menu[0].label == "primary"
+        assert result.selected_call.strike == result.contract_menu[0].contract.strike
+
+    def test_menu_adds_stretch_when_lower_delta_strike_available(self):
+        # Primary at 0.30Δ + a 0.20Δ stretch (further OTM).
+        contracts = [
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-06-26"),
+        ]
+        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        assert result.payload.result == "PASS"
+        labels = [rc.label for rc in result.contract_menu]
+        assert "primary" in labels
+        assert "stretch" in labels
+        stretch = next(rc for rc in result.contract_menu if rc.label == "stretch")
+        assert abs(stretch.contract.delta) < abs(result.selected_call.delta)
+
+    def test_menu_adds_defensive_when_longer_dte_available(self):
+        # Primary at 42 DTE + a 70 DTE same-strike defensive variant.
+        contracts = [
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26", dte=42),
+            _contract(strike=145, delta=0.32, option_type="CALL", expiry="2026-07-24", dte=70),
+        ]
+        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        assert result.payload.result == "PASS"
+        labels = [rc.label for rc in result.contract_menu]
+        assert "defensive" in labels
+        defensive = next(rc for rc in result.contract_menu if rc.label == "defensive")
+        assert defensive.contract.dte > result.selected_call.dte
+
+    def test_menu_skips_slot_when_no_qualifying_contract(self):
+        # Only the primary qualifies — no stretch, no defensive variants.
+        contracts = [
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+        ]
+        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        assert len(result.contract_menu) == 1
+        assert result.contract_menu[0].label == "primary"
+
+    def test_payload_criteria_includes_menu(self):
+        contracts = [
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-06-26"),
+        ]
+        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        menu_in_criteria = result.payload.criteria.get("contract_menu", [])
+        assert len(menu_in_criteria) >= 1
+        primary_entry = menu_in_criteria[0]
+        assert primary_entry["label"] == "primary"
+        assert "rationale" in primary_entry
+        assert "contract" in primary_entry
