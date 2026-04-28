@@ -183,8 +183,14 @@ def assess_term_structure(
                 shape=shape,
                 note="Acceptable for date-known catalyst.",
             )
-        # Heavy backwardation — check magnitude if reference provided.
+        # Heavy backwardation — check magnitude. When ticker-specific
+        # ``historical_pre_event_backwardation`` is missing (Phase 8+
+        # backfill pending), fall back to a 1.10 default reference: a
+        # typical pre-earnings front-vs-60d ratio. This keeps the gate
+        # functional rather than always-pass.
         ref = historical_pre_event_backwardation
+        if ref is None or ref <= 0:
+            ref = 1.10
         if ref is not None and ref > 0:
             current_backwardation = front_month_iv / sixty_day_iv
             if current_backwardation > 2 * ref:
@@ -236,12 +242,15 @@ class SkewAssessment:
 
 
 def _classify_skew(
-    put_iv: float, call_iv: float, balanced_threshold: float = 0.02
+    put_iv: float, call_iv: float, balanced_threshold: float = 0.05
 ) -> str:
     """Classify 25Δ put vs call skew shape.
 
     ``balanced_threshold`` is the absolute fractional difference below
-    which we treat the skew as balanced (default ±2%).
+    which we treat the skew as balanced (default ±5%). Bumped from 2% in
+    response to live observation that microstructure noise alone moves
+    25Δ skew 2-3% intraday — at 2% the gate misclassifies noise as real
+    positioning.
     """
     if put_iv <= 0 or call_iv <= 0:
         return "unknown"

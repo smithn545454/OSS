@@ -544,9 +544,10 @@ class TestPipelineStage2:
         assert "no Stage 4 inputs provider" in c.stages.stage_4.summary
 
     @pytest.mark.asyncio
-    async def test_uv_detection_carried_to_candidate(self):
-        # Inputs trigger UV detection; pipeline should preserve the
-        # detection on the candidate so Stage 4 can flag Smart Money.
+    async def test_uv_alone_no_longer_admits_stage2_pass(self):
+        """UV is evidence, not a catalyst — must combine with compression
+        / date-known / sympathy to admit a Stage 2 PASS. UV-only inputs
+        FAIL Stage 2 even though UV detector fires."""
         inputs = _make_stage2_inputs("NVDA", with_earnings=False)
         # Inject UV: 6× threshold, call-heavy.
         inputs.today_total_options_volume = 600
@@ -566,7 +567,9 @@ class TestPipelineStage2:
         result = await pipeline.run(universe_tickers=["NVDA"])
         c = result.candidates[0]
         assert c.stages.stage_2 is not None
-        assert c.stages.stage_2.result == "PASS"
+        # UV alone — no real catalyst — Stage 2 FAILS.
+        assert c.stages.stage_2.result == "FAIL"
+        # UV detection still preserved on the candidate for Stage 4 reference.
         assert c.uv_detection is not None
         assert c.uv_detection.detected is True
         assert c.uv_detection.directional_skew == "call_heavy"

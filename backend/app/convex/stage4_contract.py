@@ -202,6 +202,25 @@ class RejectedAlternative:
 
 
 @dataclass
+class RecommendedContract:
+    """One option recommendation in the Stage 4 contract menu.
+
+    The menu surfaces multiple tradeable contracts that all pass selection
+    gates, distinguished by their tradeoff profile:
+
+    - ``primary``: closest to expected terminus, in target delta band.
+    - ``stretch``: same expiry, lower-delta strike (higher leverage,
+      cheaper premium, larger move required).
+    - ``defensive``: closer-to-ATM strike OR longer DTE (more theta buffer,
+      higher premium, less convexity).
+    """
+
+    contract: ConvexContractCandidate
+    label: str        # "primary" | "stretch" | "defensive"
+    rationale: str    # Human-readable: what tradeoff this contract represents
+
+
+@dataclass
 class StrikeSelection:
     """Outcome of strike selection for one direction (or one straddle leg)."""
 
@@ -365,6 +384,164 @@ def _build_strike_rationale(
 
 
 # ---------------------------------------------------------------------------
+# Contract menu (multi-contract recommendations)
+# ---------------------------------------------------------------------------
+
+
+def _build_contract_menu(
+    primary: ConvexContractCandidate,
+    by_direction: Sequence[ConvexContractCandidate],
+    direction_only_chain: Sequence[ConvexContractCandidate],
+    config: ConvexConfig,
+    direction: str,
+    expected_terminus: Optional[float],
+) -> list[RecommendedContract]:
+    """Build a 1-3 contract menu around the primary recommendation.
+
+    Slots:
+      - ``primary`` (always present): closest to terminus, in target delta band.
+      - ``stretch`` (best-effort): same expiry, lower-delta strike (more OTM,
+        cheaper premium, higher leverage, larger move required).
+      - ``defensive`` (best-effort): longer expiry near the same strike (more
+        time decay buffer, costlier premium, less convexity). May extend
+        past ``config.contract_dte_max`` since "more time" is the point.
+
+    Each slot must independently pass liquidity. Missing slots are skipped.
+    """
+    menu: list[RecommendedContract] = [
+        RecommendedContract(
+            contract=primary,
+            label="primary",
+            rationale=_build_strike_rationale(primary, expected_terminus, direction),
+        )
+    ]
+    if direction == "ambiguous":
+        # Straddle context — caller pairs call+put separately, no menu variants.
+        return menu
+
+    # Stretch: same expiry, lower delta (further OTM).
+    stretch = _pick_stretch(primary, by_direction, config)
+    if stretch is not None and stretch.option_ticker != primary.option_ticker:
+        menu.append(
+            RecommendedContract(
+                contract=stretch,
+                label="stretch",
+                rationale=_stretch_rationale(primary, stretch, direction),
+            )
+        )
+
+    # Defensive: longer expiry, similar strike. Searches the full direction-
+    # filtered chain (not DTE-restricted) since the goal is "more time".
+    defensive = _pick_defensive(primary, direction_only_chain, config)
+    if (
+        defensive is not None
+        and defensive.option_ticker != primary.option_ticker
+        and (stretch is None or defensive.option_ticker != stretch.option_ticker)
+    ):
+        menu.append(
+            RecommendedContract(
+                contract=defensive,
+                label="defensive",
+                rationale=_defensive_rationale(primary, defensive, direction),
+            )
+        )
+
+    return menu
+
+
+def _pick_stretch(
+    primary: ConvexContractCandidate,
+    by_direction: Sequence[ConvexContractCandidate],
+    config: ConvexConfig,
+) -> Optional[ConvexContractCandidate]:
+    """Pick same-expiry contract with lower delta (more OTM) than primary.
+
+    Searches contracts 0.05-0.20Δ below primary's delta with absolute
+    delta floor at 0.10 (don't go too far OTM). Picks the highest-delta
+    candidate in that range that passes liquidity.
+    """
+    primary_abs_delta = abs(primary.delta)
+    candidates = [
+        c for c in by_direction
+        if c.expiry == primary.expiry
+        and c.option_ticker != primary.option_ticker
+        and abs(c.delta) < primary_abs_delta - 0.05  # at least 5Δ further OTM
+        and abs(c.delta) >= 0.10                     # not too far OTM
+        and _passes_liquidity(c, config)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: abs(c.delta))
+
+
+def _pick_defensive(
+    primary: ConvexContractCandidate,
+    direction_only_chain: Sequence[ConvexContractCandidate],
+    config: ConvexConfig,
+) -> Optional[ConvexContractCandidate]:
+    """Pick longer-expiry contract near primary strike (more time buffer).
+
+    Searches the full direction-filtered chain (not DTE-restricted) for
+    contracts within ±5% of primary strike with DTE ≥ primary.dte + 14
+    and DTE ≤ contract_dte_max + 60 (allows the defensive option to
+    extend up to ~3 months past the standard upper bound — the whole
+    point of this slot is more time). Picks the shortest-DTE candidate
+    in that range that passes liquidity.
+    """
+    if primary.strike <= 0:
+        return None
+    strike_lo = primary.strike * 0.95
+    strike_hi = primary.strike * 1.05
+    extended_dte_cap = config.contract_dte_max + 60
+    candidates = [
+        c for c in direction_only_chain
+        if c.option_ticker != primary.option_ticker
+        and c.dte >= primary.dte + 14
+        and c.dte <= extended_dte_cap
+        and strike_lo <= c.strike <= strike_hi
+        and _passes_liquidity(c, config)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: c.dte)
+
+
+def _stretch_rationale(
+    primary: ConvexContractCandidate,
+    stretch: ConvexContractCandidate,
+    direction: str,
+) -> str:
+    delta_diff = abs(primary.delta) - abs(stretch.delta)
+    primary_mid = primary.mid or primary.ask
+    stretch_mid = stretch.mid or stretch.ask
+    if primary_mid and primary_mid > 0:
+        cheaper_pct = (1 - (stretch_mid / primary_mid)) * 100 if stretch_mid else 0
+        return (
+            f"Stretch — strike {stretch.strike:g} is "
+            f"{delta_diff:.2f}Δ further OTM (~{cheaper_pct:.0f}% cheaper "
+            f"premium). Higher leverage if {direction} thesis plays out, "
+            f"larger move required to clear strike."
+        )
+    return (
+        f"Stretch — strike {stretch.strike:g} is {delta_diff:.2f}Δ further "
+        f"OTM. Higher leverage, larger move required."
+    )
+
+
+def _defensive_rationale(
+    primary: ConvexContractCandidate,
+    defensive: ConvexContractCandidate,
+    direction: str,
+) -> str:
+    extra_days = defensive.dte - primary.dte
+    return (
+        f"Defensive — strike {defensive.strike:g} expires {extra_days} days "
+        f"later ({defensive.dte} DTE vs {primary.dte}). More time for the "
+        f"{direction} thesis to develop, costlier premium, less theta-sensitive."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Smart Money Confirmation
 # ---------------------------------------------------------------------------
 
@@ -398,6 +575,7 @@ class Stage4Result:
     selected_call: Optional[ConvexContractCandidate] = None
     selected_put: Optional[ConvexContractCandidate] = None
     smart_money_confirmation: bool = False
+    contract_menu: list[RecommendedContract] = field(default_factory=list)
 
 
 def evaluate_stage4(inputs: Stage4Inputs, config: ConvexConfig) -> Stage4Result:
@@ -460,14 +638,30 @@ def evaluate_stage4(inputs: Stage4Inputs, config: ConvexConfig) -> Stage4Result:
             ),
         )
 
+    # Direction-only filtered chain (no DTE cap) so the defensive slot can
+    # extend past contract_dte_max — that's the whole point of "more time".
+    direction_only = _filter_by_direction(
+        inputs.available_contracts, inputs.direction
+    )
+    contract_menu = _build_contract_menu(
+        primary=selection.selected,
+        by_direction=by_direction,
+        direction_only_chain=direction_only,
+        config=config,
+        direction=inputs.direction,
+        expected_terminus=expected_terminus,
+    )
+
     payload = _build_directional_payload(
-        inputs, selection, expected_terminus, smart_money, config
+        inputs, selection, expected_terminus, smart_money, config,
+        contract_menu=contract_menu,
     )
     return Stage4Result(
         payload=payload,
         selected_call=selection.selected if inputs.direction == "bullish" else None,
         selected_put=selection.selected if inputs.direction == "bearish" else None,
         smart_money_confirmation=smart_money,
+        contract_menu=contract_menu,
     )
 
 
@@ -559,6 +753,7 @@ def _build_directional_payload(
     expected_terminus: Optional[float],
     smart_money: bool,
     config: ConvexConfig,
+    contract_menu: Optional[list[RecommendedContract]] = None,
 ) -> ConvexStagePayload:
     chosen = selection.selected
     assert chosen is not None  # narrowing for type-checker
@@ -568,6 +763,14 @@ def _build_directional_payload(
         f"{chosen.strike:g} expiring {chosen.expiry} "
         f"(delta {chosen.delta:+.2f}, {chosen.dte} DTE)."
     )
+    menu_dicts = [
+        {
+            "label": rc.label,
+            "rationale": rc.rationale,
+            "contract": _contract_dict(rc.contract),
+        }
+        for rc in (contract_menu or [])
+    ]
 
     return ConvexStagePayload(
         stage=4,
@@ -577,6 +780,7 @@ def _build_directional_payload(
         criteria={
             "structure": "directional",
             "selected_contract": _contract_dict(chosen),
+            "contract_menu": menu_dicts,
             "alternatives_considered": [
                 _alt_dict(a) for a in selection.alternatives_considered
             ],

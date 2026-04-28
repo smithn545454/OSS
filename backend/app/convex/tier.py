@@ -24,7 +24,6 @@ prominently.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -106,15 +105,21 @@ def _stage_strength(stages: ConvexStagesPayload, n: int) -> float:
 
 
 def within_tier_composite(candidate: "ConvexCandidate") -> float:
-    """Geometric mean of stage strengths used for in-tier ordering only."""
-    parts = [
-        _stage_strength(candidate.stages, n) for n in (2, 3, 4)
-    ]
-    parts = [p for p in parts if p > 0]
-    if not parts:
-        return 0.0
-    log_sum = sum(math.log(p) for p in parts)
-    return round(math.exp(log_sum / len(parts)), 4)
+    """Single-dimension within-tier ranking score.
+
+    Ranks by Stage 3 strength (where lower IV percentile / IV rank
+    produces higher Stage 3 strength). Cheaper convexity ranks first
+    within the same tier — one interpretable dimension instead of an
+    arbitrary blend across stages.
+
+    Returns the Stage 3 strength directly. Falls back to Stage 2 strength
+    when Stage 3 didn't run (shouldn't happen for tier-assigned
+    candidates, but keep a non-zero floor for sort stability).
+    """
+    s3 = _stage_strength(candidate.stages, 3)
+    if s3 > 0:
+        return round(s3, 4)
+    return round(_stage_strength(candidate.stages, 2), 4)
 
 
 def position_sizing_recommendation(

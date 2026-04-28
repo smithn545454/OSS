@@ -11,6 +11,8 @@ import type {
 } from '@/lib/convexTypes'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { formatDateTime } from '@/lib/formatTime'
+import { Stage2DetectorPanel } from '@/components/convex/Stage2DetectorPanel'
+import { Stage4MenuPanel } from '@/components/convex/Stage4MenuPanel'
 
 const TIER_BADGE: Record<ConvexTier, string> = {
   A: 'bg-oss-approve/15 text-oss-approve border-oss-approve/30',
@@ -64,6 +66,7 @@ export default function ConvexEvaluationDetail() {
             title="What's the catalyst"
             stage={stages.stage_2}
             tier={evaluation.convex_tier}
+            body={<Stage2DetectorPanel stage={stages.stage_2} />}
           />
         )}
         {stages?.stage_3 && (
@@ -80,6 +83,7 @@ export default function ConvexEvaluationDetail() {
             title="Why this specific contract"
             stage={stages.stage_4}
             tier={evaluation.convex_tier}
+            body={<Stage4MenuPanel stage={stages.stage_4} />}
           />
         )}
       </div>
@@ -152,11 +156,13 @@ function StagePanel({
   title,
   stage,
   tier,
+  body,
 }: {
   number: number
   title: string
   stage: ConvexStagePayload
   tier: ConvexTier
+  body?: React.ReactNode
 }) {
   // Default expanded for Tier A; collapsed for B/C.
   const [expanded, setExpanded] = useState(tier === 'A')
@@ -195,13 +201,20 @@ function StagePanel({
 
       {expanded && (
         <div className="space-y-3 border-t border-oss-border px-4 pb-4 pt-3">
-          <p className="text-sm leading-relaxed text-oss-text">{stage.summary}</p>
+          {body ? (
+            // Specialized panel (Stage 2 detectors, Stage 4 contract menu)
+            body
+          ) : (
+            <>
+              <p className="text-sm leading-relaxed text-oss-text">{stage.summary}</p>
 
-          {Object.keys(stage.criteria).length > 0 && (
-            <div className="rounded-lg border border-oss-border/60 bg-oss-bg/30 p-3">
-              <p className="mb-2 text-xs uppercase tracking-wide text-oss-muted">Criteria</p>
-              <CriteriaList criteria={stage.criteria} />
-            </div>
+              {Object.keys(stage.criteria).length > 0 && (
+                <div className="rounded-lg border border-oss-border/60 bg-oss-bg/30 p-3">
+                  <p className="mb-2 text-xs uppercase tracking-wide text-oss-muted">Criteria</p>
+                  <CriteriaList criteria={stage.criteria} />
+                </div>
+              )}
+            </>
           )}
 
           {stage.strength !== null && (

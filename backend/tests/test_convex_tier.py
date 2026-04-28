@@ -105,8 +105,9 @@ class TestAssignTier:
 
 
 class TestWithinTierComposite:
+    """Within-tier ranking is now Stage-3-strength only (cheaper convexity ranks first)."""
 
-    def test_geometric_mean_of_three_stages(self):
+    def test_returns_stage3_strength_directly(self):
         candidate = _candidate(s2=0.5, s3=0.5, s4=0.5)
         assert within_tier_composite(candidate) == pytest.approx(0.5, abs=1e-3)
 
@@ -114,17 +115,14 @@ class TestWithinTierComposite:
         candidate = _candidate(s2=0.0, s3=0.0, s4=0.0)
         assert within_tier_composite(candidate) == 0.0
 
-    def test_robust_to_partial_zeros(self):
-        # When only some stages have strength, the geometric mean is
-        # taken over non-zero parts (never NaN / -inf).
+    def test_falls_back_to_stage2_when_stage3_missing(self):
+        # Defensive fallback for sort stability when Stage 3 didn't run.
         candidate = _candidate(s2=0.8, s3=0.0, s4=0.6)
-        result = within_tier_composite(candidate)
-        # Geometric mean of (0.8, 0.6) ≈ 0.693
-        assert 0.6 < result < 0.75
+        assert within_tier_composite(candidate) == pytest.approx(0.8, abs=1e-3)
 
-    def test_higher_strengths_produce_higher_composite(self):
+    def test_higher_stage3_strength_produces_higher_composite(self):
         weak = _candidate(s2=0.4, s3=0.4, s4=0.4)
-        strong = _candidate(s2=0.9, s3=0.9, s4=0.9)
+        strong = _candidate(s2=0.4, s3=0.9, s4=0.4)  # Stage 3 differentiator
         assert within_tier_composite(strong) > within_tier_composite(weak)
 
 
