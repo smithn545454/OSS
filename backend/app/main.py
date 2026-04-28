@@ -833,17 +833,18 @@ async def _run_scheduled_scan() -> dict[str, Any]:
 
 
 async def _run_convex_universe_refresh() -> dict[str, Any]:
-    """Monthly Convex Mode kinetic-universe construction.
+    """Convex Mode kinetic-universe construction (daily refresh, runs ~3am PT).
 
-    Triggered by EventBridge on the 1st of each month. Reads the active
-    policy's optionable watchlist, fetches live market metadata via
+    Reads the optionable, active ticker list from ``oss-dev-sp500-tickers``
+    (with authoritative sector data), fetches live market metadata via
     Polygon, runs the Stage 1 gates, and persists a versioned
     ``ConvexUniverseSnapshot``.
     """
+    import boto3
+
     from app.convex.polygon_fetcher import PolygonMetadataFetcher
     from app.convex.universe_builder import UniverseConstructor
     from app.core.policy import PolicyTable
-    from app.core.watchlist import WatchlistManager
     from app.services.polygon import PolygonClient
 
     logger.info("Convex universe refresh starting")
@@ -859,18 +860,43 @@ async def _run_convex_universe_refresh() -> dict[str, Any]:
             "(snapshot is harmless until pipeline activated)."
         )
 
-    watchlist = await WatchlistManager.from_policy_async(policy.config)
-    tickers = list(watchlist.tickers)
+    # Pull candidate tickers + sectors directly from oss-dev-sp500-tickers
+    # (filtered to optionable + active). This is the authoritative sector
+    # source; StockSummaryTable is a cache populated only for tickers that
+    # have already been evaluated and is unreliable for fresh universes.
+    settings = get_settings()
+    table_name = f"{settings.dynamodb_table_prefix}-sp500-tickers"
+    region = settings.aws_region
+    table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+    items: list[dict] = []
+    last_key = None
+    while True:
+        kwargs = {
+            "FilterExpression": "has_options = :t AND is_active = :t",
+            "ExpressionAttributeValues": {":t": True},
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+
+    tickers = [it["ticker"] for it in items]
+    sectors: dict[str, str] = {
+        it["ticker"]: it["sector"] for it in items if it.get("sector")
+    }
     logger.info(
-        "Convex universe refresh: %d candidate tickers from watchlist",
-        len(tickers),
+        "Convex universe refresh: %d candidate tickers (%d with sector) from %s",
+        len(tickers), len(sectors), table_name,
     )
 
     async with PolygonClient() as polygon:
         fetcher = PolygonMetadataFetcher(polygon)
         constructor = UniverseConstructor(convex_cfg, fetcher)
         snapshot = await constructor.build_snapshot(
-            tickers=tickers, policy_version=policy.version
+            tickers=tickers, policy_version=policy.version, sectors=sectors,
         )
 
     return {

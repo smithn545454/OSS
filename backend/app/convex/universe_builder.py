@@ -107,6 +107,7 @@ class UniverseConstructor:
         tickers: list[str],
         policy_version: str,
         as_of_date: Optional[date] = None,
+        sectors: Optional[dict[str, str]] = None,
     ) -> ConvexUniverseSnapshot:
         """Construct, persist, and return a universe snapshot.
 
@@ -114,18 +115,24 @@ class UniverseConstructor:
             tickers: Candidate optionable tickers to evaluate.
             policy_version: Active policy version recorded on the snapshot.
             as_of_date: Snapshot date; defaults to today UTC.
+            sectors: Optional pre-fetched ``{ticker: sector}`` map. When
+                provided we skip the StockSummaryTable lookup (which is
+                cache-only and unreliable for the broader universe). The
+                authoritative source is ``oss-dev-sp500-tickers`` —
+                callers should pass that map through.
 
         Returns:
             The persisted ``ConvexUniverseSnapshot``.
         """
         snapshot_date = (as_of_date or datetime.now(timezone.utc).date()).isoformat()
+        sectors = sectors or {}
         logger.info(
-            "UniverseConstructor: fetching inputs for %d tickers (snapshot %s)",
-            len(tickers), snapshot_date,
+            "UniverseConstructor: fetching inputs for %d tickers (snapshot %s, sector_map=%d)",
+            len(tickers), snapshot_date, len(sectors),
         )
 
         inputs_results = await asyncio.gather(
-            *(self._fetch_ticker_inputs(t) for t in tickers),
+            *(self._fetch_ticker_inputs(t, sectors.get(t)) for t in tickers),
             return_exceptions=False,
         )
         valid_inputs = [i for i in inputs_results if i is not None]
@@ -157,7 +164,7 @@ class UniverseConstructor:
         return snapshot
 
     async def _fetch_ticker_inputs(
-        self, ticker: str
+        self, ticker: str, sector: Optional[str] = None
     ) -> Optional[TickerKineticInputs]:
         """Fetch all inputs for a single ticker.
 
@@ -178,13 +185,15 @@ class UniverseConstructor:
                 return None
             closes = [b.close for b in bars]
 
-            # Sector lookup — fail soft.
-            sector: Optional[str] = None
-            try:
-                summary = await StockSummaryTable.get_latest_for_ticker(ticker)
-                sector = getattr(summary, "sector", None) if summary else None
-            except Exception as e:
-                logger.debug("Sector lookup failed for %s: %s", ticker, e)
+            # Sector resolution: prefer sector passed by caller (sourced
+            # from oss-dev-sp500-tickers); fall back to StockSummaryTable
+            # cache when caller didn't supply one. Fail soft to None.
+            if sector is None:
+                try:
+                    summary = await StockSummaryTable.get_latest_for_ticker(ticker)
+                    sector = getattr(summary, "sector", None) if summary else None
+                except Exception as e:
+                    logger.debug("Sector lookup failed for %s: %s", ticker, e)
 
             # Live metadata: market cap + options stats. Best-effort.
             metadata: Optional[TickerMetadata] = None
