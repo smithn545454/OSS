@@ -36,6 +36,7 @@ from app.convex.tier import (
     FinalisedConvexCandidate,
     finalise_candidate,
 )
+from app.convex.uv_lookup import lookup_uv_signal, to_dict as uv_to_dict
 from app.core.schemas import (
     ConvexConfig,
     ConvexEvaluation,
@@ -240,10 +241,20 @@ async def _finalise_and_persist(
         # Tier + Decision only for fully-advanced candidates.
         if candidate.advanced_to_stage == 4:
             evaluation_id = f"convex-{run_id[:8]}-{candidate.ticker}"
+            # Look up the UV signal for this ticker BEFORE finalising so
+            # smart_money_confirmation reflects real UV scanner detections.
+            uv_signal = await lookup_uv_signal(candidate.ticker)
+            if uv_signal is not None and candidate.direction:
+                candidate.smart_money_confirmation = (
+                    uv_signal.is_unusual
+                    and uv_signal.aligns_with(candidate.direction)
+                )
             result = finalise_candidate(
                 candidate, evaluation_id, policy_version, config
             )
             if result is not None:
+                # Attach UV signal data to the Decision payload for UI.
+                result.decision.convex_uv_signal = uv_to_dict(uv_signal)
                 finalised.append(result)
 
     if stage_events:

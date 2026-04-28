@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Zap, ChevronDown, ChevronRight, CheckCircle, XCircle, TrendingUp, Sparkles } from 'lucide-react'
+import { ArrowLeft, Zap, ChevronDown, ChevronRight, CheckCircle, XCircle, TrendingUp } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
 
@@ -13,6 +13,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { formatDateTime } from '@/lib/formatTime'
 import { Stage2DetectorPanel } from '@/components/convex/Stage2DetectorPanel'
 import { Stage4MenuPanel } from '@/components/convex/Stage4MenuPanel'
+import { SmartMoneyBadge } from '@/components/convex/SmartMoneyBadge'
 
 const TIER_BADGE: Record<ConvexTier, string> = {
   A: 'bg-oss-approve/15 text-oss-approve border-oss-approve/30',
@@ -121,11 +122,10 @@ function Header({ evaluation }: { evaluation: ConvexEvaluation }) {
             Tier {evaluation.convex_tier}
           </span>
           <DirectionBadge direction={evaluation.direction} />
-          {evaluation.smart_money_confirmation && (
-            <span className="inline-flex items-center gap-1 rounded-md border border-oss-accent/40 bg-oss-accent/10 px-3 py-1 text-sm text-oss-accent">
-              <Sparkles className="h-3.5 w-3.5" /> Smart Money
-            </span>
-          )}
+          <SmartMoneyBadge
+            confirmed={evaluation.smart_money_confirmation}
+            signal={evaluation.decision.convex_uv_signal}
+          />
         </div>
       </div>
 

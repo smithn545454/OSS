@@ -7,6 +7,7 @@ import { useConvexEvaluations } from '@/lib/convexApi'
 import type { ConvexEvaluation, ConvexTier } from '@/lib/convexTypes'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { formatDateTime } from '@/lib/formatTime'
+import { SmartMoneyBadge } from '@/components/convex/SmartMoneyBadge'
 
 const TIER_BADGE: Record<ConvexTier, string> = {
   A: 'bg-oss-approve/15 text-oss-approve border border-oss-approve/30',
@@ -156,11 +157,11 @@ function ConvexEvaluationRow({ evaluation }: { evaluation: ConvexEvaluation }) {
       <td className="px-3 py-2 font-mono text-xs">{contract ? contract.dte : '—'}</td>
       <td className="px-3 py-2 text-xs text-oss-muted">{sizing ?? '—'}</td>
       <td className="px-3 py-2 text-xs">
-        {evaluation.smart_money_confirmation ? (
-          <span className="rounded bg-oss-accent/15 px-2 py-0.5 text-oss-accent">Yes</span>
-        ) : (
-          <span className="text-oss-muted">—</span>
-        )}
+        <SmartMoneyBadge
+          confirmed={evaluation.smart_money_confirmation}
+          signal={evaluation.decision.convex_uv_signal}
+          compact
+        />
       </td>
       <td className="px-3 py-2 text-xs text-oss-muted">
         {formatDateTime(evaluation.generated_at)}

@@ -531,6 +531,11 @@ class Decision(OSSBaseModel):
     # Smart Money Confirmation: UV directional skew aligns with Stage 3 thesis.
     # Visibility-only at launch; does not auto-promote tier.
     smart_money_confirmation: Optional[bool] = None
+    # UV signal aggregated from oss-dev-unusual-volume-candidates GSI for
+    # this ticker. Carries detection_count / volume_ratio / directional_skew
+    # so the UI can render a richer "Smart Money" badge than a binary flag.
+    # See app.convex.uv_lookup.UVSignal.
+    convex_uv_signal: Optional[dict[str, Any]] = None
     # Per-tier sizing recommendation surfaced on Evaluation Detail.
     # E.g. "Tier A — 50% of standard sizing".
     position_sizing_recommendation: Optional[str] = None

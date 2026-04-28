@@ -41,6 +41,22 @@ export interface ConvexSelectedContract {
   volume: number
 }
 
+/** Aggregated UV signal payload — populated at Stage 4 from the
+ * legacy UV scanner's per-contract detections via the underlying-ticker
+ * GSI. ``directional_skew`` agreeing with the candidate's direction +
+ * ``is_unusual = true`` is what flips smart_money_confirmation true. */
+export interface ConvexUVSignal {
+  detection_count: number
+  total_today_volume: number
+  total_avg_volume: number
+  volume_ratio: number | null
+  call_volume: number
+  put_volume: number
+  directional_skew: 'call_heavy' | 'put_heavy' | 'balanced'
+  is_unusual: boolean
+  lookback_hours: number
+}
+
 /** Decision payload as persisted on a ConvexEvaluation.
  * Only Convex-relevant fields are typed here; legacy fields are kept as
  * passthrough so we don't have to re-list the dozens of v3/v4/v5 columns. */
@@ -56,6 +72,7 @@ export interface ConvexDecision {
   convex_stages: ConvexStagesPayload | null
   convex_strength_composite: number | null
   smart_money_confirmation: boolean | null
+  convex_uv_signal: ConvexUVSignal | null
   position_sizing_recommendation: string | null
   // Legacy fields (untyped passthrough)
   [key: string]: unknown
