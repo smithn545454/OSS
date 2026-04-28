@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from app.core.schemas import (
@@ -388,6 +388,9 @@ class UniverseBuildResult:
     ``rejected_tickers`` lists tickers that failed Stage 1 gates.
     ``capped_tickers`` lists tickers that passed gates but were dropped by
     the sector cap.
+    ``rejection_breakdown`` counts per-gate failures across all rejected
+    tickers (sum may exceed len(rejected_tickers) when multiple gates fail
+    on the same ticker — first-failed gate is what's recorded).
     """
 
     entries: list[ConvexUniverseEntry]
@@ -395,6 +398,7 @@ class UniverseBuildResult:
     rejected_tickers: list[str]
     capped_tickers: list[str]
     sector_distribution: dict[str, int]
+    rejection_breakdown: dict[str, int] = field(default_factory=dict)
 
 
 def build_universe(
@@ -410,6 +414,12 @@ def build_universe(
     payloads: dict[str, ConvexStagePayload] = {}
     pre_cap_entries: list[ConvexUniverseEntry] = []
     rejected: list[str] = []
+    rejection_breakdown: dict[str, int] = {
+        "liquidity": 0,
+        "kinetic_capability": 0,
+        "hv_regime": 0,
+        "market_cap": 0,
+    }
 
     for inp in inputs:
         ev = evaluate_ticker(inp, config)
@@ -418,6 +428,14 @@ def build_universe(
             pre_cap_entries.append(ev.entry)
         else:
             rejected.append(ev.ticker)
+            # Record the FIRST failing gate (in evaluation order) so the
+            # breakdown reflects the dominant rejector. If multiple gates
+            # fail, only the first one shows up in this counter.
+            for gate_name in ("liquidity", "kinetic_capability", "hv_regime", "market_cap"):
+                gate = ev.payload.criteria.get(gate_name, {})
+                if not gate.get("pass", True):
+                    rejection_breakdown[gate_name] += 1
+                    break
 
     accepted, distribution = apply_sector_cap(pre_cap_entries, config)
     accepted_tickers = {e.ticker for e in accepted}
@@ -426,8 +444,11 @@ def build_universe(
     ]
 
     logger.info(
-        "Convex universe built: in=%d, gate-fail=%d, sector-capped=%d, accepted=%d",
+        "Convex universe built: in=%d, gate-fail=%d, sector-capped=%d, accepted=%d "
+        "[breakdown: liq=%d kinetic=%d hv=%d mcap=%d]",
         len(inputs), len(rejected), len(capped), len(accepted),
+        rejection_breakdown["liquidity"], rejection_breakdown["kinetic_capability"],
+        rejection_breakdown["hv_regime"], rejection_breakdown["market_cap"],
     )
 
     return UniverseBuildResult(
@@ -436,4 +457,5 @@ def build_universe(
         rejected_tickers=rejected,
         capped_tickers=capped,
         sector_distribution=distribution,
+        rejection_breakdown=rejection_breakdown,
     )

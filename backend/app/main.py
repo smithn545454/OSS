@@ -892,18 +892,21 @@ async def _run_convex_universe_refresh() -> dict[str, Any]:
         len(tickers), len(sectors), table_name,
     )
 
+    # Stash the build result on the constructor for telemetry exposure.
     async with PolygonClient() as polygon:
         fetcher = PolygonMetadataFetcher(polygon)
         constructor = UniverseConstructor(convex_cfg, fetcher)
         snapshot = await constructor.build_snapshot(
             tickers=tickers, policy_version=policy.version, sectors=sectors,
         )
+    rejection_breakdown = getattr(constructor, "_last_rejection_breakdown", {})
 
     return {
         "status": "ok",
         "snapshot_date": snapshot.snapshot_date,
         "total_count": snapshot.total_count,
         "sector_distribution": snapshot.sector_distribution,
+        "rejection_breakdown": rejection_breakdown,
     }
 
 

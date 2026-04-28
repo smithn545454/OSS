@@ -144,6 +144,9 @@ class UniverseConstructor:
             )
 
         result: UniverseBuildResult = build_universe(valid_inputs, self.config)
+        # Expose the rejection breakdown so the Lambda handler can report
+        # it without re-running the build.
+        self._last_rejection_breakdown = dict(result.rejection_breakdown)
 
         snapshot = ConvexUniverseSnapshot(
             snapshot_date=snapshot_date,
