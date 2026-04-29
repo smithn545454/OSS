@@ -60,6 +60,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "quiet_hours_end": "08:00",
     "webhook_channels": [],
     "verdicts": ["APPROVE"],
+    # Convex pipeline cutover knobs. ``convex_min_tier`` filters which
+    # tiers fire Slack alerts: "A" = Tier A only (most selective),
+    # "B" = A+B (default — drops Tier C borderline candidates),
+    # "C" = all Convex APPROVES through (noisy).
+    "convex_min_tier": "B",
 }
 
 # Config keys carried forward. Anything else loaded from DynamoDB (including
@@ -974,6 +979,282 @@ class SlackAlertService:
         # Cap + cooldown state is derived from ALERT_LOG entries written by
         # log_alert() above, so there's no in-memory bookkeeping to update.
         return True, None
+
+    async def send_convex_alert(
+        self,
+        finalised: Any,
+    ) -> tuple[bool, str | None]:
+        """Send a Convex-shaped alert for a finalised Convex candidate.
+
+        Convex Decisions don't carry HR/P conviction — gating uses tier
+        (A/B/C), composite strength, and smart-money confirmation
+        instead. The cap + cooldown infrastructure is reused so a flood
+        of Convex APPROVES doesn't blow past the daily cap.
+
+        Returns ``(sent, error_or_reason)``.
+        """
+        config = await self._ensure_config()
+
+        if not config.get("enabled", False):
+            return False, "Alerts disabled"
+
+        webhooks = self._get_webhook_urls()
+        if not webhooks:
+            return False, "No webhook URLs configured"
+
+        candidate = finalised.candidate
+        decision = finalised.decision
+
+        tier_label = (
+            finalised.tier.value
+            if hasattr(finalised.tier, "value")
+            else str(finalised.tier)
+        )
+        min_tier = str(config.get("convex_min_tier", "B")).upper()
+        # Tier ordering: A (best) > B > C. Drop tiers worse than min.
+        tier_rank = {"A": 0, "B": 1, "C": 2}
+        if tier_rank.get(tier_label, 99) > tier_rank.get(min_tier, 99):
+            return (
+                False,
+                f"Convex tier {tier_label} below min_tier {min_tier}",
+            )
+
+        # Pick the contract that matches direction.
+        direction = (candidate.direction or "ambiguous").lower()
+        if direction == "bearish" and candidate.selected_put is not None:
+            selected = candidate.selected_put
+        elif candidate.selected_call is not None:
+            selected = candidate.selected_call
+        else:
+            selected = candidate.selected_put
+
+        if selected is None:
+            return False, "No selected contract on candidate"
+
+        contract_id = selected.option_ticker
+
+        # Cap + cooldown share state with the legacy alert path.
+        daily_cap = config.get("daily_cap", 10)
+        sent_today = await self._count_sent_today()
+        if sent_today >= daily_cap:
+            return False, f"Daily alert cap ({daily_cap}) reached"
+
+        contract_cooldown = config.get("cooldown_minutes", 30)
+        last_contract_ts = await self._last_alert_for_contract(contract_id)
+        if last_contract_ts is not None:
+            elapsed = datetime.now(timezone.utc) - last_contract_ts
+            if elapsed < timedelta(minutes=contract_cooldown):
+                return False, f"Contract in {contract_cooldown}min cooldown"
+
+        ticker_cooldown = config.get("ticker_cooldown_minutes", 240)
+        if ticker_cooldown:
+            last_ticker_alert = await self._last_alert_for_ticker(candidate.ticker)
+            if last_ticker_alert is not None:
+                ts = last_ticker_alert.get("timestamp")
+                try:
+                    last_ts = datetime.fromisoformat(ts) if ts else None
+                except ValueError:
+                    last_ts = None
+                if last_ts is not None and (
+                    datetime.now(timezone.utc) - last_ts
+                    < timedelta(minutes=ticker_cooldown)
+                ):
+                    return (
+                        False,
+                        f"Ticker {candidate.ticker} in {ticker_cooldown}min cooldown",
+                    )
+
+        if self._is_within_quiet_hours():
+            return False, "Within quiet hours"
+
+        message = self._format_convex_message(
+            ticker=candidate.ticker,
+            tier=tier_label,
+            composite_strength=float(finalised.composite),
+            smart_money=bool(candidate.smart_money_confirmation),
+            direction=direction,
+            selected=selected,
+            stages=candidate.stages,
+            evaluation_id=decision.evaluation_id,
+        )
+
+        sent_count = 0
+        for webhook in webhooks:
+            url = webhook.get("url", "")
+            channel = webhook.get("channel_name", "unknown")
+            if not url:
+                continue
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, json=message, timeout=10.0)
+                    response.raise_for_status()
+                sent_count += 1
+                logger.info(
+                    f"Sent Convex alert to {channel} for {contract_id} "
+                    f"(tier={tier_label}, composite={finalised.composite:.2f})"
+                )
+                await log_alert(
+                    contract_id=contract_id,
+                    ticker=candidate.ticker,
+                    hr_conviction=None,
+                    p_conviction=None,
+                    driver=f"convex_tier_{tier_label.lower()}",
+                    channel_name=channel,
+                    status="sent",
+                    quality_tier=None,
+                )
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to send Convex alert to {channel}: {e}")
+                await log_alert(
+                    contract_id=contract_id,
+                    ticker=candidate.ticker,
+                    hr_conviction=None,
+                    p_conviction=None,
+                    driver=f"convex_tier_{tier_label.lower()}",
+                    channel_name=channel,
+                    status="failed",
+                    quality_tier=None,
+                )
+
+        if sent_count == 0:
+            return False, "All webhook sends failed"
+        return True, None
+
+    def _format_convex_message(
+        self,
+        *,
+        ticker: str,
+        tier: str,
+        composite_strength: float,
+        smart_money: bool,
+        direction: str,
+        selected: Any,
+        stages: Any,
+        evaluation_id: str,
+    ) -> dict[str, Any]:
+        """Format a Convex-shaped Slack message.
+
+        Headers lead with tier (A/B/C) plus a smart-money flag so the
+        reader can scan the channel without parsing pillar fields that
+        no longer exist.
+        """
+        if tier == "A":
+            header_emoji = "⭐"  # ⭐
+            header_label = "CONVEX TIER A"
+        elif tier == "B":
+            header_emoji = "\U0001f3af"  # 🎯
+            header_label = "CONVEX TIER B"
+        else:
+            header_emoji = "\U0001f50d"  # 🔍
+            header_label = "CONVEX TIER C"
+
+        sm_suffix = " ✨" if smart_money else ""  # ✨ when UV-confirmed
+        opt_type = str(getattr(selected, "option_type", "?")).upper()
+        strike = getattr(selected, "strike", 0) or 0
+        expiry = getattr(selected, "expiry", "?")
+        dte = getattr(selected, "dte", "?")
+        delta = getattr(selected, "delta", None)
+        bid = getattr(selected, "bid", None)
+        ask = getattr(selected, "ask", None)
+
+        header_text = (
+            f"{header_emoji} {header_label}{sm_suffix}: "
+            f"{ticker} ${strike:g} {opt_type}"
+        )
+
+        delta_str = f"{delta:.2f}" if delta is not None else "—"
+        spread_str = "—"
+        if bid is not None and ask is not None:
+            mid = (bid + ask) / 2.0
+            spread_str = f"${bid:.2f} / ${ask:.2f} (mid ${mid:.2f})"
+
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": header_text, "emoji": True},
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4c4 *Contract*\n"
+                        f"Exp {expiry} · DTE {dte} · Δ {delta_str}\n"
+                        f"Bid/Ask: {spread_str}"
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"\U0001f4ca *Convex Profile*\n"
+                        f"Direction: *{direction}* · "
+                        f"Composite Strength: {composite_strength:.2f}\n"
+                        f"Smart Money: "
+                        f"{'✅ confirmed' if smart_money else '❌ not confirmed'}"
+                    ),
+                },
+            },
+        ]
+
+        # Per-stage summary line.
+        stage_lines: list[str] = []
+        for n in (1, 2, 3, 4):
+            payload = getattr(stages, f"stage_{n}", None)
+            if payload is None:
+                continue
+            stage_name = getattr(payload, "stage_name", f"Stage {n}")
+            strength = getattr(payload, "strength", None)
+            strength_str = f"{strength:.2f}" if strength is not None else "—"
+            summary = getattr(payload, "summary", "")
+            stage_lines.append(
+                f"*{stage_name}* (str {strength_str}): {summary}"
+            )
+        if stage_lines:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "\U0001f9ed *Stages*\n" + "\n".join(stage_lines),
+                    },
+                }
+            )
+
+        if evaluation_id:
+            link = f"{FRONTEND_URL}/evaluation/{ticker}/{evaluation_id}"
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "View Details"},
+                            "url": link,
+                            "style": "primary",
+                        }
+                    ],
+                }
+            )
+
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"⏰ "
+                            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+                        ),
+                    }
+                ],
+            }
+        )
+
+        return {"blocks": blocks}
 
     async def send_test_alert(
         self, channel_index: int | None = None

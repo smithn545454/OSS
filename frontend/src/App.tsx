@@ -2,10 +2,8 @@ import { Component, type ReactNode } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { XCircle, ArrowLeft } from 'lucide-react'
 import Layout from './components/Layout'
-import Opportunities from './pages/Opportunities'
 import PolicyConfig from './pages/PolicyConfig'
 import PipelineMonitor from './pages/PipelineMonitor'
-import EvaluationDetail from './pages/EvaluationDetail'
 import Calibration from './pages/Calibration'
 import Intelligence from './pages/Intelligence'
 import PaperTrading from './pages/PaperTrading'
@@ -13,17 +11,14 @@ import MyTrades from './pages/MyTrades'
 import TradeDetail from './pages/TradeDetail'
 import AlertsConfig from './pages/AlertsConfig'
 import Backtesting from './pages/Backtesting'
-import Opps from './pages/Opps'
 import ConvexOpportunities from './pages/ConvexOpportunities'
 import ConvexEvaluationDetail from './pages/ConvexEvaluationDetail'
 import ConvexFailedCandidates from './pages/ConvexFailedCandidates'
-import { useIsMobile } from './hooks/useIsMobile'
 import { usePageTitle } from './hooks/usePageTitle'
 
-function ResponsiveOpportunities() {
+function ConvexOpportunitiesPage() {
   usePageTitle('Opportunities')
-  const isMobile = useIsMobile()
-  return isMobile ? <Opps /> : <Opportunities />
+  return <ConvexOpportunities />
 }
 
 class EvaluationErrorBoundary extends Component<
@@ -70,7 +65,7 @@ function App() {
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/opportunities" replace />} />
         <Route path="dashboard" element={<Navigate to="/opportunities" replace />} />
-        <Route path="opportunities" element={<ResponsiveOpportunities />} />
+        <Route path="opportunities" element={<ConvexOpportunitiesPage />} />
         <Route path="opps" element={<Navigate to="/opportunities" replace />} />
         <Route path="pipeline" element={<PipelineMonitor />} />
         <Route path="calibration" element={<Calibration />} />
@@ -85,11 +80,13 @@ function App() {
           path="evaluation/:ticker/:evaluationId"
           element={
             <EvaluationErrorBoundary>
-              <EvaluationDetail />
+              <ConvexEvaluationDetail />
             </EvaluationErrorBoundary>
           }
         />
-        <Route path="convex" element={<ConvexOpportunities />} />
+        {/* /convex/* aliases preserved for one release so existing
+            bookmarks keep working. Removed in Phase 6. */}
+        <Route path="convex" element={<Navigate to="/opportunities" replace />} />
         <Route
           path="convex/runs/:runId/failed"
           element={<ConvexFailedCandidates />}

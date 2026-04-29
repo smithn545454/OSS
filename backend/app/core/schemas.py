@@ -1617,8 +1617,10 @@ class ConvexConfig(OSSBaseModel):
     cutover. See docs/convex-mode-impact-report.md for context.
     """
 
-    # Master kill switch. When False the Convex pipeline does not run.
-    enabled: bool = False
+    # Master kill switch. Convex is the sole production pipeline as of the
+    # 2026-04-29 cutover; default True. Set False on the active policy to
+    # halt the daily pipeline (legacy is no longer available as fallback).
+    enabled: bool = True
 
     # ---- Stage 1 — Kinetic Universe (monthly refresh) ----
     universe_min_options_volume: int = 5000
@@ -1673,6 +1675,13 @@ class ConvexConfig(OSSBaseModel):
     # Visibility-only at launch. Set True to allow Convex tier promotion when
     # UV directional skew aligns with Stage 3 thesis.
     smart_money_promotes_tier: bool = False
+
+    # ---- Cutover gates ----
+    # Slack alerts: gates the Convex daily runner from emitting Slack alerts
+    # for finalised candidates. Default True at the cutover; set False on
+    # the active policy to silence Slack while keeping positions+theses
+    # flowing for inspection.
+    alerts_enabled: bool = True
 
 
 class PolicyConfig(OSSBaseModel):

@@ -87,10 +87,13 @@ class TestConvexPipelineDisabled:
         assert result.universe_size == 2
 
     @pytest.mark.asyncio
-    async def test_default_config_is_disabled(self):
-        # Master kill switch: Phase 1 default is False so the pipeline never
-        # produces signals until cutover.
-        assert ConvexConfig().enabled is False
+    async def test_default_config_is_enabled(self):
+        # Post-cutover (2026-04-29): Convex is the sole production pipeline,
+        # so the default ConvexConfig boots up enabled. The kill switch is
+        # available via ConvexConfig(enabled=False) on the active policy.
+        assert ConvexConfig().enabled is True
+        # Slack alerts also default on at the cutover.
+        assert ConvexConfig().alerts_enabled is True
 
 
 class TestConvexPipelineEnabledScaffold:

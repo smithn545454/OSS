@@ -221,6 +221,11 @@ class BackendStack(Stack):
         # Market hours: 9:30 AM - 4:00 PM ET = ~13:30 - 21:00 UTC (varies with DST)
         # Using 13:00 - 21:00 UTC to cover both EST and EDT
         # Runs every 10 minutes on weekdays
+        # DISABLED at the Convex cutover (see baselines/convex-cutover-README.md).
+        # The legacy 8-stage scanner pipeline is no longer the production path
+        # — the Convex 4-stage pipeline (convex_daily_rule below) is.
+        # CDK is documentation only; the live flip happens via:
+        #   aws events disable-rule --name oss-dev-scan-schedule --region us-west-1
         self.scan_schedule_rule = events.Rule(
             self,
             "ScanScheduleRule",
@@ -231,7 +236,7 @@ class BackendStack(Stack):
                 hour="13-21",
                 week_day="MON-FRI",
             ),
-            enabled=True,
+            enabled=False,
         )
 
         # Add Lambda as target with scheduled scan event
@@ -354,7 +359,8 @@ class BackendStack(Stack):
         # EventBridge rule for Convex Mode kinetic-universe construction.
         # Runs monthly on the 1st at 02:00 UTC (well outside market hours)
         # to refresh the eligible universe from price-history + Polygon
-        # ticker reference data. Disabled by default; enabled at cutover.
+        # ticker reference data. ENABLED at the Convex cutover. Live flip:
+        #   aws events enable-rule --name oss-dev-convex-universe-refresh --region us-west-1
         self.convex_universe_refresh_rule = events.Rule(
             self,
             "ConvexUniverseRefreshRule",
@@ -367,7 +373,7 @@ class BackendStack(Stack):
                 month="*",
                 year="*",
             ),
-            enabled=False,
+            enabled=True,
         )
         self.convex_universe_refresh_rule.add_target(
             targets.LambdaFunction(
@@ -381,8 +387,9 @@ class BackendStack(Stack):
 
         # EventBridge rule for daily Convex pipeline run.
         # Runs weekdays at 22:30 UTC — after the 22:00 daily data-capture
-        # settles and before pre-market alerts. Disabled by default; the
-        # cutover plan flips it on once Phase 8 backtest validation is done.
+        # settles and before pre-market alerts. ENABLED at the Convex
+        # cutover (replaces scan_schedule_rule above). Live flip:
+        #   aws events enable-rule --name oss-dev-convex-daily-run --region us-west-1
         self.convex_daily_rule = events.Rule(
             self,
             "ConvexDailyRule",
@@ -393,7 +400,7 @@ class BackendStack(Stack):
                 hour="22",
                 week_day="MON-FRI",
             ),
-            enabled=False,
+            enabled=True,
         )
         self.convex_daily_rule.add_target(
             targets.LambdaFunction(

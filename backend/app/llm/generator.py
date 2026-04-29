@@ -14,7 +14,6 @@ from app.core.schemas import (
     Decision,
     Evaluation,
     ExitPlanThesis,
-    LLMProvider as LLMProviderEnum,
     PillarScore,
     ScannerTrigger,
     StopLossTarget,
@@ -25,6 +24,9 @@ from app.core.schemas import (
     TradeThesis,
     Verdict,
 )
+from app.core.schemas import (
+    LLMProvider as LLMProviderEnum,
+)
 from app.llm.models import (
     ContractData,
     PillarContributorData,
@@ -34,7 +36,11 @@ from app.llm.models import (
     ThesisOutput,
     UnderlyingData,
 )
-from app.llm.prompt import build_thesis_prompt, parse_thesis_response
+from app.llm.prompt import (
+    build_convex_thesis_prompt,
+    build_thesis_prompt,
+    parse_thesis_response,
+)
 from app.llm.provider import LLMProvider, get_provider
 from app.llm.rate_limiter import RateLimiter
 
@@ -476,6 +482,176 @@ class ThesisGenerator:
             error_message=error_message,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    async def generate_convex(
+        self,
+        finalised: Any,
+    ) -> TradeThesis:
+        """Generate a trade thesis for a finalised Convex candidate.
+
+        Convex Decisions don't carry pillar scores, archetypes, or v5
+        conviction metrics — they carry tier (A/B/C), composite strength,
+        smart-money confirmation, and the four-stage walkthrough. This
+        path uses a Convex-specific prompt and bypasses the v5 verdict
+        check while reusing the existing rate limiter, provider
+        selection, response parser, and TradeThesis output schema.
+        """
+        candidate = finalised.candidate
+        decision = finalised.decision
+
+        if not self._config.enabled:
+            return self._create_failed_thesis(
+                decision.evaluation_id,
+                "Thesis generation is disabled",
+                status=ThesisStatus.PENDING,
+            )
+
+        if not await self._rate_limiter.can_make_call():
+            remaining = await self._rate_limiter.get_remaining_calls()
+            logger.warning(f"Rate limit exceeded, {remaining} calls remaining")
+            return self._create_failed_thesis(
+                decision.evaluation_id,
+                f"Daily rate limit reached ({self._config.max_daily_calls} calls/day)",
+                status=ThesisStatus.RATE_LIMITED,
+            )
+
+        provider = self._get_provider()
+        if not provider:
+            return self._create_failed_thesis(
+                decision.evaluation_id,
+                "No LLM provider available (check API keys)",
+            )
+
+        # Pick the contract that matches the direction, falling back to whichever
+        # was selected. ConvexContractCandidate is duck-typed at runtime to keep
+        # this module independent from app.convex.
+        direction = (candidate.direction or "ambiguous").lower()
+        if direction == "bearish" and candidate.selected_put is not None:
+            selected = candidate.selected_put
+        elif candidate.selected_call is not None:
+            selected = candidate.selected_call
+        else:
+            selected = candidate.selected_put
+
+        selected_dict: dict[str, Any] = {}
+        if selected is not None:
+            selected_dict = {
+                "option_type": getattr(selected, "option_type", None),
+                "strike": getattr(selected, "strike", None),
+                "expiry": getattr(selected, "expiry", None),
+                "dte": getattr(selected, "dte", None),
+                "delta": getattr(selected, "delta", None),
+                "bid": getattr(selected, "bid", None),
+                "ask": getattr(selected, "ask", None),
+                "open_interest": getattr(selected, "open_interest", None),
+                "volume": getattr(selected, "volume", None),
+            }
+
+        stages_dict: dict[str, Any] = {}
+        for n in (1, 2, 3, 4):
+            payload = getattr(candidate.stages, f"stage_{n}", None)
+            if payload is None:
+                continue
+            stages_dict[f"stage_{n}"] = (
+                payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+            )
+
+        tier_label = (
+            finalised.tier.value
+            if hasattr(finalised.tier, "value")
+            else str(finalised.tier)
+        )
+
+        prompt = build_convex_thesis_prompt(
+            ticker=candidate.ticker,
+            direction=direction,
+            tier=tier_label,
+            composite_strength=float(finalised.composite),
+            smart_money_confirmation=bool(candidate.smart_money_confirmation),
+            stages=stages_dict,
+            selected_contract=selected_dict,
+            policy_version=decision.policy_version,
+        )
+
+        try:
+            logger.info(
+                f"Generating Convex thesis for {decision.evaluation_id} "
+                f"using {provider.name}"
+            )
+            response = await provider.generate(
+                prompt=prompt,
+                max_tokens=self._config.output_token_limit,
+            )
+
+            if not response.success:
+                return self._create_failed_thesis(
+                    decision.evaluation_id,
+                    f"LLM call failed: {response.error}",
+                )
+
+            try:
+                thesis_data = parse_thesis_response(response.content)
+                output = ThesisOutput.from_dict(thesis_data)
+            except ValueError as e:
+                return self._create_failed_thesis(
+                    decision.evaluation_id,
+                    f"Failed to parse LLM response: {e}",
+                )
+
+            await self._rate_limiter.record_call(response.tokens_used)
+
+            take_profits = [
+                TakeProfitTarget(
+                    tier=tp.tier,
+                    option_pnl_pct=tp.option_pnl_pct,
+                    underlying_price=tp.underlying_price,
+                    rationale=tp.rationale,
+                )
+                for tp in output.exit_plan.take_profits
+            ]
+            stop_loss_level = None
+            if output.exit_plan.stop_loss_level:
+                stop_loss_level = StopLossTarget(
+                    option_pnl_pct=output.exit_plan.stop_loss_level.option_pnl_pct,
+                    underlying_price=output.exit_plan.stop_loss_level.underlying_price,
+                    rationale=output.exit_plan.stop_loss_level.rationale,
+                )
+            time_exit_level = None
+            if output.exit_plan.time_exit_level:
+                time_exit_level = TimeExitTarget(
+                    dte_threshold=output.exit_plan.time_exit_level.dte_threshold,
+                    rationale=output.exit_plan.time_exit_level.rationale,
+                )
+
+            return TradeThesis(
+                thesis_id=str(uuid4()),
+                evaluation_id=decision.evaluation_id,
+                setup_summary=output.setup_summary,
+                thesis=output.thesis,
+                supporting_evidence=output.supporting_evidence,
+                risks=output.risks,
+                invalidation_conditions=output.invalidation_conditions,
+                exit_plan=ExitPlanThesis(
+                    profit_target=output.exit_plan.profit_target,
+                    stop_loss=output.exit_plan.stop_loss,
+                    time_exit=output.exit_plan.time_exit,
+                    take_profits=take_profits,
+                    stop_loss_level=stop_loss_level,
+                    time_exit_level=time_exit_level,
+                ),
+                llm_provider=LLMProviderEnum(provider.name),
+                model_used=response.model,
+                tokens_used=response.tokens_used,
+                status=ThesisStatus.COMPLETED,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+        except Exception as e:
+            logger.exception(f"Unexpected error generating Convex thesis: {e}")
+            return self._create_failed_thesis(
+                decision.evaluation_id,
+                f"Unexpected error: {str(e)}",
+            )
 
     async def generate_batch(
         self,

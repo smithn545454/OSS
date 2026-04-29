@@ -36,7 +36,8 @@ from app.convex.tier import (
     FinalisedConvexCandidate,
     finalise_candidate,
 )
-from app.convex.uv_lookup import lookup_uv_signal, to_dict as uv_to_dict
+from app.convex.uv_lookup import lookup_uv_signal
+from app.convex.uv_lookup import to_dict as uv_to_dict
 from app.core.schemas import (
     ConvexConfig,
     ConvexEvaluation,
@@ -169,6 +170,15 @@ async def run_daily_convex_pipeline(
         pipeline_result, config, policy_version, run_id
     )
 
+    # Downstream consumers — paper trading, LLM thesis, Slack alerts.
+    # Each call is isolated so a failure in one consumer does not break
+    # the run or block the others. Slack is gated on
+    # ``config.alerts_enabled`` so legacy alerts continue uninterrupted
+    # until cutover; positions and theses run unconditionally so they
+    # exist for inspection in pre-cutover dry runs.
+    if finalised:
+        await _emit_downstream_artifacts(finalised, config)
+
     completed_at = datetime.now(timezone.utc).isoformat()
     logger.info(
         "Convex daily run %s done: u=%d s2=%d s3=%d s4=%d tiers a=%d b=%d c=%d "
@@ -291,6 +301,91 @@ def _to_convex_evaluation(
         selected_put=_to_selected_contract(candidate.selected_put),
         decision=finalised.decision,
     )
+
+
+async def _emit_downstream_artifacts(
+    finalised: list[FinalisedConvexCandidate],
+    config: ConvexConfig,
+) -> None:
+    """Fan out positions, theses, and alerts for finalised candidates.
+
+    Each consumer is wrapped so a single ticker's failure cannot block
+    the rest. Positions and theses run unconditionally (they are
+    isolated DynamoDB writes / LLM calls); Slack is gated on
+    ``config.alerts_enabled`` so production alerting only flips at
+    cutover.
+    """
+    # Paper trading positions — always create.
+    try:
+        from app.paper_trading.position_manager import (
+            create_position_from_convex_candidate,
+        )
+
+        position_count = 0
+        for candidate in finalised:
+            try:
+                position = await create_position_from_convex_candidate(candidate)
+                if position is not None:
+                    position_count += 1
+            except Exception as e:
+                logger.warning(
+                    f"Convex paper position create failed for "
+                    f"{candidate.candidate.ticker}: {e}"
+                )
+        logger.info(f"Convex paper positions created: {position_count}/{len(finalised)}")
+    except Exception as e:
+        logger.warning(f"Convex paper trading wiring failed: {e}")
+
+    # LLM trade theses — always generate (rate-limited internally).
+    try:
+        from app.db.tables import TradeThesisTable
+        from app.llm.generator import ThesisGenerator
+
+        generator = ThesisGenerator()
+        thesis_count = 0
+        for candidate in finalised:
+            try:
+                thesis = await generator.generate_convex(candidate)
+                await TradeThesisTable.put(thesis)
+                thesis_count += 1
+            except Exception as e:
+                logger.warning(
+                    f"Convex thesis generation failed for "
+                    f"{candidate.candidate.ticker}: {e}"
+                )
+        logger.info(f"Convex theses generated: {thesis_count}/{len(finalised)}")
+    except Exception as e:
+        logger.warning(f"Convex thesis wiring failed: {e}")
+
+    # Slack alerts — gated on the cutover flag.
+    if not config.alerts_enabled:
+        logger.info(
+            "Convex Slack alerts disabled (alerts_enabled=False); skipping."
+        )
+        return
+
+    try:
+        from app.services.slack import get_slack_service
+
+        service = get_slack_service()
+        sent_count = 0
+        for candidate in finalised:
+            try:
+                sent, reason = await service.send_convex_alert(candidate)
+                if sent:
+                    sent_count += 1
+                else:
+                    logger.info(
+                        f"Convex alert skipped for {candidate.candidate.ticker}: {reason}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Convex Slack alert failed for "
+                    f"{candidate.candidate.ticker}: {e}"
+                )
+        logger.info(f"Convex alerts sent: {sent_count}/{len(finalised)}")
+    except Exception as e:
+        logger.warning(f"Convex Slack wiring failed: {e}")
 
 
 def _to_selected_contract(c: Optional[Any]) -> Optional[ConvexSelectedContract]:

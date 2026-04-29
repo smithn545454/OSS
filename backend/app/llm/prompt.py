@@ -449,6 +449,141 @@ def _format_v5_scores(scores: dict[str, Any], final: float) -> str:
     return "\n".join(lines) + "\n"
 
 
+CONVEX_THESIS_SYSTEM_PROMPT = """You are an expert options trading analyst generating a thesis for an approved single-leg long options trade selected by the OSS Convex pipeline.
+
+NORTH STAR. The trader is a sharpshooter hunting grand-slam outcomes — trades whose maximum favorable excursion (MFE) reaches +200% or more on the option. A +30% winner is a consolation prize, not the goal. Your thesis must judge the trade on two dimensions simultaneously:
+
+  1. UPSIDE CAPACITY. If the underlying delivers the move the setup implies, does this specific contract have the structural leverage (delta, DTE, IV regime, convexity) to 3–5x or more?
+  2. EVIDENCE QUALITY. The Convex pipeline applies four sequential gates — Kinetic Universe, Catalyst, Volatility Mispricing, Contract Selection — and each gate carries a strength score. A trade that cleared every gate at high strength is structurally cleaner than one that scraped through.
+
+CONVEX SCORING MODEL. The evaluation is described by:
+
+- **Tier (A/B/C):** A is awarded only when every dimension is strong (Stage 2 strength ≥ 0.75 AND Stage 3 composite ≥ 0.70 AND Stage 4 strength ≥ 0.85). B is "all gates passed at moderate strength". C is "all gates passed at borderline strength". Tier A is the home-run bucket; Tier C still passed every gate but is best treated as a small probe.
+- **Composite strength (0.00–1.00):** within-tier ranking by Stage 3 strength (cheaper convexity ranks first). Use it to gauge how attractive this trade is *relative to other Convex APPROVES today*, not as an absolute probability.
+- **Smart Money Confirmation:** when True, an Unusual Volume signal aligned directionally with the Stage 3 thesis. Strong tailwind. When False, the trade is structurally clean but lacks that confirmation.
+
+STAGE BLOCKS. The four stage payloads in the input each carry: a result (PASS/FAIL — only PASS reaches you), a strength score, a free-text summary, and a `criteria` dict with the specific values that drove the gate. Cite specific numbers when framing the thesis.
+
+- **Stage 1 — Kinetic Universe:** establishes that the underlying has the structural conditions to move (options volume, market cap, ATM spread, tail-event count, HV regime). This is a backdrop check, not a thesis driver.
+- **Stage 2 — Catalyst:** identifies *why now*. Date-known catalyst (earnings/FDA), compression breakout, unusual volume, or sympathy move. The catalyst is the most important part of the directional thesis — call it out by name and explain its expected mechanism.
+- **Stage 3 — Volatility Mispricing:** confirms that IV is cheap relative to historical realized vol. Cite IV rank, IV percentile, and IV/HV ratio. This is the structural edge — buying convexity when the market is under-pricing future moves.
+- **Stage 4 — Contract Selection:** chose a specific contract within the delta/DTE/spread envelope. Cite the delta, DTE, spread, and open interest. Note whether the chosen contract is in the ideal sub-range (drives Tier A) or at the periphery.
+
+DIRECTION. The candidate carries a `direction` field (``bullish`` / ``bearish`` / ``ambiguous``). Use the matching contract type. For ``ambiguous`` direction, frame the thesis around volatility expansion (long premium plays both sides via the IV expansion).
+
+Based on this data, produce a thesis that answers:
+ 1. Why this Convex trade has grand-slam potential — frame Stage 2 catalyst + Stage 3 vol mispricing + Stage 4 contract leverage as a coherent story.
+ 2. What the catalyst's expected mechanism is and how it gets priced in.
+ 3. Whether the contract structure is leveraged enough to capture the move (delta/DTE trade-off, theta drag, convexity).
+ 4. What invalidates the thesis (clean exit conditions).
+
+OUTPUT — RETURN VALID JSON MATCHING EXACTLY THIS STRUCTURE:
+
+{
+  "setup_summary": "string — one-sentence framing (e.g. 'Compression breakout with cheap IV on AAPL post-earnings')",
+  "thesis": "string — 2–4 sentences explaining the grand-slam mechanism",
+  "supporting_evidence": ["string", ...],
+  "risks": ["string", ...],
+  "invalidation_conditions": ["string", ...],
+  "exit_plan": {
+    "take_profits": [
+      {"tier": 1, "option_pnl_pct": 60.0, "underlying_price": 0.0, "rationale": "Conservative de-risk — ~1x expected move"},
+      {"tier": 2, "option_pnl_pct": 150.0, "underlying_price": 0.0, "rationale": "Home-run base case"},
+      {"tier": 3, "option_pnl_pct": 300.0, "underlying_price": 0.0, "rationale": "Stretch / long-tail"}
+    ],
+    "stop_loss_level": {"option_pnl_pct": -40.0, "underlying_price": 0.0, "rationale": "Below thesis invalidation"},
+    "time_exit_level": {"dte_threshold": 7, "rationale": "Exit before theta acceleration"},
+    "profit_target": "string — human-readable summary",
+    "stop_loss": "string — human-readable summary",
+    "time_exit": "string — human-readable summary"
+  }
+}"""
+
+
+def build_convex_thesis_prompt(
+    *,
+    ticker: str,
+    direction: str,
+    tier: str,
+    composite_strength: float,
+    smart_money_confirmation: bool,
+    stages: dict[str, Any],
+    selected_contract: dict[str, Any],
+    policy_version: str,
+) -> str:
+    """Build a Convex-shaped prompt for the LLM thesis generator.
+
+    The output asks the model to return the same JSON contract used by
+    the legacy thesis path, so ``parse_thesis_response`` and
+    ``ThesisOutput.from_dict`` work without modification.
+    """
+    contract_lines = []
+    if selected_contract:
+        contract_lines.append(f"- Type: {selected_contract.get('option_type', '?')}")
+        contract_lines.append(f"- Strike: ${selected_contract.get('strike', 0):.2f}")
+        contract_lines.append(f"- Expiry: {selected_contract.get('expiry', '?')}")
+        contract_lines.append(f"- DTE: {selected_contract.get('dte', '?')}")
+        delta = selected_contract.get("delta")
+        if delta is not None:
+            contract_lines.append(f"- Delta: {delta:.3f}")
+        bid = selected_contract.get("bid")
+        ask = selected_contract.get("ask")
+        if bid is not None and ask is not None:
+            contract_lines.append(f"- Bid/Ask: ${bid:.2f} / ${ask:.2f}")
+        oi = selected_contract.get("open_interest")
+        vol = selected_contract.get("volume")
+        if oi is not None:
+            contract_lines.append(f"- Open Interest: {oi:,}")
+        if vol is not None:
+            contract_lines.append(f"- Volume: {vol:,}")
+    contract_text = "\n".join(contract_lines) if contract_lines else "- (no contract data)"
+
+    stage_blocks = []
+    for stage_num in (1, 2, 3, 4):
+        payload = stages.get(f"stage_{stage_num}")
+        if not payload:
+            continue
+        strength = payload.get("strength")
+        strength_str = f"{strength:.2f}" if strength is not None else "—"
+        criteria = payload.get("criteria") or {}
+        criteria_str = (
+            ", ".join(f"{k}={v}" for k, v in criteria.items())
+            if criteria
+            else "(none)"
+        )
+        stage_blocks.append(
+            f"**Stage {stage_num} — {payload.get('stage_name', '?')}**\n"
+            f"- Result: {payload.get('result', '?')} (strength {strength_str})\n"
+            f"- Summary: {payload.get('summary', '')}\n"
+            f"- Criteria: {criteria_str}"
+        )
+    stages_text = "\n\n".join(stage_blocks) if stage_blocks else "(no stage data)"
+
+    sm_text = (
+        "True (UV scanner shows directionally aligned unusual volume — strong tailwind)"
+        if smart_money_confirmation
+        else "False (no UV confirmation — trade is structurally clean but lacks UV tailwind)"
+    )
+
+    user_prompt = f"""**Ticker:** {ticker}
+**Direction:** {direction}
+**Convex Tier:** {tier}
+**Composite Strength:** {composite_strength:.2f} (within-tier ranking, 0.00–1.00)
+**Smart Money Confirmation:** {sm_text}
+**Policy Version:** {policy_version}
+
+**Selected Contract**
+{contract_text}
+
+**Convex Stage Walkthrough**
+
+{stages_text}
+
+Generate the thesis JSON per the system prompt. Cite specific stage numbers/values to ground every claim. The setup_summary must name the catalyst type from Stage 2."""
+
+    return f"{CONVEX_THESIS_SYSTEM_PROMPT}\n\n---\n\n{user_prompt}"
+
+
 def parse_thesis_response(response: str) -> dict[str, Any]:
     """Parse LLM response into thesis data.
 

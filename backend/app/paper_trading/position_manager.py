@@ -301,6 +301,143 @@ async def create_position_from_evaluation(
     return position
 
 
+async def create_position_from_convex_candidate(
+    finalised: Any,
+) -> Optional[PaperPosition]:
+    """Create a paper position from a finalised Convex candidate.
+
+    Convex candidates carry tier (A/B/C) instead of pillar scores, so
+    the legacy v3/v4/v5 pillar fields stay None on the resulting
+    PaperPosition. Sizing is implicit in the tier and surfaced via
+    ``scanner_source`` (``CONVEX_TIER_A`` etc.) so downstream P&L
+    aggregations can group by tier.
+
+    The selected contract is the call for ``bullish`` direction, the put
+    for ``bearish``. ``ambiguous`` direction is rare (Stage 3 normally
+    resolves it) and falls back to whichever contract was selected.
+
+    Dedup behavior matches ``create_position_from_evaluation``: skips if
+    any open position already exists for the same option_ticker.
+
+    Args:
+        finalised: ``FinalisedConvexCandidate`` from Convex tier emission.
+
+    Returns:
+        Created PaperPosition, or None if dedup skipped or no contract
+        was selected.
+    """
+    candidate = finalised.candidate
+    decision = finalised.decision
+
+    # Pick the contract that matches the direction.
+    selected = None
+    direction = (candidate.direction or "").lower()
+    if direction == "bearish" and candidate.selected_put is not None:
+        selected = candidate.selected_put
+    elif candidate.selected_call is not None:
+        selected = candidate.selected_call
+    elif candidate.selected_put is not None:
+        selected = candidate.selected_put
+
+    if selected is None:
+        logger.warning(
+            f"Convex finalised candidate {candidate.ticker} has no "
+            f"selected contract; skipping paper position."
+        )
+        return None
+
+    # Dedup by evaluation_id, then by open contract.
+    existing = await PaperPositionTable.get_by_evaluation_id(decision.evaluation_id)
+    if existing:
+        logger.info(
+            f"Skipping Convex enrollment: position exists for "
+            f"{decision.evaluation_id} ({selected.option_ticker})"
+        )
+        return None
+
+    if await PaperPositionTable.has_open_position(selected.option_ticker):
+        logger.info(
+            f"Skipping Convex enrollment: open position for {selected.option_ticker} "
+            f"(eval={decision.evaluation_id})"
+        )
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    entry_date = now[:10]
+
+    # Entry price: ask if available, otherwise mid of bid/ask.
+    if selected.ask and selected.ask > 0:
+        entry_price = float(selected.ask)
+    elif selected.bid and selected.ask:
+        entry_price = float(selected.bid + selected.ask) / 2.0
+    else:
+        entry_price = float(selected.bid or 0.0)
+
+    if entry_price <= 0:
+        logger.warning(
+            f"Convex {candidate.ticker}: selected contract has no usable "
+            f"price (bid={selected.bid}, ask={selected.ask}); skipping."
+        )
+        return None
+
+    tier_label = finalised.tier.value if hasattr(finalised.tier, "value") else str(finalised.tier)
+    scanner_source = f"CONVEX_TIER_{tier_label}"
+
+    position = PaperPosition(
+        evaluation_id=decision.evaluation_id,
+        option_ticker=selected.option_ticker,
+        entry_price=entry_price,
+        entry_date=entry_date,
+        quantity=1,
+        verdict_at_entry=Verdict.CONVEX_APPROVE,
+        quality_tier_at_entry=None,  # Convex uses A/B/C, not the v3/v4/v5 QualityTier enum
+        current_price=entry_price,
+        current_pnl_pct=0.0,
+        max_favorable_excursion=0.0,
+        max_adverse_excursion=0.0,
+        days_held=0,
+        status=PositionStatus.OPEN,
+        last_updated=now,
+        underlying_ticker=candidate.ticker,
+        scanner_source=scanner_source,
+        scanner_list=["CONVEX"],
+        convergence_count=1,
+        # composite_strength is on a 0–1 scale; project onto the legacy 0–100
+        # conviction_score so existing UI/queries that sort by conviction keep
+        # working until they migrate to convex_tier directly.
+        conviction_score=round(float(finalised.composite) * 100.0, 2),
+        strike=selected.strike,
+        option_type=str(selected.option_type),
+        expiration_date=selected.expiry,
+        dte_at_entry=selected.dte,
+        entry_delta=selected.delta,
+        entry_open_interest=selected.open_interest,
+        entry_volume=selected.volume,
+    )
+
+    try:
+        await PaperPositionTable.put(position)
+    except Exception as e:
+        logger.error(
+            f"Failed to persist Convex paper position for {selected.option_ticker} "
+            f"(eval={decision.evaluation_id}): {e}"
+        )
+        return None
+
+    logger.info(
+        f"Created Convex paper position {selected.option_ticker} "
+        f"(tier={tier_label}, composite={finalised.composite:.2f})"
+    )
+
+    try:
+        from app.paper_trading.metrics_aggregator import MetricsAggregator
+        await MetricsAggregator.on_position_opened(position)
+    except Exception as e:
+        logger.warning(f"Failed to update metrics on Convex position open: {e}")
+
+    return position
+
+
 async def create_positions_from_decisions(
     evaluations: Sequence[Evaluation],
     decisions: dict[str, Decision],
