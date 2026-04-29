@@ -42,34 +42,17 @@ class TestCreateApp:
 
 class TestHandler:
 
-    def test_scheduled_scan_event(self):
-        """Coordinator scan event should call _run_scheduled_scan."""
+    def test_convex_daily_run_event(self):
+        """Convex daily-run event should dispatch to _run_convex_daily_run."""
         event = {
             "source": "oss.scheduler",
-            "action": "run_scan",
+            "action": "convex_daily_run",
         }
 
-        with patch("app.main._run_scheduled_scan", new_callable=AsyncMock) as mock_scan:
-            mock_scan.return_value = {"status": "success"}
+        with patch("app.main._run_convex_daily_run", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = {"status": "ok"}
             with patch("app.main.asyncio") as mock_asyncio:
-                mock_asyncio.run = MagicMock(return_value={"status": "success"})
-                result = handler(event, MagicMock())
-
-        assert result is not None
-
-    def test_worker_scan_event(self):
-        """Worker scan event should call _run_worker_scan."""
-        event = {
-            "source": "oss.scheduler",
-            "action": "worker_scan",
-            "tickers": ["AAPL", "MSFT"],
-            "chunk_index": 0,
-        }
-
-        with patch("app.main._run_worker_scan", new_callable=AsyncMock) as mock_scan:
-            mock_scan.return_value = {"status": "success"}
-            with patch("app.main.asyncio") as mock_asyncio:
-                mock_asyncio.run = MagicMock(return_value={"status": "success"})
+                mock_asyncio.run = MagicMock(return_value={"status": "ok"})
                 result = handler(event, MagicMock())
 
         assert result is not None

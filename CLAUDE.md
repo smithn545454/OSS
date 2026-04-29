@@ -66,77 +66,75 @@ cdk deploy oss-dev-frontend   # Deploy frontend infra only (SAFE)
 
 ## Architecture
 
-### Pipeline (8 stages, sequential)
+### Pipeline (Convex Mode — 4 stages, sequential)
 
-The core system is an evaluation pipeline that processes tickers through 8 stages:
+The core system is the **Convex pipeline**, a four-stage gated evaluator that
+identifies asymmetric long-premium "exploder" setups. It cut over to be the
+sole production pipeline on 2026-04-29 (the legacy 8-stage scanner is gone).
 
-1. **Opportunity Discovery** (`app/scanners/`) — 4 scanners (Breakout, Compression, Cheap Options, Unusual Volume) identify ticker-level opportunities
-2. **Underlying Quality Filters** (`app/filters/`) — Remove low-quality underlyings
-3. **Contract Selection** (`app/selection/`) — Select contracts per DTE/delta bucket
-4. **Feature Computation** (`app/features/`) — Calculate scoring inputs (liquidity, volatility, catalyst, etc.)
-5. **Pillar Scoring** (`app/pillars/`) — Score three pillars: Directional, Volatility, Structure
-6. **Hard Gates** (`app/gates/`) — Binary pass/fail checks; any failure → REJECT
-7. **Decision Logic** (`app/decision/`) — Final verdict: APPROVE / WATCH / REJECT with quality tiers
-8. **Paper Trading** (`app/paper_trading/`) — Track simulated performance
+1. **Stage 1 — Kinetic Universe** (`app/convex/stage1_universe.py`) —
+   monthly construction of the eligible ticker set (options volume, market
+   cap, ATM spread, tail-event count, HV regime). Persists snapshots to
+   `ConvexUniverseSnapshotTable` for the daily run to consume.
+2. **Stage 2 — Catalyst** (`app/convex/stage2_catalyst.py`) — daily
+   detection of date-known catalysts (earnings/FDA), compression breakouts,
+   unusual volume, and sympathy moves. Sets candidate direction.
+3. **Stage 3 — Volatility Mispricing** (`app/convex/stage3_volatility.py`) —
+   IV rank / IV percentile / IV-vs-HV ratio gates; cheap convexity wins.
+4. **Stage 4 — Contract Selection** (`app/convex/stage4_contract.py`) —
+   pick a specific contract within the delta/DTE/spread envelope; smart-
+   money confirmation via the UV scanner GSI lookup.
+
+Tier assignment runs after Stage 4: **Tier A** (every dimension strong),
+**Tier B** (all gates passed at moderate strength), **Tier C** (borderline
+but every gate passed). Sizing is tier-driven (A=50%, B=35%, C=25% of
+standard). See `app/convex/tier.py`.
 
 ### Lambda Handler (`app/main.py`)
 
-The backend runs as a single Lambda with three invocation modes:
+Single Lambda with two invocation modes:
 - **API Gateway** — HTTP requests via Mangum
-- **Coordinator** — EventBridge-triggered; splits watchlist into chunks, fans out to workers
-- **Worker** — Processes a chunk of tickers through the pipeline
+- **Scheduled events** — EventBridge dispatches actions:
+  `convex_daily_run`, `convex_universe_refresh`, `paper_update`,
+  `paper_update_worker`, `paper_trading_update`, `earnings_refresh`,
+  `price_history_refresh`, `earnings_history_refresh`, `daily_data_capture`,
+  `pattern_discovery_worker`, `custom_analysis_worker`, `thesis_worker`,
+  `stock_summary_worker`.
 
 ### Key Modules
-- `app/core/schemas.py` — All Pydantic models (Policy, Evaluation, Opportunity, Decision, etc.)
-- `app/core/watchlist.py` — Ticker watchlist management
-- `app/db/tables.py` — DynamoDB table operations (all tables use PK/SK pattern, some with GSI1/GSI2)
-- `app/config.py` — Settings via pydantic-settings
-- `app/services/` — External API clients (Polygon, Finnhub, Slack)
-- `app/llm/` — Post-decision trade thesis generation (LLM is never used in decision logic)
-- `app/calibration/` — Performance tracking, archetype rates, discovery/drift detection
-- `app/observability/` — Pipeline stage tracing/telemetry
-- `app/v5/` — **v5 dual-conviction scoring** (HR/P archetypes, GBM co-scorer, decision pipeline)
+- `app/convex/` — the production pipeline (stages, providers, tier, daily runner, backtest harness)
+- `app/core/schemas.py` — all Pydantic models (Policy, ConvexConfig, Decision, ConvexEvaluation, PaperPosition, etc.)
+- `app/db/tables.py` — DynamoDB table operations (all tables use PK/SK; some with GSI1/GSI2)
+- `app/config.py` — settings via pydantic-settings
+- `app/services/` — external API clients (Polygon, Finnhub) and Slack alert service
+- `app/llm/` — post-decision trade thesis generation (Convex-shaped prompt; LLM is never in decision logic)
+- `app/paper_trading/` — position creation from Convex finalised candidates, daily updates, exit checking
+- `app/observability/` — representative trace sampling
+- `app/data_capture/` — daily market snapshot for backtesting
 
-### v5 Scoring Regime (active as of 2026-04-20)
+### Downstream consumer wiring
 
-Policy **v4.1.1** activated v5: `v5_active=True`, scanners = `{UNUSUAL_VOLUME,
-CHEAP_OPTIONS, BREAKDOWN, REVALIDATION}`. See `docs/v5_architecture.md` for
-the full design, `docs/archetypes_catalog.md` for the archetype library.
-
-**Two convictions:**
-- **HR Conviction (0–20):** `100 × Wilson_lower(P(MFE ≥ 200%)) × fit × regime`.
-  Calibrated grand-slam probability.
-- **P Conviction (0–100):** `100 × Wilson_lower(P_win) × normalized_pnl × fit × regime`.
-  Calibrated profitability (catches grinder patterns like BREAKDOWN).
-
-**Verdict order:** gates → anti-archetypes → v5 tier assignment when scanner
-is in `v5_active_scanners`; otherwise v4.1.0 fallback. `BREAKOUT` and
-`COMPRESSION_EXPANSION` remain on v4.1.0 until positive archetypes surface.
-
-**REVALIDATION is not a primary scanner** — it's a synthetic re-evaluation
-pass that re-injects recent APPROVEs (last 8 hours) so we refresh their
-convictions with current prices and Greeks. Its opportunities carry
-`scanner_metrics.originating_scanner` pointing at the real upstream scanner.
-Frontend and stage_mapper render the label as "Re-evaluation".
-
-**Critical wiring fix during Phase 7 cutover:** `opportunities` and `feature_sets`
-are passed as `list[...]` from the orchestrator but stage helpers expected
-`dict[...]`. `_normalize_opportunities` and `_normalize_feature_sets` in
-`app/decision/stage.py` accept either shape. Before the fix, v4.1.0 archetype
-matching was silently failing on the worker path (try/except swallowed the
-TypeError). Now both v4.1.0 archetypes AND v5 envelopes compute correctly.
+The Convex daily runner fans out to three downstream consumers after
+finalization (each isolated by try/except so one failure doesn't block the
+others):
+1. `paper_trading.position_manager.create_position_from_convex_candidate(...)` — tier-based scanner_source, no pillar denorm.
+2. `llm.generator.ThesisGenerator.generate_convex(...)` — Convex 4-stage walkthrough prompt; reuses the existing rate limiter and JSON output contract.
+3. `services.slack.SlackAlertService.send_convex_alert(...)` — gated on `ConvexConfig.alerts_enabled`; tier filtering via `convex_min_tier` config (default "B" — A+B alert; C suppressed).
 
 ### Frontend
 - React 18 + TypeScript + Vite + Tailwind CSS
 - TanStack React Query for server state
 - Path alias: `@/` → `src/`
-- Pages: Dashboard, Opportunities, Pipeline Monitor, Policy Config, Calibration, Evaluation Detail
+- Canonical pages: `/opportunities` (ConvexOpportunities), `/evaluation/:ticker/:evaluationId` (ConvexEvaluationDetail)
+- `/convex/*` aliases preserved one release for bookmarks
+- Other pages: Paper Trading, My Trades, Intelligence, Alerts, Backtesting, Policy Config
+- **Pending:** `/pipeline` and `/calibration` legacy pages still render but their backend routes are gone — they will 404 on data calls until Phase 5 (rebuild Pipeline Monitor for Convex) and Phase 6 (delete legacy frontend pages) land
 
 ### Infrastructure (4 CDK Stacks)
 - **DatabaseStack** — DynamoDB tables
-- **BackendStack** — Lambda + API Gateway + Secrets Manager
+- **BackendStack** — Lambda + API Gateway + Secrets Manager (CDK is documentation only — never `cdk deploy oss-dev-backend`)
 - **FrontendStack** — S3 + CloudFront
-- **UnusualVolumeStack** — Serverless fan-out for UV scanner (separate Lambda pipeline)
+- **UnusualVolumeStack** — serverless fan-out for the UV scanner (writes the GSI Convex Stage 4 reads for smart-money confirmation)
 
 ## Non-Negotiable Principles
 
@@ -164,29 +162,26 @@ TypeError). Now both v4.1.0 archetypes AND v5 envelopes compute correctly.
 ## Key Implementation Details
 
 ### Evaluation Detail Page
-- Route: `/evaluation/:ticker/:evaluationId` (2 params, no timestamp)
-- Backend endpoint: `GET /api/evaluations/detail/{ticker}/{evaluation_id}` — MUST be defined BEFORE the catch-all `/{ticker}/{timestamp}/{evaluation_id}` route in `evaluations.py` to avoid FastAPI route collision (both are 3-segment paths)
-- `EvaluationTable.get_by_id()` queries by PK and scans SK suffix for evaluation_id (avoids URL-encoding issues with ISO timestamps containing `+00:00`)
-- `EvaluationDetail.tsx` uses `fmt(val, decimals)` and `num(val)` helpers for null-safe number formatting — many API fields return null
+- Route: `/evaluation/:ticker/:evaluationId` → `ConvexEvaluationDetail`
+- Backend: `GET /api/convex/evaluations/{ticker}/{evaluation_id}` returns `ConvexEvaluation` with embedded `convex_stages` for the four-stage walkthrough
+- Tier A expands by default; B and C collapse for scan-and-drill UX
 - Error boundary (`EvaluationErrorBoundary`) wraps the page to catch render crashes gracefully
 
-### Pillar Models: PillarResult vs PillarScore
-- `PillarResult` (runtime, `app/pillars/models.py`): has `subscores: list[Subscore]` and `top_contributors` property
-- `PillarScore` (schema, `app/core/schemas.py`): has `contributors: list[PillarContributor]`
-- Convert with `pillar_result.to_pillar_score()` — do NOT manually construct PillarScore from PillarResult (there is no `contributors` attribute on PillarResult)
+### Decision shape (`app/core/schemas.py`)
+- `Decision.verdict = Verdict.CONVEX_APPROVE` for all production decisions
+- Convex-specific fields: `convex_tier` (A/B/C), `convex_stages` (the four `ConvexStagePayload`s), `convex_strength_composite`, `smart_money_confirmation`, `convex_uv_signal`, `position_sizing_recommendation`
+- Legacy v3/v4/v5 pillar/conviction fields remain on the schema (Optional) for historical row deserialization until the legacy `EvaluationTable` is dropped (~30 days post-cutover); new rows leave them null
+- Decision is **frozen** — when populating `convex_uv_signal` after `finalise_candidate`, use `decision.model_copy(update={...})` and rebuild the `FinalisedConvexCandidate`
 
-### Conviction Score (`frontend/src/lib/convictionScore.ts`)
-- Client-side weighted calculation: EV (40%), Pillar composite (25%), Gate margin (15%), Scanner convergence (10%), Time sensitivity (10%)
-- `DEFAULT_EV_BENCHMARK = 15` — theta-adjusted EV is per-contract dollars over a 5-day hold; typical range $-5 to $+15
-- Urgency mapping: Breakout → act_now (100), Unusual Volume → hours (50), Compression/Cheap Options → patient (0)
+### Convex composite strength (`app/convex/tier.py`)
+- Within-tier ranking uses Stage 3 strength (cheaper convexity ranks first); falls back to Stage 2 strength when Stage 3 didn't run
+- `Decision.final_score = 0.0` is the sentinel — Convex doesn't compute a blended composite; tier + strength tell the story
+- `PaperPosition.conviction_score` for new Convex positions = `composite_strength × 100` (legacy 0–100 scale projection so existing UI sorting keeps working)
 
 ### Opportunities Page
-- Verdict filter dropdown: APPROVE / WATCH / ALL (query param on `/api/evaluations/approve`)
-- Conviction Queue shows high-conviction (≥75) opportunities; All APPROVEs table shows everything
-
-### Gate Journey (CSS)
-- `.gate-journey` uses `align-items: flex-start` (not `center`) for consistent vertical alignment of gate circles
-- `.gate-journey::before` connector line uses `top: 16px` (half of 32px circle diameter)
+- Tier filter dropdown: A / B / C / ALL
+- 100 evaluations cached for 60s via React Query
+- `SmartMoneyBadge` flags UV-confirmed candidates
 
 ### API Base URL
 - Production API: `https://2nv5mt4d1k.execute-api.us-west-1.amazonaws.com` (no trailing slash, no `/prod` suffix)
@@ -357,75 +352,44 @@ After any rollback, tell the user:
 10. **Clean up branches** — after merging, delete the remote branch. One active branch at a time keeps things simple.
 11. **Never `cdk deploy` the backend stack** — `cdk deploy oss-dev-backend` replaces Lambda code with an unpackaged bundle that lacks dependencies, immediately breaking the backend. Use `cdk deploy oss-dev-database` for database changes, `./scripts/deploy.sh backend` for backend code. If you accidentally run `cdk deploy` on the backend, immediately rollback: `./scripts/deploy.sh rollback`.
 
-### Pipeline Run ID Flow (Critical Context)
-- **Coordinator** (`main.py`) is triggered by EventBridge every 15 min
-- If tickers ≤ CHUNK_SIZE (100): processes directly, orchestrator creates PipelineRun with UUID
-- If tickers > CHUNK_SIZE: coordinator creates PipelineRun, passes run_id to workers in payload
-- **Workers** record all stage events under the coordinator's run_id
-- **UV scanner** is a separate Lambda pipeline — its runs appear in the sidebar too but only have Stages 1-2
-- The Pipeline Monitor queries `PipelineRunTable` for sidebar items and `StageEventTable.list_by_run(run_id)` for stage data
+### EventBridge schedule (production)
 
-## Known Issues / Future Work
+Live rule states (CDK is documentation-only; flip via `aws events enable-rule`/`disable-rule`):
 
-### Pipeline Monitor Restructure (Done)
-- Pipeline Monitor now displays all 8 backend stages 1:1 (was 5 compressed stages)
-- Stage mapper (`stage_mapper.py`) passes through all 8 stages individually
-- Remaining: Add UV scanner as 4th scanner at Stage 1, normalize UV drop reason keys, add Stage 3 passthrough event for UV runs
-- Remaining: Add per-filter drop tracking to contract selection (Stage 3)
+- `oss-dev-convex-daily-run` — ENABLED — `30 22 * * MON-FRI` UTC
+- `oss-dev-convex-universe-refresh` — ENABLED — monthly, 1st at 02:00 UTC
+- `oss-dev-paper-trading-update` — ENABLED — daily 21:15 UTC
+- `oss-dev-earnings-refresh`, `oss-dev-price-history-refresh`, `oss-dev-earnings-history-refresh`, `oss-dev-data-capture` — ENABLED — daily/weekly data jobs
+- `oss-dev-scan-schedule` (legacy 8-stage scanner) — DISABLED at the 2026-04-29 cutover
+- `oss-dev-calibration-weekly` — DISABLED (legacy v5 archetype rate refresh; gone with v5)
 
-### Pipeline Fixes Applied (Feb 12, 2026)
-- Stages 2, 6, 7 TypeError crashes fixed (earnings_cache kwarg, pillar_results kwarg, pillar→pillars typo)
-- Stage 3: Polygon snapshot bid/ask fallback — added day.close fallback with 5% spread estimate (now rarely needed with Advanced Options plan)
-- Stage 4: FeatureComputer positional arg bug (config passed as catalyst_service)
-- Worker run_id flow: workers now use orchestrator-created UUID (was invisible `worker-xxx` IDs)
-- Stage mapper: aggregate sums events correctly; fan-out stages (3, 8) don't trigger false anomalies
-- All 8 stages flow data end-to-end; Stage 6 currently rejects all (gates working, thresholds may need tuning)
+## Known Issues / Watch Items
 
-### Pipeline Audit Fixes (Mar 10, 2026)
-- **Greeks Coherence gate was rejecting 91% of evaluations** — root cause: Black-Scholes fallback only triggered when BOTH delta=0 AND iv=0, but Polygon basic tier often returns IV without the other Greeks. Fixed: fallback now triggers when ANY critical Greek is zero.
-- **IV Percentile gate hard-failed on missing data** — was rejecting evaluations where IV history hadn't accumulated (needs 20 days). Fixed: gate now fails open (passes) when data is missing, since missing data is not evidence of high IV.
-- **IV history only written by Cheap Options scanner** — due to early exit optimization (Breakout/Compression trigger first → CheapOptions skipped), many tickers never accumulated IV history. Fixed: orchestrator now stores IV history for ALL tickers before scanners run.
-- **Dead GateConfig fields**: `combined_score_min`, `pillar_minimum`, `pillar_spread_max` are defined in GateConfig but no production gate uses them (only backtest). The "relaxations" noted previously had zero effect on production.
-- `breakout_volume_min` stays at 1.5x (intentional)
+- **FinnhubClient "not initialized"** — needs async context manager usage. Earnings lookups in `services/catalyst.py` (used by Convex Stage 2 catalyst detection) catch this and return `None` so the catalyst pass fails open. Noisy in logs, non-blocking.
+- **SEC EDGAR rate limiting** — `CatalystDataService.prefetch_batch()` runs 5 concurrent requests with only 0.1s delay, exceeding SEC's 10 req/s limit. Can trigger 429s; `recent_sec_filing` defaults to `False` on failure.
+- **Backfill script region default** — `backfill_iv_history_dynamodb.py` uses `AWS_DEFAULT_REGION` but `app.config.Settings` reads `AWS_REGION`. Run with `AWS_REGION=us-west-1 DYNAMODB_TABLE_PREFIX=oss-dev` env vars explicitly set.
+- **Legacy frontend pages still bundled** — `/pipeline` and `/calibration` routes render legacy components that call deleted backend routes (404). Phase 5 (rebuild Pipeline Monitor for Convex) and Phase 6 (delete legacy frontend pages) are deferred follow-ups.
+- **Decision schema legacy fields** — v3/v4/v5 pillar/conviction fields remain on the `Decision` model (Optional, null on new rows) for historical row deserialization while `EvaluationTable` is retained ~30 days. Drop in a follow-up after the legacy table is dropped.
 
-### Pipeline Fixes Applied (Mar 11, 2026)
-- **BS fallback ignored Polygon IV** — `compute_greeks()` always recomputed IV via Newton-Raphson from estimated market prices, failing ~85% of the time. Fixed: accepts optional `iv` parameter; when Polygon provides IV, skips Newton-Raphson and computes delta/gamma/theta/vega directly. `contract_selector.py` now passes Polygon IV to the fallback and preserves it afterward.
-- **CatalystDataService never wired up** — fully implemented but never instantiated in the pipeline. `days_to_earnings` was always `None`, catalyst subscore always defaulted to 50. Fixed: orchestrator now creates `CatalystDataService(earnings_cache=earnings_cache)` and passes it through `run_feature_computation()` to `FeatureComputer`.
-- **No visibility into data completeness** — added per-run data availability logging in `pillars/calculator.py` (logs counts of non-None values for iv_rv_ratio, iv_percentile, rv20, rs_20d, theta_adj_edge, days_to_earnings).
-- **IV history backfilled** — 278,701 records across 5,904 tickers (Dec 11, 2025 – Mar 9, 2026) loaded into `oss-dev-iv-history` from S3 parquet files. IV Percentile subscore now computes from real data immediately.
+## Polygon API
 
-### Polygon API Key Upgrade (Mar 12, 2026)
-- **Upgraded to Advanced Options plan** — Polygon now returns native Greeks (delta, gamma, theta, vega) and IV directly on snapshot endpoints. BS fallback (`greeks.py`) is retained but only triggers for edge cases (very low liquidity, newly listed contracts).
-- **IV field location**: `implied_volatility` is at the top level of each snapshot result, NOT inside `greeks` (where it's `None`). The contract selector already handles this correctly via `or` chain.
-- **Greeks source logging added** — contract selector now logs `polygon={N} bs_fallback={M}` counts per run for monitoring.
-
-### Known Issues / Watch Items
-- **FinnhubClient "not initialized" errors** — needs async context manager usage. `CatalystDataService.get_days_to_earnings()` catches this and returns `None` (`catalyst.py:92-96`), so `days_to_earnings` may be `None` for some/all tickers. Catalyst subscore (3.5% of total) defaults to 50 — fails open, noisy but non-blocking.
-- **SEC EDGAR rate limiting** — `CatalystDataService.prefetch_batch()` runs 5 concurrent requests with only 0.1s delay (`catalyst.py:264-273`), exceeding SEC's 10 req/s limit. Can trigger 429 errors caught by try/except (`catalyst.py:164`), causing `recent_sec_filing` to default to `False`. Minor scoring impact only.
-- **Backfill script defaults to wrong region** — `backfill_iv_history_dynamodb.py` uses `os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-1")` but `app.config.Settings` reads `AWS_REGION` (not `AWS_DEFAULT_REGION`) and defaults to `us-east-1`. Must run with `AWS_REGION=us-west-1 DYNAMODB_TABLE_PREFIX=oss-dev` env vars explicitly set.
-
-### Pending Verification
-- Paper Trading section needs a new pipeline run to verify (GSI1 was added to `oss-dev-paper-positions` table)
-- AI Trade Thesis generation should work on next pipeline run (PillarResult→PillarScore conversion was fixed)
+- **Advanced Options plan** — Polygon returns native Greeks (delta, gamma, theta, vega) and IV directly on snapshot endpoints
+- **IV field location**: `implied_volatility` is at the top level of each snapshot result, NOT inside `greeks`
+- Convex Stage 4 contract selection consumes these directly; no Newton-Raphson IV recovery is needed in the production path
 
 ## Baselines
 
-Baselines capture a known-good pipeline state: code (git tag) + policy config (exported JSON). Stored in `baselines/` with restore instructions.
+Baselines capture a known-good production state: code (git tag) + policy config (exported JSON). Stored in `baselines/` with restore instructions.
 
-**Current known-good baseline: `pipeline-stable-v5.0-2026-04-20`**
-- Policy v4.1.1 (v5 active), Lambda v255, hash `0ef0cc52ae35340c`
-- v5_active=True, scanners UV/CHEAP/BREAKDOWN/REVALIDATION, GBM HR-only at 0.5× weight
-- First live Decision carrying `v5_scoring_version="v5.0.0"` on 2026-04-20 02:49 UTC
-- Full context in `baselines/2026-04-19-v5-cutover-README.md`
+**Current production baseline: `pipeline-stable-convex-cutover-2026-04-29`**
+- Convex 4-stage pipeline, sole production scorer
+- Lambda v287 (cutover backend deploy), commit `014d615`
+- `ConvexConfig.enabled=True`, `alerts_enabled=True`; Convex Slack alert filter `convex_min_tier=B` (A+B alert; C suppressed)
+- Legacy 8-stage modules (`scanners/`, `filters/`, `selection/`, `features/`, `pillars/`, `gates/`, `decision/`, `v5/`, `archetypes/`, `calibration/`, `backtest/`) deleted; legacy DynamoDB tables retained ~30 days for historical browsing
 
-**Previous baseline: `pipeline-stable-v4.0.1-2026-04-18`**
-- Policy v4.0.1, Lambda v244
-- See `baselines/2026-04-18-v4.0.1-README.md`
-
-**Deeper history:** `baselines/2026-03-13-README.md` covers Policy v2.0.2.
+**Previous baseline (legacy): `pipeline-stable-v5.0-2026-04-20`** — last legacy v5 baseline. Restore is non-trivial because legacy code is deleted; for emergency rollback use `./scripts/deploy.sh rollback` to v286 (the pre-cutover Lambda) plus re-enable `oss-dev-scan-schedule` and disable the two Convex EventBridge rules.
 
 ### Convention
 - Tag code: `git tag pipeline-stable-YYYY-MM-DD && git push --tags`
 - Export policy: `curl -s .../api/policies/active > baselines/YYYY-MM-DD-policy.json`
 - Document: create `baselines/YYYY-MM-DD-README.md` with identifiers + metrics + restore steps
-- To restore: checkout the tag, POST the policy JSON back via API, activate it

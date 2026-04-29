@@ -53,7 +53,6 @@ from app.core.schemas import (
     StageEvent,
     Verdict,
 )
-from app.features.models import FeatureSet
 
 
 # ============================================================================
@@ -548,52 +547,6 @@ def moto_dynamodb():
         yield db
 
         DynamoDBClient._instance = None
-
-
-# ============================================================================
-# FeatureSet Fixture
-# ============================================================================
-
-
-@pytest.fixture
-def sample_feature_set() -> FeatureSet:
-    """A canonical FeatureSet for AAPL with realistic computed features."""
-    return FeatureSet(
-        evaluation_id="eval-test-001",
-        close=189.0,
-        sma20=185.0,
-        sma50=180.0,
-        return_5d=2.5,
-        return_20d=5.0,
-        trend_aligned_bullish=True,
-        trend_aligned_bearish=False,
-        atr14=3.50,
-        atr14_pct=1.85,
-        spy_return_5d=1.0,
-        spy_return_20d=3.0,
-        rs_5d=1.5,
-        rs_20d=2.0,
-        rv20=0.28,
-        iv=0.32,
-        iv_rv_ratio=1.14,
-        iv_percentile=45.0,
-        iv_10d_change=-2.0,
-        iv_regime=IVRegime.IV_NEUTRAL_REGIME,
-        mid=8.65,
-        spread_pct=3.47,
-        theta_pct=0.92,
-        breakeven_price=193.65,
-        required_move_pct=2.46,
-        expected_move_pct=5.0,
-        feasibility_ratio=0.49,
-        time_adjusted_feasibility=0.45,
-        theta_adjusted_edge=1.8,
-        open_interest=5000,
-        volume=500,
-        oi_5d_change_pct=5.0,
-        days_to_earnings=45,
-        recent_sec_filing=False,
-    )
 
 
 # ============================================================================

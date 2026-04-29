@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 from app.core.schemas import (
-    Decision,
-    Evaluation,
     ExitReason,
     PaperPosition,
     PositionStatus,
@@ -24,7 +22,7 @@ from app.core.schemas import (
     TrackingConfig,
     Verdict,
 )
-from app.db.tables import OpportunityTable, PaperPositionTable, PaperSnapshotTable
+from app.db.tables import PaperPositionTable, PaperSnapshotTable
 from app.paper_trading.exit_checker import (
     calculate_dte_from_expiration,
     check_exit_conditions,
@@ -66,239 +64,25 @@ async def _compute_exit_enrichment(position: PaperPosition) -> dict[str, Any]:
             if s.get("underlying_price") is not None
         ]
         if len(underlying_prices) >= 3:
-            from app.scanners.utils import calculate_rv
-            enrichment["realized_vol_holding"] = calculate_rv(
-                underlying_prices, window=len(underlying_prices) - 1
-            )
+            # Realized volatility: stdev of daily log returns × sqrt(252).
+            import math
+            window = len(underlying_prices) - 1
+            log_returns = [
+                math.log(underlying_prices[i] / underlying_prices[i - 1])
+                for i in range(1, len(underlying_prices))
+                if underlying_prices[i - 1] > 0
+            ]
+            if len(log_returns) >= 2:
+                mean = sum(log_returns) / len(log_returns)
+                variance = sum((r - mean) ** 2 for r in log_returns) / (
+                    len(log_returns) - 1
+                )
+                enrichment["realized_vol_holding"] = math.sqrt(variance * 252)
+            _ = window  # documented above; not used directly anymore
     except Exception as e:
         logger.warning(f"Failed to compute exit enrichment: {e}")
 
     return enrichment
-
-
-async def create_position_from_evaluation(
-    evaluation: Evaluation,
-    decision: Decision,
-) -> Optional[PaperPosition]:
-    """Create a paper position from an evaluation and decision.
-    
-    Per Section 17.1:
-    - Entry price = ask at evaluation time (realistic buy price)
-    - Quantity = 1 contract
-
-    Args:
-        evaluation: The evaluation record
-        decision: The decision for this evaluation
-
-    Returns:
-        Created PaperPosition or None if position already exists
-    """
-    # Check for duplicate by evaluation_id
-    existing = await PaperPositionTable.get_by_evaluation_id(evaluation.evaluation_id)
-    if existing:
-        logger.warning(
-            f"Skipping enrollment: position already exists for evaluation "
-            f"{evaluation.evaluation_id} ({evaluation.option_ticker})"
-        )
-        return None
-
-    # Check for duplicate by option_ticker (same contract already has an open position)
-    has_open = await PaperPositionTable.has_open_position(evaluation.option_ticker)
-    if has_open:
-        logger.warning(
-            f"Skipping enrollment: open position already exists for contract "
-            f"{evaluation.option_ticker} (eval={evaluation.evaluation_id})"
-        )
-        return None
-    
-    # Determine quality tier
-    quality_tier: Optional[QualityTier] = None
-    if decision.quality_tier:
-        if isinstance(decision.quality_tier, str):
-            quality_tier = QualityTier(decision.quality_tier)
-        else:
-            quality_tier = decision.quality_tier
-    
-    # Create position with denormalized enrichment fields
-    now = datetime.now(timezone.utc).isoformat()
-    entry_date = now[:10]  # YYYY-MM-DD
-
-    # Extract scanner source from evaluation (normalize _SCANNER suffix from UV Lambda)
-    scanner_source = getattr(evaluation, "scanner_source", None)
-    if scanner_source and scanner_source.endswith("_SCANNER"):
-        scanner_source = scanner_source[: -len("_SCANNER")]
-
-    # Look up the opportunity to get all scanner triggers (for confluence tracking)
-    scanner_list: list[str] = []
-    convergence_count = 1  # Default: at least the primary scanner
-    try:
-        opportunities = await OpportunityTable.list_by_ticker(
-            evaluation.underlying_ticker, limit=20
-        )
-        for opp in opportunities:
-            if opp.opportunity_id == evaluation.opportunity_id:
-                scanner_list = sorted(set(
-                    t.scanner_type.value
-                    if hasattr(t.scanner_type, "value") else str(t.scanner_type)
-                    for t in opp.scanner_triggers
-                ))
-                convergence_count = len(scanner_list)
-                break
-    except Exception as e:
-        logger.warning(f"Failed to look up opportunity for scanner_list: {e}")
-
-    # Fallback: if opportunity lookup failed, use primary scanner_source
-    if not scanner_list and scanner_source:
-        scanner_list = [scanner_source]
-
-    # Entry price uses ask (what you'd actually pay to buy a long option)
-    entry_price = evaluation.ask if evaluation.ask > 0 else evaluation.mid
-    position = PaperPosition(
-        evaluation_id=evaluation.evaluation_id,
-        option_ticker=evaluation.option_ticker,
-        entry_price=entry_price,
-        entry_date=entry_date,
-        quantity=1,
-        verdict_at_entry=decision.verdict,
-        quality_tier_at_entry=quality_tier,
-        current_price=entry_price,
-        current_pnl_pct=0.0,
-        max_favorable_excursion=0.0,
-        max_adverse_excursion=0.0,
-        days_held=0,
-        status=PositionStatus.OPEN,
-        last_updated=now,
-        # Denormalized enrichment fields
-        underlying_ticker=evaluation.underlying_ticker,
-        scanner_source=scanner_source,
-        scanner_list=scanner_list or None,
-        convergence_count=convergence_count,
-        conviction_score=decision.final_score,
-        pillar_premium_leverage=decision.premium_leverage_score,
-        pillar_underlying_behavior=decision.underlying_behavior_score,
-        pillar_setup_quality=decision.setup_quality_score,
-        pillar_directional_conviction=decision.directional_conviction_score,
-        pillar_move_potential=decision.move_potential_score,
-        pillar_trade_structure=decision.trade_structure_score,
-        strike=evaluation.strike,
-        option_type=evaluation.option_type,
-        expiration_date=evaluation.expiration_date,
-        dte_at_entry=evaluation.dte,
-        dte_bucket=evaluation.dte_bucket,
-        entry_delta=evaluation.delta,
-        entry_iv=evaluation.iv,
-        entry_theta=evaluation.theta,
-        entry_underlying_price=evaluation.underlying_price,
-        entry_moneyness_pct=getattr(evaluation, "moneyness_pct", None),
-        entry_spread_pct=getattr(evaluation, "spread_pct", None),
-        entry_open_interest=getattr(evaluation, "open_interest", None),
-        entry_volume=getattr(evaluation, "volume", None),
-    )
-
-    # Load volatility features for position enrichment and rule matching
-    vol_features: dict[str, float] = {}
-    try:
-        from app.db.tables import FeatureValueTable
-        feat_values = await FeatureValueTable.list_by_evaluation(
-            evaluation.evaluation_id
-        )
-        for fv in feat_values:
-            if fv.feature_name in (
-                "iv_percentile", "iv_rv_ratio", "theta_adjusted_edge",
-                "days_to_earnings", "atr14_pct", "rs_20d",
-                "feasibility_ratio", "rv20",
-                "adx_14", "plus_di", "minus_di",
-            ):
-                if fv.value is not None:
-                    vol_features[fv.feature_name] = fv.value
-    except Exception as e:
-        logger.warning(f"Failed to load features for position enrichment: {e}")
-
-    # Compute theta_adj_ev using volatility-edge formula
-    try:
-        from app.api.routes.evaluations import calculate_theta_adjusted_ev
-        position.theta_adj_ev = calculate_theta_adjusted_ev(
-            theta=evaluation.theta or 0,
-            iv=evaluation.iv or 0,
-            rv20=vol_features.get("rv20"),
-        )
-    except Exception as e:
-        logger.warning(f"Failed to compute theta_adj_ev: {e}")
-
-    # Enrich position with features (for Pattern Discovery AI)
-    position.entry_iv_percentile = vol_features.get("iv_percentile")
-    position.entry_iv_rv_ratio = vol_features.get("iv_rv_ratio")
-    position.entry_theta_adjusted_edge = vol_features.get("theta_adjusted_edge")
-    position.entry_rv20 = vol_features.get("rv20")
-    dte_val = vol_features.get("days_to_earnings")
-    position.entry_days_to_earnings = (
-        int(dte_val) if dte_val is not None else None
-    )
-    position.entry_atr14_pct = vol_features.get("atr14_pct")
-    position.entry_rs_20d = vol_features.get("rs_20d")
-    position.entry_feasibility_ratio = vol_features.get("feasibility_ratio")
-    position.entry_adx_14 = vol_features.get("adx_14")
-    position.entry_plus_di = vol_features.get("plus_di")
-    position.entry_minus_di = vol_features.get("minus_di")
-
-    # Match setup rules at position creation time
-    try:
-        from app.paper_trading.pattern_discovery import list_setup_rules
-        from app.paper_trading.rule_matcher import format_matched_rules, match_rules
-
-        all_rules = await list_setup_rules()
-        if all_rules:
-            eval_dict: dict[str, Any] = {
-                "option_type": (
-                    evaluation.option_type.value
-                    if hasattr(evaluation.option_type, "value")
-                    else str(evaluation.option_type)
-                ),
-                "dte": evaluation.dte,
-                "iv": evaluation.iv,
-                "delta": evaluation.delta,
-                "spread_pct": getattr(evaluation, "spread_pct", None),
-                "open_interest": getattr(evaluation, "open_interest", None),
-                "volume": getattr(evaluation, "volume", None),
-                "underlying_price": evaluation.underlying_price,
-                "moneyness_pct": getattr(
-                    evaluation, "moneyness_pct", None
-                ),
-                **vol_features,
-            }
-            decision_dict = {
-                "final_score": decision.final_score,
-                **decision.pillar_score_dict(),
-            }
-            matched = match_rules(all_rules, eval_dict, decision_dict, scanner_list)
-            if matched:
-                position.matched_rule_ids = [r["rule_id"] for r in matched]
-                position.matched_rules = format_matched_rules(matched, include_criteria=True)
-    except Exception as e:
-        logger.warning(f"Setup rule matching failed during position creation: {e}")
-
-    # Persist position
-    try:
-        await PaperPositionTable.put(position)
-    except Exception as e:
-        logger.error(
-            f"Failed to persist paper position for {evaluation.option_ticker} "
-            f"(eval={evaluation.evaluation_id}): {e}"
-        )
-        return None
-    logger.info(
-        f"Created paper position for {evaluation.option_ticker} "
-        f"(verdict={decision.verdict}, tier={quality_tier})"
-    )
-
-    # Update pre-aggregated metrics
-    try:
-        from app.paper_trading.metrics_aggregator import MetricsAggregator
-        await MetricsAggregator.on_position_opened(position)
-    except Exception as e:
-        logger.warning(f"Failed to update metrics on open: {e}")
-
-    return position
 
 
 async def create_position_from_convex_candidate(
@@ -438,53 +222,6 @@ async def create_position_from_convex_candidate(
     return position
 
 
-async def create_positions_from_decisions(
-    evaluations: Sequence[Evaluation],
-    decisions: dict[str, Decision],
-    config: Optional[TrackingConfig] = None,
-) -> list[PaperPosition]:
-    """Create paper positions for APPROVE and WATCH decisions.
-    
-    Per Section 17.1:
-    - Trigger: Verdict = APPROVE or WATCH
-    - Entry price = ask at evaluation time (realistic buy price)
-    - Quantity = 1 contract
-    
-    Args:
-        evaluations: List of evaluations
-        decisions: Dict mapping evaluation_id to Decision
-        config: Optional tracking configuration
-        
-    Returns:
-        List of created PaperPositions
-    """
-    created_positions: list[PaperPosition] = []
-    eligible_count = 0
-    skipped_count = 0
-
-    for evaluation in evaluations:
-        decision = decisions.get(evaluation.evaluation_id)
-        if not decision:
-            continue
-
-        # Only create positions for APPROVE and WATCH
-        if decision.verdict not in (Verdict.APPROVE, Verdict.WATCH):
-            continue
-
-        eligible_count += 1
-        position = await create_position_from_evaluation(evaluation, decision)
-        if position:
-            created_positions.append(position)
-        else:
-            skipped_count += 1
-
-    logger.info(
-        f"Paper trading enrollment: {len(created_positions)}/{eligible_count} created, "
-        f"{skipped_count} skipped (dedup or error)"
-    )
-    return created_positions
-
-
 async def update_position(
     position: PaperPosition,
     current_price: float,
@@ -510,37 +247,37 @@ async def update_position(
     """
     if config is None:
         config = TrackingConfig()
-    
+
     # Calculate current P&L
     previous_price = position.current_price
     previous_pnl = position.current_pnl_pct
-    
+
     if position.entry_price > 0:
         current_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
     else:
         current_pnl_pct = 0.0
-    
+
     # Update MFE/MAE
     mfe_updated = False
     mae_updated = False
     new_mfe = position.max_favorable_excursion
     new_mae = position.max_adverse_excursion
-    
+
     if current_pnl_pct > 0 and current_pnl_pct > position.max_favorable_excursion:
         new_mfe = current_pnl_pct
         mfe_updated = True
-    
+
     if current_pnl_pct < 0 and current_pnl_pct < position.max_adverse_excursion:
         new_mae = current_pnl_pct
         mae_updated = True
-    
+
     # Increment days held
     new_days_held = position.days_held + 1
-    
+
     # Check exit conditions
     current_dte = calculate_dte_from_expiration(expiration_date)
     exit_reason = check_exit_conditions(position, current_price, current_dte, config)
-    
+
     if exit_reason:
         # Apply MFE/MAE updates to position before close so they're persisted
         position.max_favorable_excursion = new_mfe
@@ -557,7 +294,7 @@ async def update_position(
             exit_price=current_price,
             exit_reason=exit_reason.value,
         )
-        
+
         logger.info(
             f"Closed position {position.position_id} ({position.option_ticker}): "
             f"{exit_reason.value} at {current_pnl_pct:.1f}%"
@@ -584,7 +321,7 @@ async def update_position(
             exit_triggered=True,
             exit_reason=exit_reason,
         )
-    
+
     # Update position (no exit triggered)
     updates = {
         "current_price": current_price,
@@ -593,9 +330,9 @@ async def update_position(
         "max_adverse_excursion": new_mae,
         "days_held": new_days_held,
     }
-    
+
     await PaperPositionTable.update(position, updates)
-    
+
     return UpdateResult(
         position_id=position.position_id,
         option_ticker=position.option_ticker,
@@ -629,15 +366,15 @@ async def update_open_positions(
         List of UpdateResults for each position
     """
     results: list[UpdateResult] = []
-    
+
     # Get all open positions
     open_positions = await PaperPositionTable.list_open()
     if not open_positions:
         logger.info("No open positions to update")
         return results
-    
+
     logger.info(f"Updating {len(open_positions)} open positions")
-    
+
     # Group positions by underlying ticker for efficient fetching
     positions_by_underlying: dict[str, list[PaperPosition]] = {}
     for position in open_positions:
@@ -646,13 +383,13 @@ async def update_open_positions(
         if underlying not in positions_by_underlying:
             positions_by_underlying[underlying] = []
         positions_by_underlying[underlying].append(position)
-    
+
     # Fetch options chains and update positions
     for underlying, positions in positions_by_underlying.items():
         try:
             # Fetch options chain for underlying
             chain = await polygon_client.get_options_chain(underlying)
-            
+
             # Build lookup by option ticker
             # Polygon returns ticker at top level, not nested in details
             contract_data: dict[str, dict] = {}
@@ -660,14 +397,14 @@ async def update_open_positions(
                 ticker = contract.get("ticker") or contract.get("details", {}).get("ticker")
                 if ticker:
                     contract_data[ticker] = contract
-            
+
             # Update each position
             for position in positions:
                 result = await _update_position_from_chain(
                     position, contract_data, config
                 )
                 results.append(result)
-                
+
         except Exception as e:
             logger.error(f"Error fetching chain for {underlying}: {e}")
             # Record errors for positions
@@ -686,7 +423,7 @@ async def update_open_positions(
                         error=str(e),
                     )
                 )
-    
+
     # Log summary
     exits = sum(1 for r in results if r.exit_triggered)
     errors = sum(1 for r in results if r.error)
@@ -694,7 +431,7 @@ async def update_open_positions(
         f"Position update complete: {len(results)} updated, "
         f"{exits} exits, {errors} errors"
     )
-    
+
     return results
 
 
@@ -721,11 +458,11 @@ async def _update_position_from_chain(
     if not contract:
         # Contract not found - may be expired or delisted
         logger.warning(f"Contract not found in chain: {position.option_ticker}")
-        
+
         # Check if likely expired based on option ticker
         expiration = extract_expiration_from_option_ticker(position.option_ticker)
         current_dte = calculate_dte_from_expiration(expiration)
-        
+
         if current_dte <= 0:
             # Expired - close at intrinsic value estimate (use 0.01)
             closed = await PaperPositionTable.close(
@@ -733,7 +470,7 @@ async def _update_position_from_chain(
                 exit_price=0.01,
                 exit_reason=ExitReason.EXPIRATION.value,
             )
-            
+
             return UpdateResult(
                 position_id=position.position_id,
                 option_ticker=position.option_ticker,
@@ -746,7 +483,7 @@ async def _update_position_from_chain(
                 exit_triggered=True,
                 exit_reason=ExitReason.EXPIRATION,
             )
-        
+
         # Not expired but missing — still increment days_held so position
         # doesn't appear "never updated". Price stays at last known value.
         new_days_held = position.days_held + 1
@@ -771,15 +508,15 @@ async def _update_position_from_chain(
             exit_triggered=False,
             error="Contract not found in chain",
         )
-    
+
     # Extract current price (bid for long positions — what you'd get selling)
     day = contract.get("day", {})
     underlying = contract.get("underlying_asset", {})
-    
+
     last_quote = contract.get("last_quote", {})
     bid = last_quote.get("bid", 0) or 0
     ask = last_quote.get("ask", 0) or 0
-    
+
     # Use bid for current price (long positions exit at bid, not mid)
     if bid > 0:
         current_price = bid
@@ -788,7 +525,7 @@ async def _update_position_from_chain(
     else:
         # Fallback to previous price
         current_price = position.current_price
-    
+
     # Extract expiration date
     details = contract.get("details", {})
     expiration_date = details.get("expiration_date", "2099-12-31")
@@ -838,7 +575,7 @@ def extract_underlying_from_option_ticker(option_ticker: str) -> str:
     ticker = option_ticker
     if ticker.startswith("O:"):
         ticker = ticker[2:]
-    
+
     # Find where the date portion starts (6 digits followed by C/P)
     # The underlying is everything before that
     for i in range(len(ticker) - 7, 0, -1):
@@ -849,12 +586,12 @@ def extract_underlying_from_option_ticker(option_ticker: str) -> str:
             option_type = remaining[6]
             if date_part.isdigit() and option_type in ("C", "P"):
                 return ticker[:i]
-    
+
     # Fallback: assume first 4 characters or until first digit
     for i, c in enumerate(ticker):
         if c.isdigit():
             return ticker[:i] if i > 0 else ticker[:4]
-    
+
     return ticker[:4]
 
 
@@ -871,7 +608,7 @@ def extract_expiration_from_option_ticker(option_ticker: str) -> str:
     ticker = option_ticker
     if ticker.startswith("O:"):
         ticker = ticker[2:]
-    
+
     # Find where the date portion starts
     for i in range(len(ticker) - 7, 0, -1):
         remaining = ticker[i:]
@@ -887,7 +624,7 @@ def extract_expiration_from_option_ticker(option_ticker: str) -> str:
                     return f"{year:04d}-{month:02d}-{day:02d}"
                 except ValueError:
                     pass
-    
+
     # Fallback: far future
     return "2099-12-31"
 
@@ -1138,11 +875,11 @@ async def close_position_manually(
         if p.position_id == position_id:
             position = p
             break
-    
+
     if not position:
         logger.warning(f"Position not found for manual close: {position_id}")
         return None
-    
+
     # Use provided price or current price
     final_exit_price = exit_price if exit_price is not None else position.current_price
 

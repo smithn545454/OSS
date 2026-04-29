@@ -12,8 +12,22 @@ from typing import List, Optional, Sequence
 
 from pydantic import BaseModel
 
-from app.scanners.utils import calculate_n_day_high, calculate_n_day_low
 from app.services.polygon import DailyBar
+
+
+def calculate_n_day_high(bars: "list[DailyBar]", n: int) -> Optional[float]:
+    """Highest high in the last n bars; None if fewer than n bars."""
+    if len(bars) < n:
+        return None
+    return max(bar.high for bar in bars[-n:])
+
+
+def calculate_n_day_low(bars: "list[DailyBar]", n: int) -> Optional[float]:
+    """Lowest low in the last n bars; None if fewer than n bars."""
+    if len(bars) < n:
+        return None
+    return min(bar.low for bar in bars[-n:])
+
 
 logger = logging.getLogger(__name__)
 
