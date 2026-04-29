@@ -264,8 +264,19 @@ async def _finalise_and_persist(
             )
             if result is not None:
                 # Attach UV signal data to the Decision payload for UI.
-                result.decision.convex_uv_signal = uv_to_dict(uv_signal)
-                finalised.append(result)
+                # Decision is a frozen Pydantic model, so we must rebuild
+                # the FinalisedConvexCandidate with an updated decision.
+                updated_decision = result.decision.model_copy(
+                    update={"convex_uv_signal": uv_to_dict(uv_signal)}
+                )
+                finalised.append(
+                    FinalisedConvexCandidate(
+                        candidate=result.candidate,
+                        tier=result.tier,
+                        composite=result.composite,
+                        decision=updated_decision,
+                    )
+                )
 
     if stage_events:
         try:
