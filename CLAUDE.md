@@ -354,14 +354,14 @@ After any rollback, tell the user:
 
 ### EventBridge schedule (production)
 
-Live rule states (CDK is documentation-only; flip via `aws events enable-rule`/`disable-rule`):
+Live rule states (CDK is documentation-only; flip via `aws events enable-rule`/`disable-rule`/`put-rule`). Verify with `aws events describe-rule --name <rule>` since the CDK file may diverge from production.
 
-- `oss-dev-convex-daily-run` — ENABLED — `30 22 * * MON-FRI` UTC
+- `oss-dev-convex-daily-run` — ENABLED — `cron(0 10 * * ? *)` (10:00 UTC daily)
 - `oss-dev-convex-universe-refresh` — ENABLED — monthly, 1st at 02:00 UTC
 - `oss-dev-paper-trading-update` — ENABLED — daily 21:15 UTC
 - `oss-dev-earnings-refresh`, `oss-dev-price-history-refresh`, `oss-dev-earnings-history-refresh`, `oss-dev-data-capture` — ENABLED — daily/weekly data jobs
 - `oss-dev-scan-schedule` (legacy 8-stage scanner) — DISABLED at the 2026-04-29 cutover
-- `oss-dev-calibration-weekly` — DISABLED (legacy v5 archetype rate refresh; gone with v5)
+- `oss-dev-calibration-weekly` — DISABLED (legacy v5 archetype rate refresh; handler removed)
 
 ## Known Issues / Watch Items
 

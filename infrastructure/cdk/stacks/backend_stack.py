@@ -250,24 +250,22 @@ class BackendStack(Stack):
             )
         )
 
-        # EventBridge rule for weekly v5 archetype rate recomputation.
-        # Runs Monday 07:00 UTC — needs >= 5 business days of closes.
-        # NOTE: This resource is documentation only. Per CLAUDE.md the
-        # backend stack must never be `cdk deploy`ed (it re-uploads an
-        # unpackaged Lambda zip that lacks dependencies). The actual
-        # EventBridge rule is created via AWS CLI during Phase 2 rollout
-        # and lives here so a future legitimate CDK deploy picks it up.
+        # DISABLED at the Convex cutover (see baselines/convex-cutover-README.md).
+        # Legacy v5 archetype rate recomputation is gone with the rest of the
+        # legacy pipeline; the action handler was removed from main.py. CDK
+        # is documentation only; the live flip happens via:
+        #   aws events disable-rule --name oss-dev-calibration-weekly --region us-west-1
         self.calibration_weekly_rule = events.Rule(
             self,
             "CalibrationWeeklyRule",
             rule_name=f"{project_name}-{env_name}-calibration-weekly",
-            description="Recompute v5 archetype HR/P rate lookups weekly",
+            description="(retired) v5 archetype HR/P rate weekly recompute",
             schedule=events.Schedule.cron(
                 minute="0",
                 hour="7",
                 week_day="MON",
             ),
-            enabled=True,
+            enabled=False,
         )
         self.calibration_weekly_rule.add_target(
             targets.LambdaFunction(
@@ -386,19 +384,18 @@ class BackendStack(Stack):
         )
 
         # EventBridge rule for daily Convex pipeline run.
-        # Runs weekdays at 22:30 UTC — after the 22:00 daily data-capture
-        # settles and before pre-market alerts. ENABLED at the Convex
-        # cutover (replaces scan_schedule_rule above). Live flip:
-        #   aws events enable-rule --name oss-dev-convex-daily-run --region us-west-1
+        # Production schedule is `cron(0 10 * * ? *)` — 10:00 UTC daily, set
+        # via `aws events put-rule` (not via this CDK file). The schedule
+        # below is the original design intent; the live rule may differ.
+        # ENABLED at the 2026-04-29 Convex cutover (replaces scan_schedule_rule).
         self.convex_daily_rule = events.Rule(
             self,
             "ConvexDailyRule",
             rule_name=f"{project_name}-{env_name}-convex-daily-run",
             description="Daily Convex Mode four-stage pipeline run",
             schedule=events.Schedule.cron(
-                minute="30",
-                hour="22",
-                week_day="MON-FRI",
+                minute="0",
+                hour="10",
             ),
             enabled=True,
         )
