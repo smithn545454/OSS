@@ -2866,6 +2866,72 @@ class ConvexStageEventTable:
         records.sort(key=lambda r: r.stage)
         return records
 
+    @staticmethod
+    async def list_recent_run_summaries(
+        limit: int = 20, max_scan_pages: int = 10
+    ) -> list[dict[str, Any]]:
+        """Scan the table to surface every recent pipeline run.
+
+        Unlike ``ConvexEvaluationTable.list_recent`` (finalised-only), this
+        groups stage events by ``run_id`` and returns one summary per run —
+        including runs that produced zero finalised candidates.
+
+        Returns dicts with keys: ``run_id``, ``started_at``, ``completed_at``,
+        ``universe_size``, ``stage2_advancers``, ``stage3_advancers``,
+        ``stage4_advancers``. Sorted descending by ``started_at``.
+
+        ``max_scan_pages`` caps DynamoDB scan cost. Stage events live ~30
+        days post-cutover, so the table stays small (a few thousand items).
+        """
+        db = get_dynamodb()
+        table = db.get_table(ConvexStageEventTable.TABLE)
+
+        runs: dict[str, dict[str, Any]] = {}
+        scan_kwargs: dict[str, Any] = {}
+        for _ in range(max_scan_pages):
+            response = table.scan(**scan_kwargs)
+            for raw in response.get("Items", []):
+                item = db.convert_from_dynamodb(raw)
+                run_id = item.get("run_id")
+                stage = item.get("stage")
+                payload = item.get("payload") or {}
+                result = payload.get("result")
+                recorded_at = item.get("recorded_at")
+                if not run_id or stage is None or not recorded_at:
+                    continue
+                summary = runs.setdefault(
+                    run_id,
+                    {
+                        "run_id": run_id,
+                        "started_at": recorded_at,
+                        "completed_at": recorded_at,
+                        "universe_size": 0,
+                        "stage2_advancers": 0,
+                        "stage3_advancers": 0,
+                        "stage4_advancers": 0,
+                    },
+                )
+                if recorded_at < summary["started_at"]:
+                    summary["started_at"] = recorded_at
+                if recorded_at > summary["completed_at"]:
+                    summary["completed_at"] = recorded_at
+                if stage == 1 and result == "PASS":
+                    summary["universe_size"] += 1
+                elif stage == 2 and result == "PASS":
+                    summary["stage2_advancers"] += 1
+                elif stage == 3 and result == "PASS":
+                    summary["stage3_advancers"] += 1
+                elif stage == 4 and result == "PASS":
+                    summary["stage4_advancers"] += 1
+            if "LastEvaluatedKey" not in response:
+                break
+            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+        sorted_runs = sorted(
+            runs.values(), key=lambda r: r["started_at"], reverse=True
+        )
+        return sorted_runs[:limit]
+
 
 class CatalystCalendarTable:
     """Operations for the catalyst-calendar table.

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Zap, ArrowUpRight, Search } from 'lucide-react'
+import { Zap, ArrowUpRight, Search, Activity } from 'lucide-react'
 import clsx from 'clsx'
 
-import { useConvexEvaluations } from '@/lib/convexApi'
-import type { ConvexEvaluation, ConvexTier } from '@/lib/convexTypes'
+import { useConvexEvaluations, useConvexRuns } from '@/lib/convexApi'
+import type { ConvexEvaluation, ConvexRunSummary, ConvexTier } from '@/lib/convexTypes'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { formatDateTime } from '@/lib/formatTime'
 import { SmartMoneyBadge } from '@/components/convex/SmartMoneyBadge'
@@ -89,12 +89,60 @@ export default function ConvexOpportunities() {
       ) : error ? (
         <p className="text-sm text-oss-reject">Failed to load Convex evaluations.</p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-oss-muted">
-          No CONVEX_APPROVE candidates yet. The pipeline runs daily after market close.
-        </p>
+        <EmptyOpportunitiesState />
       ) : (
         <ConvexEvaluationsTable evaluations={filtered} />
       )}
+    </div>
+  )
+}
+
+function EmptyOpportunitiesState() {
+  const { data, isLoading } = useConvexRuns(1)
+  const latest = data?.runs?.[0]
+  return (
+    <div className="rounded-lg border border-oss-border bg-oss-surface p-4 text-sm">
+      <p className="text-oss-text">
+        No CONVEX_APPROVE candidates right now.
+      </p>
+      <p className="mt-1 text-xs text-oss-muted">
+        The pipeline runs daily at 10:00 UTC. Some days legitimately produce zero finalised
+        candidates — Convex is selective by design.
+      </p>
+      {isLoading ? null : latest ? (
+        <LatestRunSummary run={latest} />
+      ) : (
+        <p className="mt-3 text-xs text-oss-muted">No recent pipeline runs found.</p>
+      )}
+    </div>
+  )
+}
+
+function LatestRunSummary({ run }: { run: ConvexRunSummary }) {
+  const ts = run.started_at ?? run.generated_at
+  const universe = run.universe_size ?? 0
+  const s2 = run.stage2_advancers ?? 0
+  const s3 = run.stage3_advancers ?? 0
+  const s4 = run.stage4_advancers ?? 0
+  return (
+    <div className="mt-3 flex flex-col gap-2 rounded-md border border-oss-border bg-oss-bg/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-xs">
+        <div className="flex items-center gap-2 text-oss-muted">
+          <Activity className="h-3 w-3" />
+          Latest run <span className="font-mono text-oss-text">{run.run_id.slice(0, 8)}…</span>
+          <span>{formatDateTime(ts)}</span>
+        </div>
+        <div className="mt-1 font-mono text-oss-text">
+          {universe} in universe → {s2} caught a catalyst → {s3} had cheap convexity → {s4}{' '}
+          finalised
+        </div>
+      </div>
+      <Link
+        to={`/convex/runs/${run.run_id}/failed`}
+        className="inline-flex items-center gap-1 text-xs text-oss-accent hover:underline"
+      >
+        See why <ArrowUpRight className="h-3 w-3" />
+      </Link>
     </div>
   )
 }

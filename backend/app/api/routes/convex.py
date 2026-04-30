@@ -76,41 +76,58 @@ async def get_evaluation(ticker: str, evaluation_id: str) -> dict[str, Any]:
 
 @router.get("/runs")
 async def list_recent_runs(limit: int = 20) -> dict[str, Any]:
-    """Return recent Convex pipeline runs derived from finalised evaluations.
+    """Return recent Convex pipeline runs (including zero-finalised days).
 
-    Pipeline Monitor sidebar uses this. Runs that produced zero finalised
-    candidates (Stage 2/3/4 rejected everything) are not surfaced — users
-    can navigate to a specific run by run_id from CloudWatch if needed.
+    Pipeline Monitor sidebar uses this. Runs are sourced from the stage-
+    events table so the list reflects every run that executed, not just
+    those that produced finalised candidates. Tier counts are joined in
+    from ``ConvexEvaluationTable`` for runs that did finalise.
 
-    Each run reports its run_id, the most recent evaluation timestamp,
-    and the per-tier finalised counts. Sorted descending by timestamp.
+    Each entry reports: run_id, started_at, completed_at, generated_at
+    (alias of completed_at for back-compat with the existing UI),
+    per-stage advancer counts, and per-tier finalised counts.
     """
-    # Sample more evaluations than we expect to need — most days produce
-    # 0–10 finalised, so limit*30 is a generous upper bound for grouping.
-    evaluations = await ConvexEvaluationTable.list_recent(limit=max(limit * 30, 200))
+    summaries = await ConvexStageEventTable.list_recent_run_summaries(limit=limit)
 
-    runs: dict[str, dict[str, Any]] = {}
+    # Join finalised tier counts. Sample enough evaluations to cover the
+    # window — most days produce 0–10 finalised, so limit*30 is a generous
+    # upper bound. Evaluations for older runs that fall outside the window
+    # simply won't be matched (their summaries report tier counts of 0).
+    evaluations = await ConvexEvaluationTable.list_recent(limit=max(limit * 30, 200))
+    tier_counts_by_run: dict[str, dict[str, Any]] = {}
     for ev in evaluations:
-        run_id = ev.run_id
-        if run_id not in runs:
-            runs[run_id] = {
-                "run_id": run_id,
-                "generated_at": ev.generated_at,
+        bucket = tier_counts_by_run.setdefault(
+            ev.run_id,
+            {
                 "tier_a": 0,
                 "tier_b": 0,
                 "tier_c": 0,
                 "finalised_count": 0,
-            }
-        # Most recent eval's timestamp wins (list_recent is desc-sorted)
-        if ev.generated_at > runs[run_id]["generated_at"]:
-            runs[run_id]["generated_at"] = ev.generated_at
-        runs[run_id][f"tier_{ev.convex_tier.lower()}"] += 1
-        runs[run_id]["finalised_count"] += 1
+                "latest_generated_at": ev.generated_at,
+            },
+        )
+        bucket[f"tier_{ev.convex_tier.lower()}"] += 1
+        bucket["finalised_count"] += 1
+        if ev.generated_at > bucket["latest_generated_at"]:
+            bucket["latest_generated_at"] = ev.generated_at
 
-    sorted_runs = sorted(
-        runs.values(), key=lambda r: r["generated_at"], reverse=True
-    )[:limit]
-    return {"runs": sorted_runs, "count": len(sorted_runs)}
+    runs: list[dict[str, Any]] = []
+    for s in summaries:
+        tiers = tier_counts_by_run.get(s["run_id"])
+        runs.append(
+            {
+                **s,
+                "generated_at": (
+                    tiers["latest_generated_at"] if tiers else s["completed_at"]
+                ),
+                "tier_a": tiers["tier_a"] if tiers else 0,
+                "tier_b": tiers["tier_b"] if tiers else 0,
+                "tier_c": tiers["tier_c"] if tiers else 0,
+                "finalised_count": tiers["finalised_count"] if tiers else 0,
+            }
+        )
+
+    return {"runs": runs, "count": len(runs)}
 
 
 @router.get("/runs/{run_id}/stage-events")

@@ -252,6 +252,101 @@ async def test_failed_candidates_summarises_failures(fresh_dynamodb_client):
 
 
 # ---------------------------------------------------------------------------
+# /runs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_runs_empty_when_no_data(fresh_dynamodb_client):
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.get("/api/convex/runs")
+    data = resp.json()
+    assert data["count"] == 0
+    assert data["runs"] == []
+
+
+@pytest.mark.asyncio
+async def test_runs_surface_zero_finalised_runs(fresh_dynamodb_client):
+    """A run with stage events but zero finalised candidates must appear.
+
+    Pre-fix the handler derived runs from ConvexEvaluationTable, hiding any
+    run where Stage 3/4 rejected everything. This regresses if that ever
+    comes back.
+    """
+    await ConvexStageEventTable.put_batch([
+        _stage_event("run-dry", "NVDA", 1, "PASS"),
+        _stage_event("run-dry", "NVDA", 2, "PASS"),
+        _stage_event("run-dry", "NVDA", 3, "FAIL"),
+    ])
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.get("/api/convex/runs")
+    data = resp.json()
+    assert data["count"] == 1
+    run = data["runs"][0]
+    assert run["run_id"] == "run-dry"
+    assert run["finalised_count"] == 0
+    assert run["tier_a"] == 0
+    assert run["universe_size"] == 1
+    assert run["stage2_advancers"] == 1
+    assert run["stage3_advancers"] == 0
+
+
+@pytest.mark.asyncio
+async def test_runs_join_finalised_tier_counts(fresh_dynamodb_client):
+    """When a run has both stage events and finalised evaluations, the
+    response merges per-stage advancer counts with per-tier finalised
+    counts."""
+    await ConvexStageEventTable.put_batch([
+        _stage_event("run-good", "NVDA", 1, "PASS"),
+        _stage_event("run-good", "NVDA", 2, "PASS"),
+        _stage_event("run-good", "NVDA", 3, "PASS"),
+        _stage_event("run-good", "NVDA", 4, "PASS"),
+    ])
+    ev = _make_evaluation(ticker="NVDA", tier="A", eval_id="convex-good-NVDA")
+    ev = ev.model_copy(update={"run_id": "run-good"})
+    await ConvexEvaluationTable.put(ev)
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.get("/api/convex/runs")
+    data = resp.json()
+    assert data["count"] == 1
+    run = data["runs"][0]
+    assert run["run_id"] == "run-good"
+    assert run["tier_a"] == 1
+    assert run["finalised_count"] == 1
+    assert run["stage4_advancers"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runs_sorted_by_started_at_desc(fresh_dynamodb_client):
+    older = ConvexStageEventRecord(
+        run_id="run-old",
+        ticker="NVDA",
+        stage=1,
+        payload=ConvexStagePayload(stage=1, stage_name="x", result="PASS", summary="x"),
+        recorded_at="2026-04-25T10:00:00+00:00",
+    )
+    newer = ConvexStageEventRecord(
+        run_id="run-new",
+        ticker="NVDA",
+        stage=1,
+        payload=ConvexStagePayload(stage=1, stage_name="x", result="PASS", summary="x"),
+        recorded_at="2026-04-30T10:00:00+00:00",
+    )
+    await ConvexStageEventTable.put_batch([older, newer])
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.get("/api/convex/runs")
+    data = resp.json()
+    assert [r["run_id"] for r in data["runs"]] == ["run-new", "run-old"]
+
+
+# ---------------------------------------------------------------------------
 # /universe
 # ---------------------------------------------------------------------------
 

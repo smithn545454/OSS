@@ -165,6 +165,18 @@ export interface ConvexUniverseResponse {
 export interface ConvexRunSummary {
   run_id: string
   generated_at: string
+  /** First stage event timestamp (start of run). */
+  started_at?: string
+  /** Last stage event timestamp (end of run). */
+  completed_at?: string
+  /** Stage 1 PASS count = tickers in the kinetic universe. */
+  universe_size?: number
+  /** Stage 2 PASS count (catalyst layer). */
+  stage2_advancers?: number
+  /** Stage 3 PASS count (volatility mispricing). */
+  stage3_advancers?: number
+  /** Stage 4 PASS count = finalised candidates. */
+  stage4_advancers?: number
   tier_a: number
   tier_b: number
   tier_c: number

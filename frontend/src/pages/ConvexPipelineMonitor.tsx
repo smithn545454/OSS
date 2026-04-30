@@ -78,8 +78,8 @@ export default function ConvexPipelineMonitor() {
           Pipeline Monitor
         </h1>
         <p className="text-sm text-oss-muted">
-          Recent Convex pipeline runs with finalised candidates. Runs producing zero finalised
-          candidates are not surfaced here — check CloudWatch logs by run_id.
+          Every recent Convex pipeline run, including days that produced zero finalised
+          candidates. Click a run to inspect its 4-stage funnel.
         </p>
       </header>
 
