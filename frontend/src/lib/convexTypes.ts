@@ -160,3 +160,18 @@ export interface ConvexUniverseSnapshot {
 export interface ConvexUniverseResponse {
   snapshot: ConvexUniverseSnapshot | null
 }
+
+/** /runs response (Pipeline Monitor sidebar). */
+export interface ConvexRunSummary {
+  run_id: string
+  generated_at: string
+  tier_a: number
+  tier_b: number
+  tier_c: number
+  finalised_count: number
+}
+
+export interface ConvexRunsListResponse {
+  runs: ConvexRunSummary[]
+  count: number
+}

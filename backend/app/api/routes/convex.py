@@ -3,6 +3,7 @@
 Exposes:
     - GET /api/convex/evaluations            list recent CONVEX_APPROVE candidates
     - GET /api/convex/evaluations/{ticker}/{evaluation_id}   single record
+    - GET /api/convex/runs                   recent pipeline runs (Pipeline Monitor sidebar)
     - GET /api/convex/runs/{run_id}/stage-events   per-ticker journey for a run
     - GET /api/convex/runs/{run_id}/failed-candidates   debug "why didn't X make it?"
     - GET /api/convex/universe                 latest kinetic-universe snapshot
@@ -71,6 +72,45 @@ async def get_evaluation(ticker: str, evaluation_id: str) -> dict[str, Any]:
     if evaluation is None:
         raise HTTPException(status_code=404, detail="Convex evaluation not found")
     return {"evaluation": evaluation.model_dump()}
+
+
+@router.get("/runs")
+async def list_recent_runs(limit: int = 20) -> dict[str, Any]:
+    """Return recent Convex pipeline runs derived from finalised evaluations.
+
+    Pipeline Monitor sidebar uses this. Runs that produced zero finalised
+    candidates (Stage 2/3/4 rejected everything) are not surfaced — users
+    can navigate to a specific run by run_id from CloudWatch if needed.
+
+    Each run reports its run_id, the most recent evaluation timestamp,
+    and the per-tier finalised counts. Sorted descending by timestamp.
+    """
+    # Sample more evaluations than we expect to need — most days produce
+    # 0–10 finalised, so limit*30 is a generous upper bound for grouping.
+    evaluations = await ConvexEvaluationTable.list_recent(limit=max(limit * 30, 200))
+
+    runs: dict[str, dict[str, Any]] = {}
+    for ev in evaluations:
+        run_id = ev.run_id
+        if run_id not in runs:
+            runs[run_id] = {
+                "run_id": run_id,
+                "generated_at": ev.generated_at,
+                "tier_a": 0,
+                "tier_b": 0,
+                "tier_c": 0,
+                "finalised_count": 0,
+            }
+        # Most recent eval's timestamp wins (list_recent is desc-sorted)
+        if ev.generated_at > runs[run_id]["generated_at"]:
+            runs[run_id]["generated_at"] = ev.generated_at
+        runs[run_id][f"tier_{ev.convex_tier.lower()}"] += 1
+        runs[run_id]["finalised_count"] += 1
+
+    sorted_runs = sorted(
+        runs.values(), key=lambda r: r["generated_at"], reverse=True
+    )[:limit]
+    return {"runs": sorted_runs, "count": len(sorted_runs)}
 
 
 @router.get("/runs/{run_id}/stage-events")

@@ -13,7 +13,7 @@ describe('Layout', () => {
 
     expect(screen.getByText('Opportunities')).toBeInTheDocument()
     expect(screen.getByText('Pipeline')).toBeInTheDocument()
-    expect(screen.getByText('Calibration')).toBeInTheDocument()
+    expect(screen.getByText('Paper Trading')).toBeInTheDocument()
     expect(screen.getByText('Policy')).toBeInTheDocument()
   })
 

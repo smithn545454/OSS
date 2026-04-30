@@ -3,8 +3,6 @@ import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { XCircle, ArrowLeft } from 'lucide-react'
 import Layout from './components/Layout'
 import PolicyConfig from './pages/PolicyConfig'
-import PipelineMonitor from './pages/PipelineMonitor'
-import Calibration from './pages/Calibration'
 import Intelligence from './pages/Intelligence'
 import PaperTrading from './pages/PaperTrading'
 import MyTrades from './pages/MyTrades'
@@ -14,6 +12,7 @@ import Backtesting from './pages/Backtesting'
 import ConvexOpportunities from './pages/ConvexOpportunities'
 import ConvexEvaluationDetail from './pages/ConvexEvaluationDetail'
 import ConvexFailedCandidates from './pages/ConvexFailedCandidates'
+import ConvexPipelineMonitor from './pages/ConvexPipelineMonitor'
 import { usePageTitle } from './hooks/usePageTitle'
 
 function ConvexOpportunitiesPage() {
@@ -67,8 +66,7 @@ function App() {
         <Route path="dashboard" element={<Navigate to="/opportunities" replace />} />
         <Route path="opportunities" element={<ConvexOpportunitiesPage />} />
         <Route path="opps" element={<Navigate to="/opportunities" replace />} />
-        <Route path="pipeline" element={<PipelineMonitor />} />
-        <Route path="calibration" element={<Calibration />} />
+        <Route path="pipeline" element={<ConvexPipelineMonitor />} />
         <Route path="intelligence" element={<Intelligence />} />
         <Route path="paper-trading" element={<PaperTrading />} />
         <Route path="trades" element={<MyTrades />} />
@@ -84,8 +82,7 @@ function App() {
             </EvaluationErrorBoundary>
           }
         />
-        {/* /convex/* aliases preserved for one release so existing
-            bookmarks keep working. Removed in Phase 6. */}
+        {/* /convex aliases — kept one release for bookmarks; remove next pass. */}
         <Route path="convex" element={<Navigate to="/opportunities" replace />} />
         <Route
           path="convex/runs/:runId/failed"

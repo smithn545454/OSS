@@ -9,6 +9,7 @@ import type {
   ConvexEvaluationResponse,
   ConvexEvaluationsListResponse,
   ConvexFailedCandidatesResponse,
+  ConvexRunsListResponse,
   ConvexStageEventsResponse,
   ConvexTier,
   ConvexUniverseResponse,
@@ -69,6 +70,13 @@ export async function getConvexEvaluation(
   )
 }
 
+export async function listConvexRuns(
+  limit = 20,
+): Promise<ConvexRunsListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  return fetchConvex(`/api/convex/runs?${params.toString()}`)
+}
+
 export async function listConvexStageEvents(
   runId: string,
   ticker?: string,
@@ -112,6 +120,16 @@ export function useConvexEvaluation(
     queryKey: ['convex', 'evaluation', ticker, evaluationId],
     queryFn: () => getConvexEvaluation(ticker!, evaluationId!),
     enabled: Boolean(ticker && evaluationId),
+    staleTime: 60_000,
+  })
+}
+
+export function useConvexRuns(
+  limit = 20,
+): UseQueryResult<ConvexRunsListResponse> {
+  return useQuery({
+    queryKey: ['convex', 'runs', limit],
+    queryFn: () => listConvexRuns(limit),
     staleTime: 60_000,
   })
 }
