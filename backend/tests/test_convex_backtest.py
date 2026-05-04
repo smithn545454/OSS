@@ -75,25 +75,45 @@ def _make_finalised(
     """Build a FinalisedConvexCandidate ready for outcome resolution."""
     if contract is None:
         contract = ConvexContractCandidate(
-            option_ticker="O:NVDA260620C00145000",
+            option_ticker="O:NVDA260515C00145000",
             option_type="CALL",
             strike=145.0,
-            expiry="2026-06-20",
-            dte=42,
+            expiry="2026-05-15",
+            dte=19,
             delta=0.32,
             bid=4.75,
             ask=4.95,
             open_interest=8240,
             volume=1850,
+            iv=0.30,
         )
+    # Stage 4 carries pl_score on extras, Stage 2 carries momentum_aligned —
+    # both required by the new tier rule for finalise_candidate to succeed.
+    s2_extras = {
+        "direction": direction,
+        "momentum_aligned": True,
+        "selected_catalyst_type": "date_known",
+    }
+    s4_extras = {"pl_score": 90.0, "smart_money_confirmation": False}
     stages = ConvexStagesPayload()
-    for n in range(1, 5):
-        stages = stages.model_copy(update={
-            f"stage_{n}": ConvexStagePayload(
-                stage=n, stage_name=f"Stage {n}",
-                result="PASS", summary="x", strength=0.85,
-            )
-        })
+    stages = stages.model_copy(update={
+        "stage_1": ConvexStagePayload(
+            stage=1, stage_name="Stage 1",
+            result="PASS", summary="x", strength=0.85,
+        ),
+        "stage_2": ConvexStagePayload(
+            stage=2, stage_name="Stage 2",
+            result="PASS", summary="x", strength=0.85, extras=s2_extras,
+        ),
+        "stage_3": ConvexStagePayload(
+            stage=3, stage_name="Stage 3",
+            result="PASS", summary="x", strength=0.85,
+        ),
+        "stage_4": ConvexStagePayload(
+            stage=4, stage_name="Stage 4",
+            result="PASS", summary="x", strength=0.85, extras=s4_extras,
+        ),
+    })
     candidate = ConvexCandidate(ticker=ticker, stages=stages, direction=direction)
     candidate.selected_call = contract if contract.option_type == "CALL" else None
     candidate.selected_put = contract if contract.option_type == "PUT" else None

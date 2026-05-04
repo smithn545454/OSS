@@ -1645,26 +1645,36 @@ class ConvexConfig(OSSBaseModel):
     catalyst_sympathy_peer_move_threshold_pct: float = 5.0
     catalyst_sympathy_lookback_days: int = 5
 
-    # ---- Stage 3 — Volatility Mispricing (daily) ----
-    vol_iv_rank_max: int = 40
-    vol_iv_percentile_max: int = 35
-    vol_iv_hv_ratio_max: float = 1.10
+    # ---- Stage 2 — Momentum (5-day return for direction confirmation) ----
+    # Walk-forward analysis showed |5d_return| >= 5% aligned with the trade
+    # direction is the strongest stable Stage 2 signal alongside catalyst.
+    momentum_threshold_pct: float = 5.0
+
+    # ---- Stage 3 — PL pricing pre-screen (replaces IV/HV envelope) ----
+    # Stage 3 computes a representative PL score using ATM-ish chain inputs
+    # so the pipeline can fail fast before Stage 4 contract selection. The
+    # tier-determining cutoffs (80/85) live below; this is a generous floor.
+    pl_pre_screen_min: float = 70.0
 
     # ---- Stage 4 — Contract Selection (daily) ----
-    contract_delta_min: float = 0.25
+    # Tightened from the launch defaults per the PL+momentum walk-forward
+    # finding: shorter DTE, wider delta, lower OI floor.
+    contract_delta_min: float = 0.10
     contract_delta_max: float = 0.35
     contract_delta_straddle: float = 0.50
-    contract_dte_min: int = 30
-    contract_dte_max: int = 60
+    contract_dte_min: int = 7
+    contract_dte_max: int = 28
     contract_dte_post_event_buffer: int = 14
     contract_max_spread_pct: float = 8.0
-    contract_min_open_interest: int = 500
+    contract_min_open_interest: int = 100
 
     # ---- Tier thresholds ----
+    # Stage 2 still gates entry (catalyst must fire) — the floor is unchanged.
     tier_a_stage2_strength_min: float = 0.75
-    tier_a_stage3_composite_min: float = 0.70
     tier_b_stage2_strength_min: float = 0.50
-    tier_b_stage3_composite_min: float = 0.40
+    # PL gate cutoffs (Stage 4 PL re-computed on selected contract).
+    tier_pl_a_min: float = 80.0  # required for Tier A or B (with momentum)
+    tier_pl_c_min: float = 85.0  # PL alone qualifies for Tier C
 
     # ---- Position sizing (% of standard OSS sizing) ----
     sizing_tier_a_pct: float = 0.50
@@ -2052,6 +2062,7 @@ class ConvexEvaluation(OSSBaseModel):
     convex_tier: Literal["A", "B", "C"]
     composite_strength: float
     smart_money_confirmation: bool
+    pl_score: Optional[float] = None  # PL pillar 0-100 on the selected contract
     selected_call: Optional[ConvexSelectedContract] = None
     selected_put: Optional[ConvexSelectedContract] = None
     decision: Decision

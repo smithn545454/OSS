@@ -238,7 +238,7 @@ class _Stage3Stub:
     def __init__(self, inputs_by_ticker: dict[str, Stage3Inputs]) -> None:
         self._inputs = inputs_by_ticker
 
-    async def fetch(self, ticker, catalyst_type, today_iso):  # noqa: ARG002
+    async def fetch(self, ticker, today_iso):  # noqa: ARG002
         return self._inputs.get(ticker)
 
 
@@ -261,19 +261,21 @@ class _Stage4Stub:
 
 
 def _bullish_stage4_inputs(ticker: str) -> Stage4Inputs:
-    """Helper: Stage 4 inputs that pass with a bullish thesis."""
+    """Helper: Stage 4 inputs that pass with a bullish thesis under the
+    new tightened gates (Δ 0.10–0.35, DTE 7–28, OI ≥ 100)."""
     contracts = [
         ConvexContractCandidate(
-            option_ticker="O:NVDA260620C00145000",
+            option_ticker="O:NVDA260515C00145000",
             option_type="CALL",
             strike=145,
-            expiry="2026-06-20",
-            dte=42,
+            expiry="2026-05-15",
+            dte=19,
             delta=0.32,
             bid=4.75,
             ask=4.95,
             open_interest=8240,
             volume=1850,
+            iv=0.30,
         ),
     ]
     return Stage4Inputs(
@@ -287,48 +289,54 @@ def _bullish_stage4_inputs(ticker: str) -> Stage4Inputs:
         available_contracts=contracts,
         uv_directional_skew=None,
         today_iso="2026-04-26",
+        # Stage 3 normally fills these; tests pre-populate to exercise the
+        # PL recompute path inside Stage 4.
+        iv_percentile_for_pl=10.0,
+        iv_rv_ratio_for_pl=0.95,
     )
 
 
 def _bullish_stage3_inputs(ticker: str) -> Stage3Inputs:
-    """Helper: Stage 3 inputs that pass all gates with a bullish bias."""
+    """Helper: Stage 3 inputs that pass the PL pre-screen.
+
+    Current IV near the dominant breakpoint (0.2972 → 90), the IV history
+    sits well above current → low IV percentile (cheap), and IV/RV near
+    0.91 (peak ratio breakpoint).
+    """
     history = [
         IVHistory(
             ticker=ticker,
             date=f"2025-01-{(i % 27) + 1:02d}",
-            atm_iv=0.30,
-            iv_30d=0.20 + i * 0.01,
+            atm_iv=0.50,
+            iv_30d=0.50,  # current IV (0.30) below all 25 records → percentile 0
         )
         for i in range(25)
     ]
     return Stage3Inputs(
         ticker=ticker,
-        current_iv_30d=0.22,    # Low — IV Rank ~10
-        current_iv_60d=0.24,     # Contango (front below sixty)
-        current_iv_25d_put=0.26, # Rich put skew
-        current_iv_25d_call=0.22,
+        current_iv_30d=0.30,
         iv_history=history,
-        rv20=0.30,                # IV/HV = 0.73
-        catalyst_type="state_based",
-        price_position_pct=80.0,  # High in range → bullish
+        rv20=0.33,  # iv/rv ≈ 0.91, near the peak
     )
 
 
 def _make_stage2_inputs(ticker: str, with_earnings: bool) -> Stage2Inputs:
     """Helper: minimal Stage 2 inputs that produce a deterministic outcome.
 
-    Uses a quiet-then-noisy synthetic series so that recent volatility
-    *exceeds* the trailing-year baseline; this keeps the compression
-    signals quiet so each test only fires the catalyst it explicitly sets.
+    Uses a quiet baseline + a definite +6% bullish 5-day move at the tail
+    so direction resolves to bullish (Stage 2 PASS gate now requires
+    non-ambiguous direction).
     """
     import math
     import random
     rng = random.Random(7)
     closes = [100.0]
-    for _ in range(200):
+    for _ in range(255):
         closes.append(max(0.01, closes[-1] * math.exp(rng.gauss(0, 0.005))))
-    for _ in range(60):
-        closes.append(max(0.01, closes[-1] * math.exp(rng.gauss(0, 0.05))))
+    # Tail: deterministic +1.2%/day for 5 days → +6.1% 5-day return.
+    base = closes[-1]
+    for i in range(1, 6):
+        closes.append(base * (1.012 ** i))
     highs = [c * 1.01 for c in closes]
     lows = [c * 0.99 for c in closes]
     volumes = [1_000_000.0 for _ in closes]

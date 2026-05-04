@@ -203,7 +203,7 @@ class HistoricalStage3InputsProvider:
         self._hv_lookback = hv_lookback
 
     async def fetch(
-        self, ticker: str, catalyst_type: Optional[str], as_of_iso: str
+        self, ticker: str, as_of_iso: str
     ) -> Optional[Stage3Inputs]:
         try:
             as_of = _date.fromisoformat(as_of_iso)
@@ -237,41 +237,15 @@ class HistoricalStage3InputsProvider:
         )
 
         iv_30d = getattr(latest, "iv_30d", None) if latest else None
-        iv_60d = getattr(latest, "iv_60d", None) if latest else None
-        iv_25d_put = getattr(latest, "iv_25d_put", None) if latest else None
-        iv_25d_call = getattr(latest, "iv_25d_call", None) if latest else None
         if iv_30d is None and latest is not None:
-            iv_30d = latest.atm_iv  # Last-resort fallback for legacy rows.
-
-        price_position = _price_position_pct_from_bars(bars)
+            iv_30d = latest.atm_iv
 
         return Stage3Inputs(
             ticker=ticker,
             current_iv_30d=iv_30d,
-            current_iv_60d=iv_60d,
-            current_iv_25d_put=iv_25d_put,
-            current_iv_25d_call=iv_25d_call,
             iv_history=history,
             rv20=rv20,
-            catalyst_type=catalyst_type,
-            price_position_pct=price_position,
-            historical_pre_event_backwardation=None,
         )
-
-
-def _price_position_pct_from_bars(bars: list) -> Optional[float]:
-    """Latest close's percentile within trailing high/low window."""
-    if len(bars) < 20:
-        return None
-    closes = [b.close for b in bars]
-    highs = [b.high for b in bars]
-    lows = [b.low for b in bars]
-    high = max(highs)
-    low = min(lows)
-    if high <= low:
-        return None
-    current = closes[-1]  # scan_forward=True → newest last
-    return max(0.0, min(100.0, ((current - low) / (high - low)) * 100.0))
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +330,7 @@ class HistoricalStage4InputsProvider:
                     ask=c.ask,
                     open_interest=c.open_interest,
                     volume=c.volume,
+                    iv=getattr(c, "iv", None),
                 )
             )
         candidates = rebuilt

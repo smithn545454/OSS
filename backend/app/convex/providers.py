@@ -154,6 +154,7 @@ def _chain_to_contract_candidates(
         strike = details.get("strike_price")
         expiry = details.get("expiration_date")
         delta = greeks.get("delta")
+        iv = c.get("implied_volatility")  # Polygon Advanced top-level field
         bid = quote.get("bid")
         ask = quote.get("ask")
         oi = c.get("open_interest")
@@ -187,6 +188,7 @@ def _chain_to_contract_candidates(
                 ask=float(ask),
                 open_interest=int(oi or 0),
                 volume=int(vol or 0),
+                iv=float(iv) if iv is not None else None,
             )
         )
     return out
@@ -359,7 +361,6 @@ class ProductionStage3InputsProvider:
     async def fetch(
         self,
         ticker: str,
-        catalyst_type: Optional[str],
         today_iso: str,
     ) -> Optional[Stage3Inputs]:
         try:
@@ -384,40 +385,23 @@ class ProductionStage3InputsProvider:
             else None
         )
 
-        # Today's IV metrics: prefer values stored on the latest IVHistory
-        # row (post Phase 0.5 backfill); fall back to live extraction from
-        # a fresh Polygon chain snapshot when the row is incomplete.
+        # Today's 30-day IV: prefer the latest IVHistory row, fall back to
+        # live extraction from a fresh Polygon chain snapshot, then to the
+        # legacy atm_iv field.
         iv_30d = getattr(latest, "iv_30d", None) if latest else None
-        iv_60d = getattr(latest, "iv_60d", None) if latest else None
-        iv_25d_put = getattr(latest, "iv_25d_put", None) if latest else None
-        iv_25d_call = getattr(latest, "iv_25d_call", None) if latest else None
-
-        if any(v is None for v in (iv_30d, iv_60d, iv_25d_put, iv_25d_call)):
+        if iv_30d is None:
             chain = await fetch_options_chain(self._polygon, ticker)
             extracted = _chain_to_iv_metrics(chain, today_iso) if chain else None
             if extracted:
-                iv_30d = iv_30d or extracted.get("iv_30d")
-                iv_60d = iv_60d or extracted.get("iv_60d")
-                iv_25d_put = iv_25d_put or extracted.get("iv_25d_put")
-                iv_25d_call = iv_25d_call or extracted.get("iv_25d_call")
-
+                iv_30d = extracted.get("iv_30d")
         if iv_30d is None and latest is not None:
-            iv_30d = latest.atm_iv  # Last-resort fallback for legacy rows.
-
-        # Price-position percentile within the trailing 60-day high/low.
-        price_position = await _compute_price_position_pct(ticker)
+            iv_30d = latest.atm_iv
 
         return Stage3Inputs(
             ticker=ticker,
             current_iv_30d=iv_30d,
-            current_iv_60d=iv_60d,
-            current_iv_25d_put=iv_25d_put,
-            current_iv_25d_call=iv_25d_call,
             iv_history=history,
             rv20=rv20,
-            catalyst_type=catalyst_type,
-            price_position_pct=price_position,
-            historical_pre_event_backwardation=None,  # Phase 8+ refinement
         )
 
 

@@ -6,7 +6,7 @@ import { useConvexRuns, useConvexStageEvents } from '@/lib/convexApi'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import type { ConvexStageEventRecord } from '@/lib/convexTypes'
 
-const STAGE_LABELS = ['', 'Kinetic Universe', 'Catalyst', 'Volatility Mispricing', 'Contract Selection']
+const STAGE_LABELS = ['', 'Kinetic Universe', 'Catalyst + Direction', 'PL Pricing Pre-Screen', 'Contract Selection']
 
 interface StageBreakdown {
   stage: number

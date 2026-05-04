@@ -1,24 +1,26 @@
 """Convex Mode — Tier Assignment + Final Decision emission.
 
-Combines stage strengths into a tier (A/B/C) and finalises the
-recommendation as an OSS ``Decision`` with ``verdict=CONVEX_APPROVE``.
-Tier definitions, position-sizing ratios, and Smart Money handling
-follow the source plan §9 and Nick's confirmed launch decisions:
+Tier mapping is driven by three signals on every Stage-4-PASS candidate:
 
-    - Tier A: all four stages PASS with high strength on every dimension
-      (Stage 2 strength ≥ 0.75 AND Stage 3 composite ≥ 0.70 AND Stage 4
-      parameters in the ideal sub-range).
-    - Tier B: all gates passed but one stage at moderate strength.
-    - Tier C: all gates passed at borderline levels.
+    - PL: the Premium Leverage pillar (0-100) recomputed in Stage 4 on
+      the actual selected contract.
+    - momentum_aligned: 5-day return ≥ ±5% in the trade direction
+      (resolved in Stage 2).
+    - uv_detected: the production UV scanner GSI shows an unusual signal
+      whose directional skew aligns with the trade direction.
 
-Within-tier ranking uses the geometric mean of stage strengths — sort
-order only, never displayed as a primary metric.
+    Tier A: PL ≥ 80 AND momentum_aligned AND uv_detected
+    Tier B: PL ≥ 80 AND momentum_aligned
+    Tier C: PL ≥ 85 alone, OR PL ≥ 80 + uv_detected
+    Reject: anything else (no Decision emitted)
+
+Within-tier ranking uses the PL score directly (PL/100). Cheaper, more
+asymmetric contracts rank first.
 
 Position sizing: A = 50%, B = 35%, C = 25% of standard OSS sizing.
 
-Smart Money Confirmation does NOT promote tiers at launch (visibility
-only); the flag is preserved on the Decision so the UI can render it
-prominently.
+Smart Money Confirmation is now a tier-determining input via the UV
+lookup, not a visibility-only flag.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.convex._types import Tier
+from app.convex.uv_lookup import UVSignal
 from app.core.schemas import (
     ConvexConfig,
     ConvexStagesPayload,
@@ -51,52 +54,60 @@ logger = logging.getLogger(__name__)
 
 
 def assign_tier(
-    candidate: "ConvexCandidate", config: ConvexConfig
+    candidate: "ConvexCandidate",
+    config: ConvexConfig,
+    uv_signal: Optional[UVSignal] = None,
 ) -> Optional[Tier]:
-    """Map candidate stage strengths onto Tier A / B / C.
+    """Map (PL × momentum × UV) onto Tier A / B / C, or None to reject.
 
-    Returns None when the candidate did not pass all four stages (no
-    tier should be assigned).
-
-    Tier A is awarded only when every dimension is strong:
-        - Stage 2 strength ≥ ``tier_a_stage2_strength_min``
-        - Stage 3 composite ≥ ``tier_a_stage3_composite_min``
-        - Stage 4 strength ≥ a derived ideal threshold (0.85 by
-          default — captures delta-band centre, DTE-band centre, and
-          tight spread).
-
-    Tier B requires at least the Tier B floors on every stage.
-    Tier C catches anything above the Tier B floor on every stage.
+    Returns ``None`` when the candidate did not pass all four stages or
+    when the new tier rule rejects the combination.
     """
     if candidate.advanced_to_stage < 4:
         return None
 
-    s2 = _stage_strength(candidate.stages, 2)
-    s3 = _stage_strength(candidate.stages, 3)
-    s4 = _stage_strength(candidate.stages, 4)
+    pl_score = _pl_score(candidate.stages)
+    if pl_score is None:
+        return None
 
-    if (
-        s2 >= config.tier_a_stage2_strength_min
-        and s3 >= config.tier_a_stage3_composite_min
-        and s4 >= 0.85
-    ):
+    momentum_aligned = _momentum_aligned(candidate.stages)
+    direction = candidate.direction or "ambiguous"
+    uv_detected = bool(
+        uv_signal
+        and uv_signal.is_unusual
+        and uv_signal.aligns_with(direction)
+    )
+
+    pl_a_min = config.tier_pl_a_min
+    pl_c_min = config.tier_pl_c_min
+
+    if pl_score >= pl_a_min and momentum_aligned and uv_detected:
         return Tier.A
-
-    if (
-        s2 >= config.tier_b_stage2_strength_min
-        and s3 >= config.tier_b_stage3_composite_min
-    ):
+    if pl_score >= pl_a_min and momentum_aligned:
         return Tier.B
+    if pl_score >= pl_c_min or (pl_score >= pl_a_min and uv_detected):
+        return Tier.C
+    return None
 
-    return Tier.C
+
+def _pl_score(stages: ConvexStagesPayload) -> Optional[float]:
+    s4 = stages.stage_4
+    if s4 is None or s4.result != "PASS":
+        return None
+    val = s4.extras.get("pl_score")
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
-def _stage_strength(stages: ConvexStagesPayload, n: int) -> float:
-    """Return the stage's strength value (0.0 if missing)."""
-    payload = getattr(stages, f"stage_{n}", None)
-    if payload is None or payload.strength is None:
-        return 0.0
-    return float(payload.strength)
+def _momentum_aligned(stages: ConvexStagesPayload) -> bool:
+    s2 = stages.stage_2
+    if s2 is None:
+        return False
+    return bool(s2.extras.get("momentum_aligned"))
 
 
 # ---------------------------------------------------------------------------
@@ -105,21 +116,19 @@ def _stage_strength(stages: ConvexStagesPayload, n: int) -> float:
 
 
 def within_tier_composite(candidate: "ConvexCandidate") -> float:
-    """Single-dimension within-tier ranking score.
+    """Single-dimension within-tier ranking score = PL/100.
 
-    Ranks by Stage 3 strength (where lower IV percentile / IV rank
-    produces higher Stage 3 strength). Cheaper convexity ranks first
-    within the same tier — one interpretable dimension instead of an
-    arbitrary blend across stages.
-
-    Returns the Stage 3 strength directly. Falls back to Stage 2 strength
-    when Stage 3 didn't run (shouldn't happen for tier-assigned
-    candidates, but keep a non-zero floor for sort stability).
+    Cheaper, more asymmetric contracts (higher PL) rank first within the
+    same tier. Falls back to the Stage 4 strength when PL is unavailable
+    (shouldn't happen for tier-assigned candidates, but keeps sort stable).
     """
-    s3 = _stage_strength(candidate.stages, 3)
-    if s3 > 0:
-        return round(s3, 4)
-    return round(_stage_strength(candidate.stages, 2), 4)
+    pl = _pl_score(candidate.stages)
+    if pl is not None:
+        return round(pl / 100.0, 4)
+    s4 = candidate.stages.stage_4
+    if s4 is not None and s4.strength is not None:
+        return round(float(s4.strength), 4)
+    return 0.0
 
 
 def position_sizing_recommendation(
@@ -154,14 +163,14 @@ def finalise_candidate(
     evaluation_id: str,
     policy_version: str,
     config: ConvexConfig,
+    uv_signal: Optional[UVSignal] = None,
 ) -> Optional[FinalisedConvexCandidate]:
     """Run tier assignment + Decision emission for a candidate.
 
-    Returns None when the candidate failed to advance through all four
-    stages (no Decision should be emitted; the candidate is logged but
-    not approved).
+    Returns ``None`` when the new tier rule rejects the candidate (no
+    Decision should be emitted; the candidate is logged but not approved).
     """
-    tier = assign_tier(candidate, config)
+    tier = assign_tier(candidate, config, uv_signal=uv_signal)
     if tier is None:
         return None
 
@@ -169,7 +178,16 @@ def finalise_candidate(
     composite = within_tier_composite(candidate)
     candidate.composite_strength = composite
 
+    # Smart-money flag now reflects whether the production UV scanner
+    # corroborated the trade direction (tier-determining for A).
+    direction = candidate.direction or "ambiguous"
+    smart_money = bool(
+        uv_signal and uv_signal.is_unusual and uv_signal.aligns_with(direction)
+    )
+    candidate.smart_money_confirmation = smart_money
+
     sizing_note = position_sizing_recommendation(tier, config)
+    pl_score = _pl_score(candidate.stages)
     decision = Decision(
         evaluation_id=evaluation_id,
         verdict=Verdict.CONVEX_APPROVE,
@@ -177,7 +195,8 @@ def finalise_candidate(
         primary_reason_code="CONVEX_APPROVED_BY_TIER",
         supporting_reason_codes=[
             f"convex_tier_{tier.value.lower()}",
-            f"direction_{candidate.direction or 'unknown'}",
+            f"direction_{direction}",
+            f"pl_score_{int(round(pl_score)) if pl_score is not None else 'na'}",
         ],
         failed_gates=[],
         concentration_warnings=[],
@@ -187,7 +206,7 @@ def finalise_candidate(
         convex_tier=tier.value,
         convex_stages=candidate.stages,
         convex_strength_composite=composite,
-        smart_money_confirmation=candidate.smart_money_confirmation,
+        smart_money_confirmation=smart_money,
         position_sizing_recommendation=sizing_note,
     )
 

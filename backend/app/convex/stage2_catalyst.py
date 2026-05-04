@@ -1,26 +1,40 @@
-"""Convex Mode — Stage 2: Catalyst Layer.
+"""Convex Mode — Stage 2: Catalyst + Momentum + Direction.
 
-Identifies which kinetically-eligible names have something pending. Stage 2
-PASSES if any of four detectors fires:
+Identifies which kinetically-eligible names have something pending AND
+resolves the trade direction. Stage 2 PASSES when both conditions hold:
+
+    1. A catalyst fires (date-known OR compression OR sympathy).
+    2. Direction resolves to bullish or bearish (not ambiguous).
+
+Detectors:
 
     2A. Date-known catalyst within the configured window (earnings, FDA
         PDUFA, investor day, macro event for index proxies).
-    2B. State-based compression — at least N of 5 signals firing
-        (Bollinger Band Width percentile, ATR contraction, range
-        compression, distance-to-level, volume contraction).
-    2C. Unusual Volume — today's options volume materially exceeds the
-        trailing 30-day average for the underlying. Captures directional
-        skew (call-heavy vs put-heavy) for Stage 4 confirmation.
-    2D. Sympathy — a peer in the same sector reported earnings within the
+    2B. State-based compression — at least N of 5 signals firing.
+    2C. Sympathy — a peer in the same sector reported earnings within the
         last 5 trading days with a >5% reaction.
+    2D. Momentum — 5-day return on the underlying. Direction-bearing
+        signal: positive momentum → bullish thesis; negative → bearish.
+        |return| ≥ momentum_threshold_pct contributes to Tier A/B
+        eligibility (the "aligned" flag), but momentum is NOT required for
+        Stage 2 to PASS — it only adds direction-confirmation strength.
 
-Strength is the **max** across the four detectors (one strong catalyst is
-sufficient — stacking is not required). Strength formulas live in the
-source plan §6:
+Direction is resolved from the (momentum × UV-skew × dir-strict) tuple:
+    - When UV skew aligns with momentum direction → that direction.
+    - Single-sided signal → that direction.
+    - Conflict → ambiguous (Stage 2 fails).
+
+UV is a ticker-level proxy — it remains computed for telemetry and to
+contribute to direction resolution; the *production* UV scanner GSI is
+consulted later (in tier mapping) for Tier A confirmation.
+
+Strength is the **max** across the catalyst detectors plus a momentum
+boost when |5d return| ≥ threshold:
     - date_known: 1.0 within 14d, scaling linearly to 0.5 at 30d
     - compression: 0.4 + 0.15 × (signals - 2), capped at 1.0
-    - uv: 0.6 + 0.1 × (magnitude - threshold), capped at 1.0
     - sympathy: 0.5 fixed
+    - momentum: included as max(catalyst_strength, |return_pct| / 10),
+      capped 1.0
 """
 
 from __future__ import annotations
@@ -81,6 +95,80 @@ class SympathyDetection:
     peer_move_pct: Optional[float] = None
     days_since_peer_event: Optional[int] = None
     strength: float = 0.0
+
+
+@dataclass
+class MomentumDetection:
+    """5-day-return signal. ``aligned`` is set after direction resolution."""
+
+    return_5d_pct: Optional[float] = None
+    direction: str = "none"  # "bullish" | "bearish" | "none"
+    magnitude_pct: float = 0.0  # absolute value of return_5d_pct
+    above_threshold: bool = False  # |return| >= momentum_threshold_pct
+    aligned: bool = False  # set later: True if direction matches resolved
+    strength: float = 0.0  # 0..1, magnitude / 10 capped at 1.0
+
+
+def detect_momentum_signal(
+    closes: Sequence[float],
+    config: ConvexConfig,
+) -> MomentumDetection:
+    """5-day return on the underlying. Direction-bearing per sign of return.
+
+    Uses the trailing 6 closes already supplied to Stage 2 — same series
+    the compression detectors consume, so no new fetch is required.
+    """
+    if len(closes) < 6:
+        return MomentumDetection()
+    try:
+        prior = float(closes[-6])
+        latest = float(closes[-1])
+    except (TypeError, ValueError):
+        return MomentumDetection()
+    if prior <= 0:
+        return MomentumDetection()
+
+    pct = (latest / prior - 1.0) * 100.0
+    direction = "bullish" if pct > 0 else ("bearish" if pct < 0 else "none")
+    magnitude = abs(pct)
+    above = magnitude >= config.momentum_threshold_pct
+    strength = min(1.0, magnitude / 10.0)
+    return MomentumDetection(
+        return_5d_pct=round(pct, 4),
+        direction=direction,
+        magnitude_pct=round(magnitude, 4),
+        above_threshold=above,
+        strength=round(strength, 4),
+    )
+
+
+def resolve_direction(
+    momentum: MomentumDetection, uv: "UVDetection"
+) -> str:
+    """Resolve trade direction from momentum + UV skew.
+
+    Returns:
+        "bullish" | "bearish" | "ambiguous"
+    """
+    momentum_dir = momentum.direction if momentum.above_threshold else "none"
+    uv_dir = "none"
+    if uv.detected:
+        if uv.directional_skew == "call_heavy":
+            uv_dir = "bullish"
+        elif uv.directional_skew == "put_heavy":
+            uv_dir = "bearish"
+
+    # Both fire: must agree.
+    if momentum_dir != "none" and uv_dir != "none":
+        return momentum_dir if momentum_dir == uv_dir else "ambiguous"
+    # Only momentum fires.
+    if momentum_dir != "none":
+        return momentum_dir
+    # Only UV fires.
+    if uv_dir != "none":
+        return uv_dir
+    # Neither: ambiguous (Stage 2 will fail).
+    return "ambiguous"
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +558,7 @@ def evaluate_stage2(
     today_iso: str,
     config: ConvexConfig,
 ) -> tuple[ConvexStagePayload, dict[str, object]]:
-    """Run catalyst detectors and return a Stage 2 payload + raw detections.
+    """Run catalyst + momentum detectors, resolve direction, return payload.
 
     Stage 2 fires on three CATALYST signals — the reasons something might
     explode in the near future:
@@ -478,15 +566,20 @@ def evaluate_stage2(
         - compression: coiled-spring price pattern
         - sympathy: a sector peer just reacted with a meaningful move
 
-    Unusual volume is NOT a Stage 2 catalyst — UV is *evidence* of smart
-    money positioning, not a reason a trade is convex. Convex moved UV
-    detection to Stage 4 as a confirmation flag (see
-    ``smart_money_confirmation``). UV alone admitting a trade was the
-    historic source of false-positive momentum-chasing entries — the
-    pipeline now requires a real catalyst, with UV as a tiebreaker.
+    PLUS a directional signal:
+        - momentum: 5-day return; sign indicates direction, magnitude
+          determines whether the candidate is "momentum-aligned" for tier
+          A/B eligibility.
 
-    The detections dict is returned alongside the payload so Stage 4 can
-    consult catalyst context when picking contracts.
+    Stage 2 PASSES when (catalyst fires) AND (direction is non-ambiguous).
+    Direction is resolved from momentum + UV skew (see ``resolve_direction``).
+
+    Unusual volume is computed here as a ticker-level proxy that informs
+    direction resolution; the production UV scanner GSI is consulted later
+    in tier mapping for Tier A's "UV detected" requirement.
+
+    The detections dict is returned alongside the payload so downstream
+    stages can consult catalyst context, momentum, and resolved direction.
     """
     date_known = detect_date_known_catalyst(
         inputs.calendar_entries, today_iso, config
@@ -502,10 +595,8 @@ def evaluate_stage2(
     sympathy = detect_sympathy(
         inputs.sector, inputs.ticker, inputs.peer_reactions, config
     )
-
-    # UV is computed here only for telemetry / debug visibility. It does
-    # NOT contribute to Stage 2 PASS/FAIL or the strength composite.
-    uv_telemetry = detect_unusual_volume(
+    momentum = detect_momentum_signal(inputs.closes, config)
+    uv = detect_unusual_volume(
         inputs.today_total_options_volume,
         inputs.avg_options_volume_30d,
         inputs.today_call_options_volume,
@@ -513,58 +604,67 @@ def evaluate_stage2(
         config,
     )
 
-    detected_any = any(
+    direction = resolve_direction(momentum, uv)
+    momentum.aligned = momentum.above_threshold and momentum.direction == direction
+
+    catalyst_detected = any(
         (date_known.detected, compression.detected, sympathy.detected)
     )
+    direction_resolved = direction in ("bullish", "bearish")
+    detected = catalyst_detected and direction_resolved
 
-    selected_strength = max(
+    catalyst_strength = max(
         date_known.strength,
         compression.strength,
         sympathy.strength,
     )
-    selected_type = _pick_strongest_type(
-        date_known, compression, _stub_uv(), sympathy
+    composite_strength = (
+        max(catalyst_strength, momentum.strength) if detected else 0.0
     )
+    selected_type = _pick_strongest_type(date_known, compression, uv, sympathy)
 
     summary = _build_summary(
-        inputs.ticker, detected_any, date_known, compression, _stub_uv(), sympathy
+        inputs.ticker,
+        detected,
+        catalyst_detected,
+        direction,
+        date_known,
+        compression,
+        uv,
+        sympathy,
+        momentum,
     )
 
     payload = ConvexStagePayload(
         stage=2,
-        stage_name="Catalyst Layer",
-        result="PASS" if detected_any else "FAIL",
+        stage_name="Catalyst + Direction",
+        result="PASS" if detected else "FAIL",
         summary=summary,
         criteria={
             "date_known": _date_known_dict(date_known),
             "state_based": _compression_dict(compression),
             "sympathy": _sympathy_dict(sympathy),
-            # UV preserved as telemetry — Stage 4 uses live chain skew
-            # directly rather than this Stage 2-time snapshot.
-            "unusual_volume_telemetry": _uv_dict(uv_telemetry),
+            "momentum": _momentum_dict(momentum),
+            "unusual_volume": _uv_dict(uv),
         },
-        strength=selected_strength if detected_any else 0.0,
+        strength=composite_strength,
         extras={
             "selected_catalyst_type": selected_type,
-            "selected_catalyst_strength": selected_strength,
+            "selected_catalyst_strength": catalyst_strength,
+            "direction": direction,
+            "momentum_aligned": momentum.aligned,
+            "momentum_return_5d_pct": momentum.return_5d_pct,
         },
     )
     detections = {
         "date_known": date_known,
         "compression": compression,
         "sympathy": sympathy,
-        # uv_telemetry exposed for Stage 4 (informational only)
-        "unusual_volume": uv_telemetry,
+        "unusual_volume": uv,
+        "momentum": momentum,
+        "direction": direction,
     }
     return payload, detections
-
-
-def _stub_uv() -> "UVDetection":
-    """Return a non-detected UVDetection for shared helpers that still
-    expect the original 4-detector tuple shape (summary builder, type
-    picker). Stage 2 PASS no longer depends on UV — this stub keeps the
-    helpers simple without restructuring them."""
-    return UVDetection(detected=False, magnitude=0.0, directional_skew=None, strength=0.0)
 
 
 def _pick_strongest_type(
@@ -588,16 +688,25 @@ def _pick_strongest_type(
 
 def _build_summary(
     ticker: str,
-    detected_any: bool,
+    detected: bool,
+    catalyst_detected: bool,
+    direction: str,
     date_known: DateKnownDetection,
     compression: CompressionDetection,
     uv: UVDetection,
     sympathy: SympathyDetection,
+    momentum: MomentumDetection,
 ) -> str:
-    if not detected_any:
+    if not detected:
+        if not catalyst_detected:
+            return (
+                f"{ticker}: no catalyst within window — no date-known event, "
+                "no compression signature, no sympathy."
+            )
+        # Catalyst fired but direction unresolved.
         return (
-            f"{ticker}: no catalyst within window — no date-known event, "
-            "no compression signature, no unusual volume, no sympathy."
+            f"{ticker}: catalyst present but direction is ambiguous "
+            f"(momentum={momentum.return_5d_pct}, uv_skew={uv.directional_skew})."
         )
     parts: list[str] = []
     if date_known.detected and date_known.event_type:
@@ -619,7 +728,12 @@ def _build_summary(
             f"sympathy from {sympathy.peer_ticker} "
             f"({sympathy.peer_move_pct:+.1f}%)"
         )
-    return f"{ticker}: " + "; ".join(parts) + "."
+    if momentum.return_5d_pct is not None:
+        aligned_str = " aligned" if momentum.aligned else ""
+        parts.append(
+            f"5d return {momentum.return_5d_pct:+.1f}%{aligned_str}"
+        )
+    return f"{ticker} ({direction}): " + "; ".join(parts) + "."
 
 
 def _date_known_dict(d: DateKnownDetection) -> dict[str, object]:
@@ -657,5 +771,16 @@ def _sympathy_dict(d: SympathyDetection) -> dict[str, object]:
         "peer_ticker": d.peer_ticker,
         "peer_move_pct": d.peer_move_pct,
         "days_since_peer_event": d.days_since_peer_event,
+        "strength": d.strength,
+    }
+
+
+def _momentum_dict(d: MomentumDetection) -> dict[str, object]:
+    return {
+        "return_5d_pct": d.return_5d_pct,
+        "direction": d.direction,
+        "magnitude_pct": d.magnitude_pct,
+        "above_threshold": d.above_threshold,
+        "aligned": d.aligned,
         "strength": d.strength,
     }

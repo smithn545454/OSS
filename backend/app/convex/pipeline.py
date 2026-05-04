@@ -74,18 +74,16 @@ class Stage3InputsProvider(Protocol):
     """Protocol for fetching per-ticker Stage 3 inputs.
 
     The daily-pipeline implementation fetches:
-        - Latest IVHistory for current iv_30d / iv_60d / iv_25d_put /
-          iv_25d_call (post Phase 0.5 backfill)
-        - Trailing 252-day IVHistory for IV Rank / IV Percentile
-        - HV20 derived from PriceHistoryTable closes
-        - Catalyst type from the candidate's Stage 2 detections
-        - Price-position percentile within recent consolidation range
+        - Latest IVHistory for current iv_30d
+        - Trailing 252-day IVHistory for IV Percentile
+        - HV20 (rv20) derived from PriceHistoryTable closes
+    Stage 3 is now a PL pricing pre-screen — no skew, no term structure,
+    no direction inference (direction is set by Stage 2).
     """
 
     async def fetch(
         self,
         ticker: str,
-        catalyst_type: Optional[str],
         today_iso: str,
     ) -> Optional[Stage3Inputs]:
         ...
@@ -137,6 +135,14 @@ class ConvexCandidate:
     # Catalyst date for Stage 4's post-event DTE buffer rule (Phase 6
     # populates this from the Stage 2 date-known detection).
     catalyst_date_iso: Optional[str] = None
+    # Carried forward from Stage 3 PL pre-screen — Stage 4 reuses these
+    # without re-fetching IVHistory.
+    iv_percentile_for_pl: Optional[float] = None
+    iv_rv_ratio_for_pl: Optional[float] = None
+    # UV signal looked up at tier-assignment time (production UV scanner
+    # GSI). Carried onto the candidate so the downstream finaliser doesn't
+    # double-fetch.
+    uv_signal_for_tier: Optional[object] = None  # UVSignal at runtime
 
     @property
     def advanced_to_stage(self) -> int:
@@ -279,11 +285,14 @@ class ConvexPipeline:
                 continue
             result.stage4_advancers += 1
 
-            # Phase 6: tier assignment + within-tier composite. The
-            # Decision emission is the caller's job (the daily-pipeline
-            # Lambda handler will call finalise_candidate with an
-            # evaluation_id and policy_version).
-            tier = assign_tier(candidate, self.config)
+            # Tier assignment + within-tier composite. The UV scanner GSI
+            # is consulted here so Tier A (which requires UV detected) can
+            # be tallied accurately. The daily-pipeline Lambda handler will
+            # call finalise_candidate with the same uv_signal to emit the
+            # Decision.
+            uv_signal = await self._lookup_uv_for_tier(candidate)
+            candidate.uv_signal_for_tier = uv_signal
+            tier = assign_tier(candidate, self.config, uv_signal=uv_signal)
             if tier is not None:
                 candidate.tier = tier
                 candidate.composite_strength = within_tier_composite(candidate)
@@ -393,11 +402,16 @@ class ConvexPipeline:
             )
 
         payload, detections = evaluate_stage2(inputs, self._as_of_date, self.config)
-        # Preserve UV detection on the candidate for Stage 4's Smart Money
-        # Confirmation flag.
+        # Preserve UV detection on the candidate (used by Stage 4's smart
+        # money flag derived from the live chain skew).
         uv = detections.get("unusual_volume")
         if isinstance(uv, UVDetection):
             candidate.uv_detection = uv
+        # Stage 2 now owns direction resolution (momentum + UV skew). Carry
+        # the resolved direction onto the candidate so Stages 3/4 read it.
+        direction = detections.get("direction")
+        if isinstance(direction, str):
+            candidate.direction = direction
         # Propagate the date-known catalyst's date so Stage 4 can apply the
         # post-event +14 DTE buffer rule.
         date_known = detections.get("date_known")
@@ -408,16 +422,16 @@ class ConvexPipeline:
         return payload
 
     async def _stage3(self, candidate: ConvexCandidate) -> ConvexStagePayload:
-        """Stage 3: Volatility Mispricing — IV cheapness + direction inference.
+        """Stage 3: PL Pricing Pre-Screen.
 
-        Pulls per-ticker IV/HV inputs via the injected provider and runs
-        the five metric gates. The inferred directional bias is preserved
-        on the candidate so Stage 4 can pick calls / puts / straddle legs.
+        Computes a representative PL using ATM-ish chain inputs so the
+        pipeline can fail fast before Stage 4 selects a contract. Direction
+        is no longer inferred here — Stage 2 owns that.
         """
         if self._stage3_provider is None:
             return ConvexStagePayload(
                 stage=3,
-                stage_name="Volatility Mispricing",
+                stage_name="PL Pricing Pre-Screen",
                 result="FAIL",
                 summary=(
                     f"{candidate.ticker}: no Stage 3 inputs provider "
@@ -425,30 +439,35 @@ class ConvexPipeline:
                 ),
             )
 
-        catalyst_type: Optional[str] = None
-        if candidate.stages.stage_2 is not None:
-            catalyst_type = candidate.stages.stage_2.extras.get(
-                "selected_catalyst_type"
-            )
-
         inputs = await self._stage3_provider.fetch(
             ticker=candidate.ticker,
-            catalyst_type=catalyst_type,
             today_iso=self._as_of_date,
         )
         if inputs is None:
             return ConvexStagePayload(
                 stage=3,
-                stage_name="Volatility Mispricing",
+                stage_name="PL Pricing Pre-Screen",
                 result="FAIL",
                 summary=(
                     f"{candidate.ticker}: data unavailable for Stage 3 "
-                    "(missing IV history or current vol surface)."
+                    "(missing IV history or 30-day IV)."
                 ),
             )
 
         result = evaluate_stage3(inputs, self.config)
-        candidate.direction = result.direction
+        # Preserve the IV-percentile / IV-RV ratio computed during the
+        # pre-screen so Stage 4 can reuse them for the per-contract PL
+        # recompute without re-fetching IVHistory.
+        candidate.iv_percentile_for_pl = (
+            result.payload.criteria.get("inputs", {}).get("iv_percentile")
+            if result.payload.criteria
+            else None
+        )
+        candidate.iv_rv_ratio_for_pl = (
+            result.payload.criteria.get("inputs", {}).get("iv_rv_ratio")
+            if result.payload.criteria
+            else None
+        )
         return result.payload
 
     async def _stage4(self, candidate: ConvexCandidate) -> ConvexStagePayload:
@@ -498,6 +517,10 @@ class ConvexPipeline:
                     "(no chain snapshot or expected-move estimate)."
                 ),
             )
+        # Forward Stage 3's IV-percentile / IV-RV ratio so Stage 4 can
+        # recompute the PL pillar on the actual selected contract.
+        inputs.iv_percentile_for_pl = candidate.iv_percentile_for_pl
+        inputs.iv_rv_ratio_for_pl = candidate.iv_rv_ratio_for_pl
 
         result = evaluate_stage4(inputs, self.config)
         if result.payload.result == "PASS":
@@ -505,3 +528,21 @@ class ConvexPipeline:
             candidate.selected_put = result.selected_put
             candidate.smart_money_confirmation = result.smart_money_confirmation
         return result.payload
+
+    async def _lookup_uv_for_tier(self, candidate: ConvexCandidate):
+        """Look up the production UV scanner GSI for tier-A determination.
+
+        Failures are logged and treated as "no UV signal" — the candidate
+        can still earn Tier B/C without UV. Imported lazily so test
+        environments without boto/dynamodb don't fail at import.
+        """
+        try:
+            from app.convex.uv_lookup import lookup_uv_signal
+            return await lookup_uv_signal(candidate.ticker)
+        except Exception as exc:
+            logger.warning(
+                "UV lookup failed for %s during tier assignment: %s",
+                candidate.ticker,
+                exc,
+            )
+            return None

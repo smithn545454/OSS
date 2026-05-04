@@ -283,7 +283,7 @@ class TestProductionProviders:
             _polygon_chain_row("NVDA", "2026-06-25", "call", 140, 0.50, iv=0.25),
         ]
         provider = ProductionStage3InputsProvider(_FakePolygon({"NVDA": chain}))
-        result = await provider.fetch("NVDA", "state_based", "2026-04-26")
+        result = await provider.fetch("NVDA", "2026-04-26")
         assert result is not None
         # iv_30d should be populated from the chain extractor.
         assert result.current_iv_30d is not None

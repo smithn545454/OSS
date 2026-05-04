@@ -155,6 +155,7 @@ function ConvexEvaluationsTable({ evaluations }: { evaluations: ConvexEvaluation
           <tr>
             <th className="px-3 py-2 font-medium">Ticker</th>
             <th className="px-3 py-2 font-medium">Tier</th>
+            <th className="px-3 py-2 font-medium">PL</th>
             <th className="px-3 py-2 font-medium">Direction</th>
             <th className="px-3 py-2 font-medium">Contract</th>
             <th className="px-3 py-2 font-medium">Δ</th>
@@ -190,6 +191,9 @@ function ConvexEvaluationRow({ evaluation }: { evaluation: ConvexEvaluation }) {
         >
           {evaluation.convex_tier}
         </span>
+      </td>
+      <td className="px-3 py-2 font-mono text-xs font-semibold">
+        {evaluation.pl_score != null ? evaluation.pl_score.toFixed(0) : '—'}
       </td>
       <td className="px-3 py-2 text-oss-muted">
         {DIRECTION_LABEL[evaluation.direction] ?? evaluation.direction}

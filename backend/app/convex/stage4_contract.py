@@ -1,10 +1,11 @@
-"""Convex Mode — Stage 4: Contract Selection.
+"""Convex Mode — Stage 4: Contract Selection + PL Recompute.
 
 Translates "this name has a setup" into "buy this specific contract".
 Computes the expected-move terminus, picks the strike closest to that
 terminus within the configured delta + DTE bands, validates liquidity,
-and sets the Smart Money Confirmation flag when Stage 2 UV directional
-skew aligns with the chosen thesis.
+sets the Smart Money Confirmation flag when Stage 2 UV directional skew
+aligns with the chosen thesis, and recomputes the PL pillar on the
+actual selected contract for tier mapping.
 
 Stage 4 PASSES when a single tradeable contract meeting all parameter
 requirements exists. FAILS when no contract clears liquidity (e.g.,
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date as _date
 from typing import Optional, Sequence
 
+from app.convex.pl_pillar import compute_pl_score
 from app.core.schemas import (
     ConvexConfig,
     ConvexStagePayload,
@@ -48,6 +50,7 @@ class ConvexContractCandidate:
     ask: float
     open_interest: int
     volume: int
+    iv: Optional[float] = None  # Polygon top-level implied_volatility, used for PL
 
     @property
     def mid(self) -> Optional[float]:
@@ -77,6 +80,10 @@ class Stage4Inputs:
     available_contracts: Sequence[ConvexContractCandidate]
     uv_directional_skew: Optional[str] = None  # "call_heavy" | "put_heavy" | "balanced"
     today_iso: Optional[str] = None
+    # Carried forward from Stage 3 for the PL recompute on the selected
+    # contract (computed once in Stage 3, reused here — no re-fetch).
+    iv_percentile_for_pl: Optional[float] = None
+    iv_rv_ratio_for_pl: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -721,10 +728,15 @@ def _evaluate_straddle(
             ),
         )
 
+    pl_score, pl_subscores = compute_contract_pl(
+        chosen_call,
+        iv_percentile=inputs.iv_percentile_for_pl,
+        iv_rv_ratio=inputs.iv_rv_ratio_for_pl,
+    )
     summary = (
         f"{inputs.ticker}: selected long straddle at {chosen_call.expiry} "
         f"(call {chosen_call.strike:g} {chosen_call.delta:+.2f}Δ, "
-        f"put {chosen_put.strike:g} {chosen_put.delta:+.2f}Δ)."
+        f"put {chosen_put.strike:g} {chosen_put.delta:+.2f}Δ, PL {pl_score:.0f})."
     )
     payload = ConvexStagePayload(
         stage=4,
@@ -735,9 +747,15 @@ def _evaluate_straddle(
             "structure": "long_straddle",
             "selected_call": _contract_dict(chosen_call),
             "selected_put": _contract_dict(chosen_put),
+            "pl_score": pl_score,
+            "pl_subscores": pl_subscores,
         },
-        strength=_directional_strength(chosen_call, config),
-        extras={"smart_money_confirmation": False},
+        strength=_strength_with_pl(chosen_call, config, pl_score),
+        extras={
+            "smart_money_confirmation": False,
+            "pl_score": pl_score,
+            "pl_subscores": pl_subscores,
+        },
     )
     return Stage4Result(
         payload=payload,
@@ -758,10 +776,16 @@ def _build_directional_payload(
     chosen = selection.selected
     assert chosen is not None  # narrowing for type-checker
 
+    pl_score, pl_subscores = compute_contract_pl(
+        chosen,
+        iv_percentile=inputs.iv_percentile_for_pl,
+        iv_rv_ratio=inputs.iv_rv_ratio_for_pl,
+    )
+
     summary = (
         f"{inputs.ticker}: selected {chosen.option_type.lower()} "
         f"{chosen.strike:g} expiring {chosen.expiry} "
-        f"(delta {chosen.delta:+.2f}, {chosen.dte} DTE)."
+        f"(delta {chosen.delta:+.2f}, {chosen.dte} DTE, PL {pl_score:.0f})."
     )
     menu_dicts = [
         {
@@ -780,6 +804,8 @@ def _build_directional_payload(
         criteria={
             "structure": "directional",
             "selected_contract": _contract_dict(chosen),
+            "pl_score": pl_score,
+            "pl_subscores": pl_subscores,
             "contract_menu": menu_dicts,
             "alternatives_considered": [
                 _alt_dict(a) for a in selection.alternatives_considered
@@ -792,40 +818,72 @@ def _build_directional_payload(
                 "volume_today": chosen.volume,
             },
         },
-        strength=_directional_strength(chosen, config),
-        extras={"smart_money_confirmation": smart_money},
+        strength=_strength_with_pl(chosen, config, pl_score),
+        extras={
+            "smart_money_confirmation": smart_money,
+            "pl_score": pl_score,
+            "pl_subscores": pl_subscores,
+        },
     )
 
 
-def _directional_strength(
-    chosen: object, config: ConvexConfig
-) -> float:
-    """Composite strength for within-tier ranking only.
-
-    Inputs: delta proximity to target band centre, DTE proximity to band
-    centre, spread tightness. Liquidity quality folds in via spread_pct.
-    """
-    c = chosen  # type: ignore[assignment]
+def _liquidity_score(c: ConvexContractCandidate, config: ConvexConfig) -> float:
+    """Composite of delta-band centring, DTE centring, spread tightness."""
     target_delta = (config.contract_delta_min + config.contract_delta_max) / 2
     delta_score = max(
         0.0,
-        1.0 - abs(abs(c.delta) - target_delta) / target_delta,  # type: ignore[attr-defined]
+        1.0 - abs(abs(c.delta) - target_delta) / target_delta,
     )
-
     target_dte = (config.contract_dte_min + config.contract_dte_max) / 2
     dte_score = max(
         0.0,
-        1.0 - abs(c.dte - target_dte) / target_dte,  # type: ignore[attr-defined]
+        1.0 - abs(c.dte - target_dte) / target_dte,
     )
-
-    spread = c.spread_pct  # type: ignore[attr-defined]
+    spread = c.spread_pct
     spread_score = (
         max(0.0, 1.0 - (spread / config.contract_max_spread_pct))
         if spread is not None
         else 0.5
     )
+    return (delta_score + dte_score + spread_score) / 3
 
-    return round((delta_score + dte_score + spread_score) / 3, 4)
+
+def compute_contract_pl(
+    contract: ConvexContractCandidate,
+    iv_percentile: Optional[float],
+    iv_rv_ratio: Optional[float],
+) -> tuple[float, dict[str, Optional[float]]]:
+    """Recompute the PL pillar on the actual selected contract.
+
+    Returns ``(pl_score, subscores)`` mirroring the legacy v5 formula.
+    Falls back to ``compute_pl_score`` graceful weight redistribution
+    when ``iv_percentile`` or ``iv_rv_ratio`` is missing.
+    """
+    return compute_pl_score(
+        iv=contract.iv,
+        abs_delta=abs(contract.delta) if contract.delta is not None else None,
+        iv_percentile=iv_percentile,
+        iv_rv_ratio=iv_rv_ratio,
+    )
+
+
+def _strength_with_pl(
+    chosen: ConvexContractCandidate,
+    config: ConvexConfig,
+    pl_score: Optional[float],
+) -> float:
+    """Stage 4 within-tier strength: PL dominates, liquidity centres it."""
+    liq = _liquidity_score(chosen, config)
+    if pl_score is None:
+        return round(liq, 4)
+    return round(0.7 * (pl_score / 100.0) + 0.3 * liq, 4)
+
+
+def _directional_strength(
+    chosen: object, config: ConvexConfig
+) -> float:
+    """Backwards-compatible liquidity-only strength (used by straddle path)."""
+    return round(_liquidity_score(chosen, config), 4)  # type: ignore[arg-type]
 
 
 def _contract_dict(c: ConvexContractCandidate) -> dict[str, object]:
@@ -836,6 +894,7 @@ def _contract_dict(c: ConvexContractCandidate) -> dict[str, object]:
         "expiry": c.expiry,
         "dte": c.dte,
         "delta": round(c.delta, 4),
+        "iv": c.iv,
         "bid": c.bid,
         "ask": c.ask,
         "mid": c.mid,

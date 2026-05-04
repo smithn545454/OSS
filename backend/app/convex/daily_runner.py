@@ -251,16 +251,15 @@ async def _finalise_and_persist(
         # Tier + Decision only for fully-advanced candidates.
         if candidate.advanced_to_stage == 4:
             evaluation_id = f"convex-{run_id[:8]}-{candidate.ticker}"
-            # Look up the UV signal for this ticker BEFORE finalising so
-            # smart_money_confirmation reflects real UV scanner detections.
-            uv_signal = await lookup_uv_signal(candidate.ticker)
-            if uv_signal is not None and candidate.direction:
-                candidate.smart_money_confirmation = (
-                    uv_signal.is_unusual
-                    and uv_signal.aligns_with(candidate.direction)
-                )
+            # The UV signal was looked up during pipeline tier-assignment
+            # (see ConvexPipeline._lookup_uv_for_tier). Reuse it so we
+            # don't double-fetch the GSI.
+            uv_signal = candidate.uv_signal_for_tier
+            if uv_signal is None:
+                uv_signal = await lookup_uv_signal(candidate.ticker)
             result = finalise_candidate(
-                candidate, evaluation_id, policy_version, config
+                candidate, evaluation_id, policy_version, config,
+                uv_signal=uv_signal,
             )
             if result is not None:
                 # Attach UV signal data to the Decision payload for UI.
@@ -300,6 +299,15 @@ def _to_convex_evaluation(
 ) -> ConvexEvaluation:
     """Project a FinalisedConvexCandidate into the persisted ConvexEvaluation."""
     candidate = finalised.candidate
+    pl_score: Optional[float] = None
+    s4 = candidate.stages.stage_4
+    if s4 is not None:
+        raw_pl = s4.extras.get("pl_score")
+        if raw_pl is not None:
+            try:
+                pl_score = float(raw_pl)
+            except (TypeError, ValueError):
+                pl_score = None
     return ConvexEvaluation(
         evaluation_id=finalised.decision.evaluation_id,
         run_id=run_id,
@@ -308,6 +316,7 @@ def _to_convex_evaluation(
         convex_tier=finalised.tier.value,
         composite_strength=finalised.composite,
         smart_money_confirmation=candidate.smart_money_confirmation,
+        pl_score=pl_score,
         selected_call=_to_selected_contract(candidate.selected_call),
         selected_put=_to_selected_contract(candidate.selected_put),
         decision=finalised.decision,

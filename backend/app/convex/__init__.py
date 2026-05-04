@@ -1,19 +1,22 @@
-"""Convex Mode pipeline (parallel four-stage gated scanner).
+"""Convex Mode pipeline (four-stage gated scanner, sole production scorer).
 
 Convex Mode targets asymmetric long-premium "exploder" setups via four
 binary gates with strength measures and tiered ranking (Tier A/B/C). It
-runs as a parallel pipeline alongside the legacy 8-stage scanner pipeline
-and emits Decisions with verdict=CONVEX_APPROVE.
+emits Decisions with verdict=CONVEX_APPROVE.
 
 Stages:
     1. Kinetic Universe (monthly refresh) — eligible underlying universe
-    2. Catalyst Layer (daily) — date-known + state-based + UV + sympathy
-    3. Volatility Mispricing (daily) — IV cheap relative to setup, direction
-    4. Contract Selection (daily) — specific contract recommendation
+    2. Catalyst + Direction (daily) — date-known + compression + sympathy
+       + 5-day momentum + UV-skew direction resolution
+    3. PL Pricing Pre-Screen (daily) — Premium Leverage representative
+       score (replaces IV/HV envelope)
+    4. Contract Selection + PL recompute (daily) — specific contract +
+       PL pillar recomputed on the actual selected contract
 
-See:
-    - docs/convex-mode-impact-report.md — pre-flight integration analysis
-    - Source plan: ~/Downloads/convex-mode-implementation-plan.md
+Tier mapping (decided after Stage 4):
+    Tier A: PL ≥ 80 AND momentum_aligned AND UV detected aligned
+    Tier B: PL ≥ 80 AND momentum_aligned
+    Tier C: PL ≥ 85 alone, OR PL ≥ 80 + UV detected aligned
 """
 
 from app.convex.backtest import (
@@ -50,6 +53,7 @@ from app.convex.pipeline import (
     ConvexPipelineResult,
     Tier,
 )
+from app.convex.pl_pillar import compute_pl_score
 from app.convex.stage1_universe import (
     TickerKineticInputs,
     UniverseBuildResult,
@@ -63,28 +67,25 @@ from app.convex.stage1_universe import (
 from app.convex.stage2_catalyst import (
     CompressionDetection,
     DateKnownDetection,
+    MomentumDetection,
     PeerEarningsReaction,
     Stage2Inputs,
     SympathyDetection,
     UVDetection,
     detect_compression_signals,
     detect_date_known_catalyst,
+    detect_momentum_signal,
     detect_sympathy,
     detect_unusual_volume,
     evaluate_stage2,
+    resolve_direction,
 )
 from app.convex.stage3_volatility import (
-    SkewAssessment,
     Stage3Inputs,
     Stage3Result,
-    TermStructureAssessment,
-    assess_skew,
-    assess_term_structure,
-    compute_iv_hv_ratio,
     compute_iv_percentile,
-    compute_iv_rank,
+    compute_iv_rv_ratio,
     evaluate_stage3,
-    infer_direction,
 )
 from app.convex.stage4_contract import (
     ConvexContractCandidate,
@@ -126,30 +127,29 @@ __all__ = [
     "TickerMetadata",
     "TickerMetadataFetcher",
     "UniverseConstructor",
+    # PL pillar
+    "compute_pl_score",
     # Stage 2
     "CompressionDetection",
     "DateKnownDetection",
+    "MomentumDetection",
     "PeerEarningsReaction",
     "Stage2Inputs",
     "SympathyDetection",
     "UVDetection",
     "detect_compression_signals",
     "detect_date_known_catalyst",
+    "detect_momentum_signal",
     "detect_sympathy",
     "detect_unusual_volume",
     "evaluate_stage2",
+    "resolve_direction",
     # Stage 3
-    "SkewAssessment",
     "Stage3Inputs",
     "Stage3Result",
-    "TermStructureAssessment",
-    "assess_skew",
-    "assess_term_structure",
-    "compute_iv_hv_ratio",
     "compute_iv_percentile",
-    "compute_iv_rank",
+    "compute_iv_rv_ratio",
     "evaluate_stage3",
-    "infer_direction",
     # Stage 4
     "ConvexContractCandidate",
     "RecommendedContract",

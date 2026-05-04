@@ -217,7 +217,7 @@ class TestHistoricalStage3InputsProvider:
             side_effect=fake_iv_history,
         ):
             provider = HistoricalStage3InputsProvider(hdp=hdp)
-            inputs = await provider.fetch("NVDA", "date_known", as_of)
+            inputs = await provider.fetch("NVDA", as_of)
 
         assert inputs is not None
         assert isinstance(inputs, Stage3Inputs)
@@ -225,16 +225,11 @@ class TestHistoricalStage3InputsProvider:
         assert captured["iv_kwargs"].get("end_date") == as_of
         # HDP called with the as-of date for price history.
         hdp.get_daily_bars.assert_awaited_once()
-        # Multi-tenor IV pulled from the latest (newest-first) row.
+        # 30-day IV pulled from the latest (newest-first) row.
         assert inputs.current_iv_30d == 0.46
-        assert inputs.current_iv_60d == 0.44
-        assert inputs.current_iv_25d_put == 0.50
-        assert inputs.current_iv_25d_call == 0.42
         # rv20 computed from price history (closes increase by 1 each day).
         assert inputs.rv20 is not None
         assert inputs.rv20 > 0
-        # Catalyst type passed through.
-        assert inputs.catalyst_type == "date_known"
 
 
 # ---------------------------------------------------------------------------

@@ -16,12 +16,16 @@ from app.convex import (
     Stage2Inputs,
     detect_compression_signals,
     detect_date_known_catalyst,
+    detect_momentum_signal,
     detect_sympathy,
     detect_unusual_volume,
     evaluate_stage2,
+    resolve_direction,
 )
 from app.convex.stage2_catalyst import (
     COMPRESSION_SIGNAL_NAMES,
+    MomentumDetection,
+    UVDetection,
     _compression_strength,
     _date_known_strength,
     _uv_strength,
@@ -408,6 +412,14 @@ class TestEvaluateStage2:
         assert payload.strength == 0.0
         assert "no catalyst within window" in payload.summary
 
+    def _bullish_momentum_closes(self) -> list[float]:
+        """Generate a close series that ends with a +6% 5-day move."""
+        closes = [100.0] * 250
+        # Last 5 days ramp +1.2%/day → ~+6% in 5 days.
+        for _ in range(5):
+            closes.append(closes[-1] * 1.012)
+        return closes
+
     def test_date_known_catalyst_passes(self):
         entry = CatalystCalendarEntry(
             ticker="NVDA",
@@ -415,10 +427,15 @@ class TestEvaluateStage2:
             event_type=CatalystEventType.EARNINGS,
             confirmed=True,
         )
-        inputs = self._stage2_inputs(calendar_entries=[entry])
+        # Direction must resolve — provide bullish 5d momentum.
+        inputs = self._stage2_inputs(
+            calendar_entries=[entry],
+            closes=self._bullish_momentum_closes(),
+        )
         payload, _ = evaluate_stage2(inputs, "2026-04-26", self.cfg)
         assert payload.result == "PASS"
         assert payload.extras["selected_catalyst_type"] == "date_known"
+        assert payload.extras["direction"] == "bullish"
 
     def test_max_strength_picked_across_detectors(self):
         # Date-known is strongest (1.0 within 14 days); compression weaker.
@@ -430,6 +447,7 @@ class TestEvaluateStage2:
         )
         inputs = self._stage2_inputs(
             calendar_entries=[entry],
+            closes=self._bullish_momentum_closes(),
             today_options_volume=600,
             avg_options_volume_30d=100,  # 6× → UV detected with strength ~0.8
         )
@@ -437,11 +455,13 @@ class TestEvaluateStage2:
         assert payload.result == "PASS"
         # Date-known at 8 days = strength 1.0 — should be selected.
         assert payload.extras["selected_catalyst_type"] == "date_known"
+        # Composite strength is max(catalyst_strength, momentum_strength) and
+        # the date-known catalyst dominates at 1.0.
         assert payload.strength == pytest.approx(1.0)
 
     def test_uv_alone_no_longer_admits_stage2_pass(self):
         """UV is evidence, not a catalyst — it cannot admit a Stage 2 PASS
-        on its own. UV detection is preserved as telemetry for Stage 4."""
+        on its own (no date-known / compression / sympathy)."""
         # Use a noisy close series that won't trigger compression on its own.
         rng = random.Random(31)
         closes = [100.0]
@@ -456,6 +476,95 @@ class TestEvaluateStage2:
         # No catalyst signal (no compression / date-known / sympathy) — Stage 2 FAILS
         # despite UV firing.
         assert payload.result == "FAIL"
-        # UV preserved as telemetry on the payload + detection bag.
         assert detections["unusual_volume"].detected is True
-        assert payload.criteria["unusual_volume_telemetry"]["detected"] is True
+        assert payload.criteria["unusual_volume"]["detected"] is True
+
+
+# ---------------------------------------------------------------------------
+# Momentum detector + direction resolution
+# ---------------------------------------------------------------------------
+
+
+class TestDetectMomentumSignal:
+
+    def setup_method(self):
+        self.cfg = ConvexConfig()
+
+    def test_returns_empty_when_too_few_closes(self):
+        result = detect_momentum_signal([100.0, 101.0], self.cfg)
+        assert result.return_5d_pct is None
+        assert result.direction == "none"
+        assert result.above_threshold is False
+
+    def test_positive_5d_return_is_bullish(self):
+        # Last 5 days: 100 → 110 → +10%
+        closes = [95.0] * 245 + [100.0, 102.0, 104.0, 106.0, 108.0, 110.0]
+        result = detect_momentum_signal(closes, self.cfg)
+        assert result.direction == "bullish"
+        assert result.return_5d_pct == pytest.approx(10.0, abs=0.01)
+        assert result.above_threshold is True
+
+    def test_negative_5d_return_is_bearish(self):
+        closes = [105.0] * 245 + [100.0, 98.0, 96.0, 94.0, 92.0, 90.0]
+        result = detect_momentum_signal(closes, self.cfg)
+        assert result.direction == "bearish"
+        assert result.return_5d_pct == pytest.approx(-10.0, abs=0.01)
+        assert result.above_threshold is True
+
+    def test_below_threshold_does_not_align(self):
+        # +2% in 5 days — under the default 5% threshold.
+        closes = [99.0] * 245 + [100.0, 100.4, 100.8, 101.2, 101.6, 102.0]
+        result = detect_momentum_signal(closes, self.cfg)
+        assert result.direction == "bullish"
+        assert result.above_threshold is False
+
+
+class TestResolveDirection:
+
+    def _uv(self, detected: bool, skew: str = "balanced") -> UVDetection:
+        return UVDetection(
+            detected=detected, magnitude=5.0 if detected else 0.0,
+            directional_skew=skew, strength=0.6 if detected else 0.0,
+        )
+
+    def _momentum(
+        self, direction: str, above: bool = True
+    ) -> MomentumDetection:
+        return MomentumDetection(
+            return_5d_pct=6.0 if direction == "bullish" else -6.0,
+            direction=direction,
+            magnitude_pct=6.0,
+            above_threshold=above,
+        )
+
+    def test_momentum_alone_resolves(self):
+        assert resolve_direction(
+            self._momentum("bullish"), self._uv(False)
+        ) == "bullish"
+
+    def test_uv_alone_resolves(self):
+        assert resolve_direction(
+            MomentumDetection(), self._uv(True, "call_heavy")
+        ) == "bullish"
+
+    def test_agreement_resolves(self):
+        assert resolve_direction(
+            self._momentum("bullish"), self._uv(True, "call_heavy")
+        ) == "bullish"
+
+    def test_disagreement_yields_ambiguous(self):
+        assert resolve_direction(
+            self._momentum("bullish"), self._uv(True, "put_heavy")
+        ) == "ambiguous"
+
+    def test_neither_yields_ambiguous(self):
+        assert resolve_direction(
+            MomentumDetection(), self._uv(False)
+        ) == "ambiguous"
+
+    def test_below_threshold_momentum_alone_yields_ambiguous(self):
+        # Direction-bearing momentum exists but magnitude < threshold,
+        # and UV doesn't fire → ambiguous (no actionable direction).
+        assert resolve_direction(
+            self._momentum("bullish", above=False), self._uv(False)
+        ) == "ambiguous"

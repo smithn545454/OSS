@@ -269,6 +269,7 @@ function formatCriterionValue(value: unknown): string {
 function FinalSummary({ evaluation }: { evaluation: ConvexEvaluation }) {
   const sizing = evaluation.decision.position_sizing_recommendation
   const composite = evaluation.composite_strength
+  const plScore = evaluation.pl_score
   return (
     <section className="rounded-xl border border-oss-border bg-oss-surface p-5">
       <h2 className="text-sm font-semibold text-oss-text">Final Summary</h2>
@@ -276,6 +277,12 @@ function FinalSummary({ evaluation }: { evaluation: ConvexEvaluation }) {
         <div>
           <dt className="text-xs uppercase tracking-wide text-oss-muted">Tier</dt>
           <dd className="text-base font-semibold text-oss-text">Tier {evaluation.convex_tier}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-oss-muted">PL score</dt>
+          <dd className="font-mono text-base font-semibold text-oss-text">
+            {plScore != null ? plScore.toFixed(1) : '—'}
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-oss-muted">Position sizing</dt>

@@ -76,19 +76,37 @@ sole production pipeline on 2026-04-29 (the legacy 8-stage scanner is gone).
    monthly construction of the eligible ticker set (options volume, market
    cap, ATM spread, tail-event count, HV regime). Persists snapshots to
    `ConvexUniverseSnapshotTable` for the daily run to consume.
-2. **Stage 2 — Catalyst** (`app/convex/stage2_catalyst.py`) — daily
-   detection of date-known catalysts (earnings/FDA), compression breakouts,
-   unusual volume, and sympathy moves. Sets candidate direction.
-3. **Stage 3 — Volatility Mispricing** (`app/convex/stage3_volatility.py`) —
-   IV rank / IV percentile / IV-vs-HV ratio gates; cheap convexity wins.
-4. **Stage 4 — Contract Selection** (`app/convex/stage4_contract.py`) —
-   pick a specific contract within the delta/DTE/spread envelope; smart-
-   money confirmation via the UV scanner GSI lookup.
+2. **Stage 2 — Catalyst + Direction** (`app/convex/stage2_catalyst.py`) —
+   daily detection of date-known catalysts (earnings/FDA), compression
+   breakouts, sympathy moves, **and 5-day momentum**. Resolves trade
+   direction from (5d momentum × UV skew) — Stage 2 PASSES only when a
+   catalyst fires AND direction is non-ambiguous.
+3. **Stage 3 — PL Pricing Pre-Screen** (`app/convex/stage3_volatility.py`) —
+   computes a representative Premium Leverage score (using ATM-ish chain
+   inputs) so the pipeline can fail fast before Stage 4. Replaced the
+   legacy IV/HV envelope after walk-forward analysis showed PL is the
+   strongest single signal. PASSES when `pl_pre_score ≥ pl_pre_screen_min`.
+4. **Stage 4 — Contract Selection + PL Recompute**
+   (`app/convex/stage4_contract.py`) — pick a specific contract within
+   the tightened delta/DTE/spread envelope (Δ 0.10–0.35, DTE 7–28,
+   OI ≥ 100), then recompute the PL pillar on the actual selected
+   contract for tier mapping.
 
-Tier assignment runs after Stage 4: **Tier A** (every dimension strong),
-**Tier B** (all gates passed at moderate strength), **Tier C** (borderline
-but every gate passed). Sizing is tier-driven (A=50%, B=35%, C=25% of
-standard). See `app/convex/tier.py`.
+Tier assignment runs after Stage 4 (`app/convex/tier.py`):
+- **Tier A**: PL ≥ 80 AND momentum-aligned AND UV detected (production
+  UV scanner GSI confirms aligned skew).
+- **Tier B**: PL ≥ 80 AND momentum-aligned.
+- **Tier C**: PL ≥ 85 alone, OR PL ≥ 80 + UV detected.
+- **Reject**: anything else (no Decision emitted).
+
+Within-tier ranking uses `pl_score / 100` directly. Sizing is tier-driven
+(A=50%, B=35%, C=25% of standard).
+
+The PL pillar (`app/convex/pl_pillar.py`) is the legacy v5 Premium
+Leverage formula reconstructed from `pipeline-stable-convex-cutover-2026-04-29^`
+(commit 8a3dda4^). Direction-agnostic 0–100 score using IV (51.6% weight),
+|delta| (27.5%), IV percentile (14.5%), IV/RV ratio (6.4%) — piecewise-
+linear interpolation across Policy v3.0.0 breakpoints.
 
 ### Lambda Handler (`app/main.py`)
 
@@ -174,9 +192,10 @@ others):
 - Decision is **frozen** — when populating `convex_uv_signal` after `finalise_candidate`, use `decision.model_copy(update={...})` and rebuild the `FinalisedConvexCandidate`
 
 ### Convex composite strength (`app/convex/tier.py`)
-- Within-tier ranking uses Stage 3 strength (cheaper convexity ranks first); falls back to Stage 2 strength when Stage 3 didn't run
-- `Decision.final_score = 0.0` is the sentinel — Convex doesn't compute a blended composite; tier + strength tell the story
+- Within-tier ranking uses `pl_score / 100` directly (PL is read off the Stage 4 `extras["pl_score"]`); falls back to Stage 4 strength when PL is missing
+- `Decision.final_score = 0.0` is the sentinel — Convex doesn't compute a blended composite; tier + PL tell the story
 - `PaperPosition.conviction_score` for new Convex positions = `composite_strength × 100` (legacy 0–100 scale projection so existing UI sorting keeps working)
+- The new tier rule is enforced in `assign_tier(candidate, config, uv_signal)` — UV signal must be passed in for Tier A; the orchestrator looks it up via `lookup_uv_signal` once per candidate and the daily runner reuses the cached result
 
 ### Opportunities Page
 - Tier filter dropdown: A / B / C / ALL

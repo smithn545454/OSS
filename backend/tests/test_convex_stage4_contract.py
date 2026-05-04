@@ -22,13 +22,14 @@ from app.core.schemas import ConvexConfig
 def _contract(
     strike: float,
     delta: float,
-    dte: int = 42,
-    expiry: str = "2026-06-26",
+    dte: int = 21,
+    expiry: str = "2026-06-05",
     option_type: str = "CALL",
     bid: float = 4.75,
     ask: float = 4.95,
     open_interest: int = 8000,
     volume: int = 1500,
+    iv: float = 0.30,
 ) -> ConvexContractCandidate:
     return ConvexContractCandidate(
         option_ticker=f"O:NVDA{expiry.replace('-','')[2:]}{option_type[0]}{int(strike*1000):08d}",
@@ -41,6 +42,7 @@ def _contract(
         ask=ask,
         open_interest=open_interest,
         volume=volume,
+        iv=iv,
     )
 
 
@@ -136,11 +138,12 @@ class TestEvaluateStage4Directional:
         uv_skew=None,
     ):
         if contracts is None:
-            # 3 calls in delta band, varying strikes near terminus 147
+            # 3 calls in delta band, varying strikes near terminus 147.
+            # New defaults: Δ 0.10–0.35, DTE 7–28.
             contracts = [
-                _contract(strike=150, delta=0.24, dte=42),  # below 0.25 floor
-                _contract(strike=145, delta=0.32, dte=42),  # ideal
-                _contract(strike=140, delta=0.45, dte=42),  # above 0.35 ceiling
+                _contract(strike=150, delta=0.08, dte=21),  # below 0.10 floor
+                _contract(strike=145, delta=0.32, dte=21),  # ideal
+                _contract(strike=140, delta=0.45, dte=21),  # above 0.35 ceiling
             ]
         return Stage4Inputs(
             ticker="NVDA",
@@ -165,15 +168,15 @@ class TestEvaluateStage4Directional:
     def test_records_alternatives_outside_delta_band(self):
         result = evaluate_stage4(self._bullish_inputs(), self.cfg)
         alts = result.payload.criteria["alternatives_considered"]
-        # Strikes 150 (below 0.25Δ) and 140 (above 0.35Δ) should be flagged
+        # Strikes 150 (below 0.10Δ) and 140 (above 0.35Δ) should be flagged
         rejected_strikes = {a["strike"] for a in alts}
         assert 150 in rejected_strikes
         assert 140 in rejected_strikes
 
     def test_fails_when_no_contracts_in_band(self):
-        # All contracts outside the 0.25-0.35 delta band
+        # All contracts outside the 0.10-0.35 delta band
         contracts = [
-            _contract(strike=150, delta=0.10),
+            _contract(strike=150, delta=0.05),
             _contract(strike=140, delta=0.55),
         ]
         result = evaluate_stage4(
@@ -199,11 +202,11 @@ class TestEvaluateStage4Directional:
         assert "tradeable" in summary_lc or "thin" in summary_lc
 
     def test_falls_back_to_secondary_strike_when_primary_fails_liquidity(self):
-        # Primary 145 fails liquidity; 148 still in band passes
+        # Primary 147 fails liquidity (below new OI floor=100); 145 passes.
         contracts = [
             _contract(  # closest to terminus, fails OI
                 strike=147, delta=0.30,
-                open_interest=100,
+                open_interest=50,
             ),
             _contract(  # next-closest, passes
                 strike=145, delta=0.32,
@@ -218,31 +221,31 @@ class TestEvaluateStage4Directional:
         assert result.selected_call.strike == 145
 
     def test_post_event_buffer_excludes_pre_event_expiries(self):
-        # Catalyst on 2026-05-14, today 2026-04-26. Buffer = 14 → expiry
-        # must be ≥ 2026-05-28. Contract at 2026-05-15 is excluded.
+        # Catalyst on 2026-04-30, today 2026-04-26. Buffer = 14 → expiry
+        # must be ≥ 2026-05-14. Contract at 2026-05-08 is excluded.
         contracts = [
             _contract(
-                strike=145, delta=0.32, dte=19,
-                expiry="2026-05-15",  # falls inside buffer
+                strike=145, delta=0.32, dte=12,
+                expiry="2026-05-08",  # falls inside buffer
             ),
             _contract(
-                strike=145, delta=0.32, dte=42,
-                expiry="2026-06-07",  # past buffer
+                strike=145, delta=0.32, dte=21,
+                expiry="2026-05-17",  # past buffer
             ),
         ]
         result = evaluate_stage4(
             self._bullish_inputs(
                 contracts=contracts,
                 catalyst_type="date_known",
-                catalyst_date_iso="2026-05-14",
+                catalyst_date_iso="2026-04-30",
             ),
             self.cfg,
         )
         assert result.payload.result == "PASS"
-        assert result.selected_call.expiry == "2026-06-07"
+        assert result.selected_call.expiry == "2026-05-17"
 
     def test_smart_money_confirmation_propagated(self):
-        contracts = [_contract(strike=145, delta=0.32, dte=42)]
+        contracts = [_contract(strike=145, delta=0.32, dte=21)]
         result = evaluate_stage4(
             self._bullish_inputs(contracts=contracts, uv_skew="call_heavy"),
             self.cfg,
@@ -251,7 +254,7 @@ class TestEvaluateStage4Directional:
         assert result.payload.extras["smart_money_confirmation"] is True
 
     def test_smart_money_off_when_skew_misaligned(self):
-        contracts = [_contract(strike=145, delta=0.32, dte=42)]
+        contracts = [_contract(strike=145, delta=0.32, dte=21)]
         result = evaluate_stage4(
             self._bullish_inputs(contracts=contracts, uv_skew="put_heavy"),
             self.cfg,
@@ -286,8 +289,8 @@ class TestEvaluateStage4Straddle:
 
     def test_picks_50d_call_and_put_at_shared_expiry(self):
         contracts = [
-            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-06-07"),
-            _contract(strike=140, delta=-0.50, option_type="PUT", expiry="2026-06-07"),
+            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-05-15"),
+            _contract(strike=140, delta=-0.50, option_type="PUT", expiry="2026-05-15"),
         ]
         result = evaluate_stage4(self._straddle_inputs(contracts), self.cfg)
         assert result.payload.result == "PASS"
@@ -299,15 +302,15 @@ class TestEvaluateStage4Straddle:
     def test_fails_when_call_or_put_missing(self):
         # Only a call available — no put pair to form straddle
         contracts = [
-            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-06-07"),
+            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-05-15"),
         ]
         result = evaluate_stage4(self._straddle_inputs(contracts), self.cfg)
         assert result.payload.result == "FAIL"
 
     def test_fails_when_no_shared_expiry(self):
         contracts = [
-            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-06-07"),
-            _contract(strike=140, delta=-0.50, option_type="PUT", expiry="2026-07-07"),
+            _contract(strike=140, delta=0.50, option_type="CALL", expiry="2026-05-15"),
+            _contract(strike=140, delta=-0.50, option_type="PUT", expiry="2026-05-22"),
         ]
         result = evaluate_stage4(self._straddle_inputs(contracts), self.cfg)
         assert result.payload.result == "FAIL"
@@ -315,11 +318,11 @@ class TestEvaluateStage4Straddle:
     def test_fails_when_pair_fails_liquidity(self):
         contracts = [
             _contract(
-                strike=140, delta=0.50, option_type="CALL", expiry="2026-06-07",
-                open_interest=100,
+                strike=140, delta=0.50, option_type="CALL", expiry="2026-05-15",
+                open_interest=50,
             ),
             _contract(
-                strike=140, delta=-0.50, option_type="PUT", expiry="2026-06-07",
+                strike=140, delta=-0.50, option_type="PUT", expiry="2026-05-15",
                 open_interest=8000,
             ),
         ]
@@ -354,7 +357,7 @@ class TestContractMenu:
 
     def test_menu_includes_primary(self):
         contracts = [
-            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-05-15"),
         ]
         result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
         assert result.payload.result == "PASS"
@@ -363,12 +366,15 @@ class TestContractMenu:
         assert result.selected_call.strike == result.contract_menu[0].contract.strike
 
     def test_menu_adds_stretch_when_lower_delta_strike_available(self):
-        # Primary at 0.30Δ + a 0.20Δ stretch (further OTM).
+        # Lower the measured move so the terminus sits near 145 → primary
+        # is 145 (0.30Δ), and 155 (0.18Δ) qualifies as a further-OTM stretch.
         contracts = [
-            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
-            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-05-15"),
+            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-05-15"),
         ]
-        result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
+        inputs = self._bullish_inputs(contracts)
+        inputs.measured_move_pct = 4.0  # terminus ≈ 145.6
+        result = evaluate_stage4(inputs, self.cfg)
         assert result.payload.result == "PASS"
         labels = [rc.label for rc in result.contract_menu]
         assert "primary" in labels
@@ -379,7 +385,7 @@ class TestContractMenu:
     def test_menu_adds_defensive_when_longer_dte_available(self):
         # Primary at 42 DTE + a 70 DTE same-strike defensive variant.
         contracts = [
-            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26", dte=42),
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-05-15", dte=21),
             _contract(strike=145, delta=0.32, option_type="CALL", expiry="2026-07-24", dte=70),
         ]
         result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
@@ -392,7 +398,7 @@ class TestContractMenu:
     def test_menu_skips_slot_when_no_qualifying_contract(self):
         # Only the primary qualifies — no stretch, no defensive variants.
         contracts = [
-            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-05-15"),
         ]
         result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
         assert len(result.contract_menu) == 1
@@ -400,8 +406,8 @@ class TestContractMenu:
 
     def test_payload_criteria_includes_menu(self):
         contracts = [
-            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-06-26"),
-            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-06-26"),
+            _contract(strike=145, delta=0.30, option_type="CALL", expiry="2026-05-15"),
+            _contract(strike=155, delta=0.18, option_type="CALL", expiry="2026-05-15"),
         ]
         result = evaluate_stage4(self._bullish_inputs(contracts), self.cfg)
         menu_in_criteria = result.payload.criteria.get("contract_menu", [])

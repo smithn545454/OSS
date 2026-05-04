@@ -87,6 +87,8 @@ export interface ConvexEvaluation {
   convex_tier: ConvexTier
   composite_strength: number
   smart_money_confirmation: boolean
+  /** PL pillar score (0-100) recomputed on the selected contract. */
+  pl_score: number | null
   selected_call: ConvexSelectedContract | null
   selected_put: ConvexSelectedContract | null
   decision: ConvexDecision

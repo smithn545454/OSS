@@ -397,19 +397,46 @@ async def test_daily_runner_persists_finalised_evaluations(fresh_dynamodb_client
     from app.convex.pipeline import ConvexPipelineResult, Tier
     from app.core.schemas import ConvexConfig
 
-    # Construct a fully-advanced candidate manually.
+    # Construct a fully-advanced candidate manually. The new tier rule
+    # demands pl_score (Stage 4 extras) plus momentum_aligned (Stage 2
+    # extras) — supply both so finalise_candidate produces a Tier A.
     stages = ConvexStagesPayload()
-    for n in range(1, 5):
-        stages = stages.model_copy(update={
-            f"stage_{n}": ConvexStagePayload(
-                stage=n,
-                stage_name=f"Stage {n}",
-                result="PASS",
-                summary="x",
-                strength=0.85,
-            )
-        })
+    stages = stages.model_copy(update={
+        "stage_1": ConvexStagePayload(
+            stage=1, stage_name="Stage 1",
+            result="PASS", summary="x", strength=0.85,
+        ),
+        "stage_2": ConvexStagePayload(
+            stage=2, stage_name="Stage 2",
+            result="PASS", summary="x", strength=0.85,
+            extras={"direction": "bullish", "momentum_aligned": True},
+        ),
+        "stage_3": ConvexStagePayload(
+            stage=3, stage_name="Stage 3",
+            result="PASS", summary="x", strength=0.85,
+        ),
+        "stage_4": ConvexStagePayload(
+            stage=4, stage_name="Stage 4",
+            result="PASS", summary="x", strength=0.85,
+            extras={"pl_score": 90.0, "smart_money_confirmation": True},
+        ),
+    })
+    # Pre-populate the UV signal on the candidate so the pipeline's UV
+    # lookup path doesn't run (test environment has no UV table).
+    from app.convex.uv_lookup import UVSignal as _UV
     candidate = ConvexCandidate(ticker="NVDA", stages=stages, direction="bullish")
+    candidate.uv_signal_for_tier = _UV(
+        ticker="NVDA",
+        detection_count=1,
+        total_today_volume=10_000.0,
+        total_avg_volume=2_000.0,
+        volume_ratio=5.0,
+        call_volume=10_000.0,
+        put_volume=0.0,
+        directional_skew="call_heavy",
+        is_unusual=True,
+        lookback_hours=24,
+    )
 
     pipeline_result = ConvexPipelineResult(
         run_id="run-test",

@@ -4,7 +4,7 @@ import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useConvexFailedCandidates } from '@/lib/convexApi'
 import { usePageTitle } from '@/hooks/usePageTitle'
 
-const STAGE_LABELS = ['', 'Kinetic Universe', 'Catalyst Layer', 'Volatility Mispricing', 'Contract Selection']
+const STAGE_LABELS = ['', 'Kinetic Universe', 'Catalyst + Direction', 'PL Pricing Pre-Screen', 'Contract Selection']
 
 export default function ConvexFailedCandidates() {
   const { runId } = useParams<{ runId: string }>()
