@@ -375,7 +375,7 @@ After any rollback, tell the user:
 
 Live rule states (CDK is documentation-only; flip via `aws events enable-rule`/`disable-rule`/`put-rule`). Verify with `aws events describe-rule --name <rule>` since the CDK file may diverge from production.
 
-- `oss-dev-convex-daily-run` — ENABLED — `cron(0 10 * * ? *)` (10:00 UTC daily)
+- `oss-dev-convex-daily-run` — ENABLED — `cron(0/15 13-21 ? * MON-FRI *)` (every 15 min during market session, Mon-Fri 13:00-21:00 UTC). Name is legacy ("daily-run") — schedule was changed to intraday on 2026-05-04 because contract optimality shifts with the underlying during the session. ~33 runs/weekday.
 - `oss-dev-convex-universe-refresh` — ENABLED — monthly, 1st at 02:00 UTC
 - `oss-dev-paper-trading-update` — ENABLED — daily 21:15 UTC
 - `oss-dev-earnings-refresh`, `oss-dev-price-history-refresh`, `oss-dev-earnings-history-refresh`, `oss-dev-data-capture` — ENABLED — daily/weekly data jobs
